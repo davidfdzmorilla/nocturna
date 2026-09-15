@@ -3,6 +3,7 @@
 Formato: `- [ ] <tarea> · <pregunta> · opciones vistas: … ` → al resolver: `- [x] … · resuelto <fecha>: <respuesta>`.
 
 - [x] T00 · Nombre del proyecto y del paquete Python · resuelto 2026-09-15: **Nocturna**, paquete `nocturna`
+- [ ] T00 · ¿Qué estrategia de ramas sigue el proyecto? · opciones vistas: rama por tarea + PR a `main` (practicado en T00); commits directos en `main`
 - [ ] T00 · ¿Qué licencia lleva el repositorio? · opciones vistas: sin licencia (privado), MIT, AGPL
 - [ ] T00 · ¿El repositorio es público en GitHub o privado? · opciones vistas: público, privado
 - [ ] T01 · `.claude/agents/` ya está completo en el commit inicial: ¿se cierra T01 como verificación de los ocho ficheros contra `AGENTS.md`, o se reescriben? · opciones vistas: cierre como verificación, reescritura
