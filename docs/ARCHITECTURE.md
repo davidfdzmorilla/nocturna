@@ -33,11 +33,15 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 
 ## Capas
 
-Ver skill `ddd-conventions`. Resumen: `api → application → domain ← infrastructure`.
+Dependencias: `api → application → domain ← infrastructure`. La capa `domain/` es pura (sin IO ni frameworks); `application/` orquesta casos de uso; `infrastructure/` implementa interfaces de dominio (repositorios, LLM); `api/` expone solo lectura. Ver skill `ddd-conventions` para detalle.
 
 ## Configuración
 
 `config/pipeline.toml`, cargada en un objeto tipado. Secciones: `budget`, `limits`, `window`, `models`, `sources.arxiv`.
+
+## Proveedor LLM
+
+La interfaz `LLMProvider` en `domain/llm.py` define el contrato mínimo (`run_agent(agent, input) -> AgentResult`). Fase 1 usa `AgentSDKProvider` en `infrastructure/llm/agent_sdk_provider.py`, autenticado con el CLI de Claude Code sin `ANTHROPIC_API_KEY`. El hueco de `ApiKeyProvider` (alternativa seleccionable por configuración si la política de suscripción cambia) queda documentado e implementable en una tarea futura. Ver [ADR 0001](adr/0001-suscripcion-como-proveedor.md).
 
 ## Lo que no existe en fase 1 (a propósito)
 
