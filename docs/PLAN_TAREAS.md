@@ -11,7 +11,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 0 — Base
 
 ### T00 · Esqueleto del repositorio
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: —
 - **Alcance**: estructura de carpetas según `CLAUDE.md`, `docs/` con `ARCHITECTURE.md`, `OPEN_DECISIONS.md`, `TECHNICAL_DEBT.md` y `adr/0001-suscripcion-como-proveedor.md` (por qué Agent SDK y no API key, con las restricciones que impone). `.gitignore`, `README.md` mínimo.
 - **Hecho cuando**: `git log` muestra un commit inicial y `docs/` se puede leer de arriba abajo sin huecos.
@@ -19,7 +19,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ### T01 · Agentes de desarrollo en `.claude/agents/`
 - **Estado**: pending
 - **Depende de**: T00
-- **Alcance**: Architect, Backend, Frontend, Database, Tester, Reviewer, Committer. Cada uno con su rol, herramientas permitidas y las reglas de `CLAUDE.md` que le aplican (Committer: sin atribución a IA, preparar ≠ ejecutar; Reviewer: vigilancia específica sobre `budget.py`).
+- **Alcance**: Architect, Backend, Frontend, Database, Tester, Reviewer, Docs-keeper, Committer. Cada uno con su rol, herramientas permitidas y las reglas de `CLAUDE.md` que le aplican (Docs-keeper: cierre de tarea en documentación; Committer: sin atribución a IA, preparar ≠ ejecutar; Reviewer: vigilancia específica sobre `budget.py`).
 - **Hecho cuando**: el orquestador puede delegar T02 sin instrucciones adicionales.
 
 ### T02 · Entorno local

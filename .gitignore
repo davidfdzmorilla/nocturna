@@ -9,3 +9,8 @@ __pycache__/
 node_modules/
 .next/
 *.pyc
+.DS_Store
+*.egg-info/
+dist/
+.coverage
+build/
