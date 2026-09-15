@@ -1,0 +1,11 @@
+.env
+.env.*
+.claude/logs/
+.claude/.commit-approved
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.next/
+*.pyc
