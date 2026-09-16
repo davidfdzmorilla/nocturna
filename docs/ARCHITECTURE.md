@@ -14,7 +14,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Modelo de dominio | dataclasses `domain/` | done (T10) |
 | Persistencia | SQLAlchemy 2 + Alembic + PostgreSQL 16 (`infrastructure/db/`) | done (T11) |
 | Ingesta arXiv | MCP in-process (`claude-agent-sdk`), `httpx` | done (T20) |
-| Control de gasto | `application/budget.py` | pendiente (T30) |
+| Control de gasto | `application/budget.py` + `domain/clock.py` | done (T30) |
 | Proveedor LLM | `infrastructure/llm/agent_sdk_provider.py` | pendiente (T40) |
 | Agentes | Reader, Popularizer, Editor | pendiente (T41–T43) |
 | Orquestador nocturno | `application/use_cases/run_night.py` | pendiente (T44) |
@@ -47,6 +47,18 @@ Dependencias: `api → application → domain ← infrastructure`. La capa `doma
 Implementada en T20. La lógica vive en `application/use_cases/ingest_arxiv.py` (`IngestArxiv`) y `infrastructure/arxiv/` (cliente HTTP). El servidor MCP (`infrastructure/mcp/arxiv_server.py`) expone dos herramientas sin persistir: adaptador fino para que los agentes (T41+) puedan invocar `fetch_new` y `get_abstract`. Detalle arquitectónico en [ADR 0004](adr/0004-ingesta-de-arxiv-y-mcp-como-adaptador.md).
 
 `cli.py` es el composition root: único sitio que abre `unit_of_work`, instancia `ArxivClient` e invoca `IngestArxiv` dentro de la transacción. T20 introduce el subcomando `nocturna run-night --dry-run` que ingesta sin llamar a agentes.
+
+## Control de gasto
+
+Implementado en T30 con `BudgetGuard` en `application/budget.py` y el reloj inyectable `domain/clock.py` (`infrastructure/clock.py`). **Toda llamada a un agente pasa por `BudgetGuard.authorize` antes de llegar a `LLMProvider`.**
+
+La puerta verifica en orden: (1) ¿el `Run` está `RUNNING`?, (2) ¿estamos dentro de `[window.start, window.hard_stop)`?, (3) ¿el rol alcanzó su tope de llamadas?, (4) ¿hay presupuesto? El acumulado de gasto se lee desde `AgentCallRepository.tokens_used_for_run()` (base de datos), nunca de `Run.tokens_used` (caché desnormalizada, ADR 0003). Ningún contador vive en memoria: reinicio a media noche no desincroniza el acumulado.
+
+**Reserva del Editor**: Reader y Popularizer ven `nightly_tokens - editor_reserve_tokens` desde la primera llamada de la noche. El Editor ve el presupuesto completo. La reserva no es "bajo demanda"; es incondicional.
+
+**Ventana y `hard_stop`**: huso horario explícito en `config/pipeline.toml` (`window.timezone`, clave IANA). La resta de segundos hasta `hard_stop` usa UTC en ambos operandos, inmune a cambios de hora. `timeout_for_call()` devuelve `min(item_timeout_s, segundos_hasta_hard_stop)`: ninguna llamada sobrevive a `hard_stop`.
+
+**Multiplicador de reset semanal**: la noche del reinicio de suscripción (día y hora en configuración), si `now.hour >= weekly_reset_hour`, el presupuesto se multiplica por `reset_day_multiplier`. El `Run` lee el valor efectivo al crearse (T44) y lo almacena en `run.budget_tokens`. La reserva del Editor no escala. Detalle completo en [ADR 0005](adr/0005-control-de-gasto.md).
 
 ## Proveedor LLM
 

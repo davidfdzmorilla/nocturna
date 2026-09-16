@@ -31,10 +31,13 @@ max_items_per_night = 40
 max_turns_per_agent = 3
 item_timeout_s = 180
 run_timeout_s = 16200
+max_editor_calls_per_night = 2
+max_calls_per_item = 2
 
 [window]
 start = "00:00"
 hard_stop = "04:45"
+timezone = "Europe/Madrid"
 
 [models]
 reader = "sonnet"
@@ -63,8 +66,11 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.budget.nightly_tokens == 300000
     assert config.limits.max_items_per_night == 40
     assert config.limits.max_turns_per_agent == 3
+    assert config.limits.max_editor_calls_per_night == 2
+    assert config.limits.max_calls_per_item == 2
     assert config.window.start == time(0, 0)
     assert config.window.hard_stop == time(4, 45)
+    assert config.window.timezone == "Europe/Madrid"
     assert config.models.reader
     assert config.models.popularizer
     assert config.models.editor
@@ -130,6 +136,65 @@ def test_valores_de_presupuesto_no_positivos_fallan(tmp_path, old, new):
     path = _write_toml(tmp_path, content)
 
     with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_max_editor_calls_per_night_falla(tmp_path):
+    content = BASE_TOML.replace("max_editor_calls_per_night = 2\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_max_editor_calls_per_night_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "max_editor_calls_per_night = 2",
+        f"max_editor_calls_per_night = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_max_calls_per_item_falla(tmp_path):
+    content = BASE_TOML.replace("max_calls_per_item = 2\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_max_calls_per_item_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "max_calls_per_item = 2",
+        f"max_calls_per_item = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_window_timezone_falla(tmp_path):
+    content = BASE_TOML.replace('timezone = "Europe/Madrid"\n', "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_window_timezone_inexistente_falla(tmp_path):
+    content = BASE_TOML.replace(
+        'timezone = "Europe/Madrid"',
+        'timezone = "Europe/Nowhereland"',
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="window.timezone"):
         load_pipeline_config(path)
 
 

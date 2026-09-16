@@ -238,15 +238,18 @@ class SqlAlchemyAgentCallRepository:
 
         Cuenta llamadas de **cualquier** `status`, incluidos `invalid_output`,
         `error` y `timeout`, no solo las que llegaron a producir una salida
-        válida. Esto importa para el tope del Editor ("se llama como máximo
-        una vez por noche") frente a la regla de reintento por JSON inválido
-        ("si el JSON no valida, un reintento; si falla de nuevo, el ítem se
-        marca failed"): si T30 implementa el tope como
-        `count_for_run(run_id, EDITOR) >= 1 → no llamar`, un primer intento
-        fallido ya cuenta como "la llamada de la noche" y consume el
-        reintento en silencio, dejando la noche sin Editor. T30 debe decidir
-        a conciencia si ese tope se comprueba sobre todas las llamadas o solo
-        sobre las que llegaron a `status == ok`; no se resuelve aquí.
+        válida. Decisión de T30 (ADR 0005): lo que cuesta presupuesto de la
+        suscripción es el intento, no el acierto, así que el tope se
+        comprueba sobre todas las llamadas, de cualquier estado. La clave
+        que hace esto compatible con la regla de reintento por JSON
+        inválido ("si el JSON no valida, un reintento; si falla de nuevo, el
+        ítem se marca failed") es `max_editor_calls_per_night = 2`
+        (`pipeline.toml`): con tope 1, un primer intento fallido ya
+        agotaría "la llamada de la noche" y consumiría el reintento en
+        silencio; con tope 2, el reintento sigue disponible aunque se
+        cuenten los intentos y no solo los aciertos. `BudgetGuard` usa este
+        mismo conteo también para Reader y Popularizer, vía
+        `max_calls_per_item * max_items_per_night`.
         """
         stmt = select(func.count()).where(
             AgentCallRow.run_id == run_id, AgentCallRow.agent == agent

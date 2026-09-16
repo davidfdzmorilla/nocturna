@@ -19,10 +19,28 @@ max_turns_per_agent = 3
 # item_timeout_s y run_timeout_s: propuestos, se calibran en T60.
 item_timeout_s = 180
 run_timeout_s = 16200
+# max_editor_calls_per_night: acota intentos, no éxitos. Lo que cuesta
+# presupuesto es el intento, no el acierto, así que se cuentan las llamadas
+# de cualquier estado; el 2 preserva "un Editor por noche" en su sentido real
+# (una edición publicada) y deja vivo el reintento por JSON inválido que
+# concede CLAUDE.md. Valor a calibrar en T60.
+max_editor_calls_per_night = 2
+# max_calls_per_item: tope de llamadas de Reader/Popularizer por ítem (el
+# intento más el reintento por JSON inválido que concede CLAUDE.md). El tope
+# de llamadas de Reader/Popularizer en toda la noche sale de multiplicar
+# esta clave por max_items_per_night, nunca de un "2" escrito a mano en
+# application/budget.py. Valor a calibrar en T60.
+max_calls_per_item = 2
 
 [window]
 start = "00:00"
 hard_stop = "04:45"
+# timezone: la hora local del sistema depende de `TZ`, que `cron` no siempre
+# propaga y que un contenedor pone en UTC por defecto. Con el proceso en UTC,
+# un hard_stop de 04:45 se dispararía a las 06:45 locales y abriría la
+# segunda sesión de cinco horas que CLAUDE.md prohíbe. La clave hace el
+# comportamiento reproducible y testeable, incluidos los cambios de hora.
+timezone = "Europe/Madrid"
 
 [models]
 reader = "sonnet"

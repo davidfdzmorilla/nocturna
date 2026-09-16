@@ -59,11 +59,11 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 3 — Control de gasto (antes que cualquier agente)
 
 ### T30 · `budget.py` y límites duros
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T11
-- **Alcance**: `BudgetGuard` que lee `pipeline.toml`, acumula tokens desde `AgentCall` en base de datos y expone `can_call(agent, estimated_tokens) -> bool`. Comprobación de ventana horaria con `hard_stop`. Reserva de presupuesto para el Editor. Contadores de ítems y turnos. Marcado de `Run` como `partial` / `killed`.
-- **Hecho cuando**: tests que demuestran: corte al alcanzar `nightly_tokens`; rechazo pasada `hard_stop`; reserva del Editor intacta aunque el Reader agote lo suyo; persistencia del acumulado tras reinicio simulado.
-- **Nota para el Reviewer**: esta tarea se revisa dos veces. Nada en Bloque 4 arranca sin T30 `done`.
+- **Alcance**: `BudgetGuard` que lee `pipeline.toml`, acumula tokens desde `AgentCall` en base de datos. Dos métodos: `check(role, estimated_tokens) -> BudgetDecision` (sin lanzar); `authorize(role, estimated_tokens)` (lanza si deniega). Comprobación de ventana horaria con `hard_stop`. Reserva de presupuesto para el Editor. Contadores de ítems y turnos. Marcado de `Run` como `partial` / `killed`. Reloj inyectable en `domain/clock.py` con implementación `SystemClock` en `infrastructure/clock.py`.
+- **Hecho cuando**: tests que demuestran: corte al alcanzar `nightly_tokens`; rechazo pasada `hard_stop`; reserva del Editor intacta aunque el Reader agote lo suyo; persistencia del acumulado tras reinicio simulado. 390 tests en verde.
+- **Nota**: dos revisiones completadas · primera rechazada por bug en `seconds_until_hard_stop` (resta en hora de pared ante cambios de hora) · segunda aprobada con verificación por mutantes · decisiones abiertas nuevas en `OPEN_DECISIONS.md`. Cerrada: 2026-09-16
 
 ---
 

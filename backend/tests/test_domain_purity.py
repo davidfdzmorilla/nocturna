@@ -45,12 +45,18 @@ FORBIDDEN_DOMAIN_MODULES = (
 
 # `application/` sí puede importar `nocturna.domain`: es la única capa de la
 # que depende. Lo prohibido es saltarse las interfaces de dominio para
-# hablar directamente con infraestructura concreta.
+# hablar directamente con infraestructura concreta. `pydantic` también está
+# vetado aquí (revisión de T30): `BudgetPolicy` es deliberadamente una
+# `dataclass` de la biblioteca estándar, no un `BaseModel` -- ver su
+# docstring en `application/budget.py` -- precisamente porque la validación
+# del TOML ya ocurrió en `infrastructure/config.py`; `application/` no debe
+# volver a depender de Pydantic para repetirla.
 FORBIDDEN_APPLICATION_MODULES = (
     "nocturna.infrastructure",
     "nocturna.api",
     "httpx",
     "claude_agent_sdk",
+    "pydantic",
 )
 
 
