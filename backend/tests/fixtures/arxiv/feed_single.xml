@@ -1,0 +1,39 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/wscT4hxY16tbdWeVrlDW3UJ1xhs</id>
+  <title>arXiv Query: search_query=&amp;id_list=2301.00001&amp;start=0&amp;max_results=1</title>
+  <updated>2026-09-16T13:08:01Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=&amp;start=0&amp;max_results=1&amp;id_list=2301.00001" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>1</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2301.00001v1</id>
+    <title>NFTrig</title>
+    <updated>2022-12-21T18:07:06Z</updated>
+    <link href="https://arxiv.org/abs/2301.00001v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2301.00001v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>NFTrig is a web-based application created for use as an educational tool to teach trigonometry and block chain technology. Creation of the application includes front and back end development as well as integration with other outside sources including MetaMask and OpenSea. The primary development languages include HTML, CSS (Bootstrap 5), and JavaScript as well as Solidity for smart contract creation. The application itself is hosted on Moralis utilizing their Web3 API. This technical report describes how the application was created, what the application requires, and smart contract design with security considerations in mind. The NFTrig application has underwent significant testing and validation prior to and after deployment. Future suggestions and recommendations for further development, maintenance, and use in other fields for education are also described.</summary>
+    <category term="cs.HC" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2022-12-21T18:07:06Z</published>
+    <arxiv:primary_category term="cs.HC"/>
+    <author>
+      <name>Jordan Thompson</name>
+    </author>
+    <author>
+      <name>Ryan Benac</name>
+    </author>
+    <author>
+      <name>Kidus Olana</name>
+    </author>
+    <author>
+      <name>Talha Hassan</name>
+    </author>
+    <author>
+      <name>Andrew Sward</name>
+    </author>
+    <author>
+      <name>Tauheed Khan Mohd</name>
+    </author>
+  </entry>
+</feed>

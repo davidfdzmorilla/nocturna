@@ -49,10 +49,10 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 2 — Ingesta
 
 ### T20 · Servidor MCP `arxiv-astro`
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T11
 - **Alcance**: servidor in-process con dos herramientas: `fetch_new(since: date, categories: list[str])` y `get_abstract(arxiv_id: str)`. Cliente HTTP a la API de arXiv con respeto a su rate limit (3 s entre peticiones). Los resultados se persisten como `Item` con `status = new`; deduplicación por `external_id`.
-- **Hecho cuando**: `nocturna run-night --dry-run` ingesta los abstracts del día para las categorías configuradas y los muestra sin llamar a ningún agente. Tests con respuestas de arXiv grabadas.
+- **Hecho cuando**: `nocturna run-night --dry-run` ingesta los abstracts del día para las categorías configuradas y muestra una vista previa de 200 caracteres de cada abstract sin llamar a ningún agente. Tests con respuestas de arXiv grabadas. Un test en subproceso comprueba que `claude_agent_sdk` no entra en `sys.modules` durante `--dry-run`.
 
 ---
 

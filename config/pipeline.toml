@@ -32,6 +32,12 @@ editor = "opus"
 [sources.arxiv]
 # PROVISIONAL · decisión abierta (docs/OPEN_DECISIONS.md, T20); astro-ph.HE en evaluación
 categories = ["astro-ph.EP", "astro-ph.GA"]
+# page_size y max_results_per_fetch: propuestos, se confirman con los primeros --dry-run reales.
+# page_size: entradas por página de la API de arXiv.
+page_size = 100
+# max_results_per_fetch: tope de resultados acumulados en una ingesta; límite de
+# cortesía hacia arXiv y de memoria, no de gasto.
+max_results_per_fetch = 400
 
 [llm]
 provider = "agent_sdk"

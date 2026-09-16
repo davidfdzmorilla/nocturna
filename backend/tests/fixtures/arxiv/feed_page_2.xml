@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/5hQ/lR6HmWt/6d/OpReUhKCUjRY</id>
+  <title>arXiv Query: search_query=cat:astro-ph.EP OR cat:astro-ph.GA&amp;id_list=&amp;start=3&amp;max_results=3</title>
+  <updated>2026-09-16T14:01:06Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:astro-ph.EP+OR+cat:astro-ph.GA&amp;start=3&amp;max_results=3&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+  <opensearch:totalResults>113100</opensearch:totalResults>
+  <opensearch:startIndex>3</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17379v1</id>
+    <title>DewTwin-Coin: an onboard autonomous framework for lunar water-ice prospecting using Chandrayaan-3 LIBS and ChaSTE data</title>
+    <updated>2026-09-15T16:21:52Z</updated>
+    <link href="https://arxiv.org/abs/2609.17379v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17379v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>It is important to locate water-ice in the lunar regolith to build futuristic, sustainable bases there. But communication delays from Earth, limited bandwidth, and power constraints demand an onboard, autonomous, time-efficient decision-making framework for locating volatiles such as water-ice in the lunar regolith. In this work, we present a framework, DewTwin-Coin, that can locate potential water-ice sites in real time without drilling. Its decision-making principle is based on a find-S learning algorithm that uses surface temperature and the Hydrogen-to-Oxygen intensity ratio at a location. The core idea is a physics-based rule $-$ water-ice is stable only if the temperature is below 110 K and the Hydrogen-to-Oxygen intensity ratio is between 1.7 and 2.3. We validate DewTwin-Coin on Chandrayaan-3's 3165 laser-induced breakdown spectroscopy (LIBS) elemental data with 387 Chandra's surface thermophysical experiment (ChaSTE) data. On a 16 GB RAM system, it classified all 3165 locations within 615 seconds, yielding no strong signatures of water-ice, which matches the Chandrayaan-3 in-situ analysis. This framework is very important for future lunar and other planetary missions in which an onboard rover can autonomously determine feasible drilling locations for water-ice without issuing false drilling commands in warm terrains. Thus, the mission's onboard setup can stretch its technical limits in both power and memory capacity.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.IM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T16:21:52Z</published>
+    <arxiv:comment>9 pages, 2 figures, 1 table, 1 algorithm. Comments are welcome</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Soundarya R.</name>
+    </author>
+    <author>
+      <name>Debasish Mondal</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17322v1</id>
+    <title>A self-consistent orbital architecture for GG Tau A. I. Simultaneous orbital fitting of the hierarchical triple</title>
+    <updated>2026-09-15T15:28:39Z</updated>
+    <link href="https://arxiv.org/abs/2609.17322v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17322v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>GG Tau $A$ is a young triple system with the close pair, $Ab_1$--$Ab_2$, and $Aa$, surrounded by a massive circumtriple disk with a large inner cavity difficult to explain in a binary framework. We aim to determine the orbital architecture and individual stellar masses of GG Tau $A$ and assess how the available astrometric and disk-based constraints restrict the range of admissible solutions. We performed a joint fit using Oracle, developed specifically for hierarchical stellar systems. All astrometric measurements were placed in a common reference frame, since the historical wide-orbit astrometry is given relative to the unresolved photocenter of the $Ab$ subsystem. The fit included one new wide-orbit astrometric epoch and a prior on the total stellar mass derived from disk kinematics. We then applied, in post-processing, an additional geometrical constraint based on the observed center of the circumtriple disk. The fit yields orbital solutions compatible with the available astrometric and disk-based constraints and provides estimates of the individual stellar masses. The additional wide-orbit epoch only marginally reduces the range of admissible solutions. By contrast, the disk-center constraint leaves the favored orbital architectures largely unchanged but significantly tightens the stellar-mass partition. This yields posterior masses of $0.521^{+0.069}_{-0.051}$, $0.106^{+0.017}_{-0.013}$, and $0.79^{+0.10}_{-0.10}$ $M_\odot$ for $Ab_1$, $Ab_2$, and $Aa$, respectively. The reported values are posterior medians with 16th--84th percentile intervals. A joint treatment of the two orbital levels is required to recover a physically meaningful architecture and constrain the individual stellar masses. The resulting solutions provide a basis for future dynamical modeling of the circumtriple disk and for testing whether the observed cavity can further constrain the system architecture.</summary>
+    <category term="astro-ph.SR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T15:28:39Z</published>
+    <arxiv:comment>Accepted for publication in A&amp;A on 25 August 2026</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.SR"/>
+    <author>
+      <name>A. Lacquement</name>
+    </author>
+    <author>
+      <name>H. Beust</name>
+    </author>
+    <author>
+      <name>G. Duchêne</name>
+    </author>
+    <author>
+      <name>C. Lawlor</name>
+    </author>
+    <author>
+      <name>C. Ginski</name>
+    </author>
+    <author>
+      <name>E. Di Folco</name>
+    </author>
+    <author>
+      <name>A. Dutrey</name>
+    </author>
+    <arxiv:doi>10.1051/0004-6361/202662146</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1051/0004-6361/202662146" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17273v1</id>
+    <title>PyExoCross 2.0: A Python Framework for LTE and non-LTE Spectra, Cross Sections, and Spectroscopic Post-processing of Atomic and Molecular Line Lists</title>
+    <updated>2026-09-15T14:50:25Z</updated>
+    <link href="https://arxiv.org/abs/2609.17273v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17273v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>PyExoCross is a Python-based spectroscopic post-processing framework for converting large atomic and molecular line lists into scientifically useful quantities, including partition function, specific heats, cooling functions, lifetimes, oscillator strengths, line intensities, stick spectra, and absorption and emission cross sections. It is intended for applications in astrophysics, planetary atmospheres, laboratory spectroscopy, and other high-temperature environments where large modern databases require efficient and reproducible computational treatment. The new release provides both a configuration-file-driven command-line interface (CLI) and a Python application programming interface (API) within a unified computational framework. The original input file workflow is retained, while the Python API enables direct use in scripts, notebooks, and automated pipelines. The version PyExoCross 2.0 also adds explicit support for non-local thermodynamic equilibrium (non-LTE) calculations, including two-temperature models and user-defined density and population treatments for both absorption and emission spectra. In addition, database compatibility has been expanded beyond ExoMol, HITRAN, and HITEMP line lists to include high-resolution molecular database ExoMolHR and atomic database ExoAtom. GPU acceleration is also introduced for computationally intensive intensity and cross-section calculations and is available for all currently supported database formats. These developments improve workflow flexibility, reproducibility, and integration with modern data-analysis environments, while extending the physical modelling capabilities of the code. PyExoCross therefore provides a more general and extensible platform for large-scale spectroscopic simulations based on modern atomic and molecular databases.</summary>
+    <category term="astro-ph.IM" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="physics.chem-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T14:50:25Z</published>
+    <arxiv:comment>24 pages, 7 figures</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.IM"/>
+    <author>
+      <name>Jingxin Zhang</name>
+    </author>
+    <author>
+      <name>Sergei N. Yurchenko</name>
+    </author>
+    <author>
+      <name>Jonathan Tennyson</name>
+    </author>
+  </entry>
+</feed>

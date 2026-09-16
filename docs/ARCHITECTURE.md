@@ -13,7 +13,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Configuración tipada | Pydantic Settings (`infrastructure/config.py`) | done (T02) |
 | Modelo de dominio | dataclasses `domain/` | done (T10) |
 | Persistencia | SQLAlchemy 2 + Alembic + PostgreSQL 16 (`infrastructure/db/`) | done (T11) |
-| Ingesta arXiv | MCP in-process (`claude-agent-sdk`), `httpx` | pendiente (T20) |
+| Ingesta arXiv | MCP in-process (`claude-agent-sdk`), `httpx` | done (T20) |
 | Control de gasto | `application/budget.py` | pendiente (T30) |
 | Proveedor LLM | `infrastructure/llm/agent_sdk_provider.py` | pendiente (T40) |
 | Agentes | Reader, Popularizer, Editor | pendiente (T41–T43) |
@@ -41,6 +41,12 @@ Dependencias: `api → application → domain ← infrastructure`. La capa `doma
 ## Configuración
 
 `config/pipeline.toml`, cargada en un objeto tipado por `infrastructure/config.py`. Secciones: `budget`, `limits`, `window`, `models`, `llm`, `sources.arxiv`.
+
+## Ingesta de arXiv
+
+Implementada en T20. La lógica vive en `application/use_cases/ingest_arxiv.py` (`IngestArxiv`) y `infrastructure/arxiv/` (cliente HTTP). El servidor MCP (`infrastructure/mcp/arxiv_server.py`) expone dos herramientas sin persistir: adaptador fino para que los agentes (T41+) puedan invocar `fetch_new` y `get_abstract`. Detalle arquitectónico en [ADR 0004](adr/0004-ingesta-de-arxiv-y-mcp-como-adaptador.md).
+
+`cli.py` es el composition root: único sitio que abre `unit_of_work`, instancia `ArxivClient` e invoca `IngestArxiv` dentro de la transacción. T20 introduce el subcomando `nocturna run-night --dry-run` que ingesta sin llamar a agentes.
 
 ## Proveedor LLM
 
