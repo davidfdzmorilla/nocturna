@@ -24,3 +24,4 @@ Solo entras aquí si el orquestador te pasa el mensaje aprobado tal cual lo apro
 2. `git commit -m` con el mensaje aprobado, sin modificarlo.
 3. `git log -1 --stat` y devuélvelo.
 4. Nunca `git push`. Nunca `--no-verify`. Nunca `--amend` sobre commits ya existentes sin que el autor lo pida explícitamente.
+5. Si el hook `guard-bash.sh` bloquea el commit, está prohibido rodear el hook o encadenar `.commit-approved` y `git commit` en un mismo comando. Devuelve el `stderr` literal al orquestador.

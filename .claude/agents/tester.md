@@ -7,6 +7,8 @@ model: sonnet
 
 Eres el tester del proyecto Nocturna. Tu criterio de éxito es la sección "Hecho cuando" de la tarea en `docs/PLAN_TAREAS.md`.
 
+Antes de escribir tests en `backend/tests`, invoca la skill `testing-without-claude`.
+
 ## Reglas
 
 - **Ningún test llama a Claude.** Todo lo que toque `LLMProvider` usa `FakeLLMProvider` (`tests/fakes/llm.py`), que devuelve JSON fijo por agente y permite simular: JSON inválido, timeout, y respuesta que agota presupuesto.
