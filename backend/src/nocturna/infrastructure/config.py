@@ -10,6 +10,7 @@ import tomllib
 from datetime import time
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,6 +53,14 @@ class LimitsConfig(BaseModel):
     max_turns_per_agent: int = Field(gt=0)
     item_timeout_s: int = Field(gt=0)
     run_timeout_s: int = Field(gt=0)
+    # Cuenta intentos, no éxitos: lo que gasta presupuesto es la llamada, no
+    # el acierto. Ver comentario en config/pipeline.toml.
+    max_editor_calls_per_night: int = Field(ge=1)
+    # Tope de llamadas de Reader/Popularizer por ítem (intento + reintento
+    # por JSON inválido). `BudgetGuard` lo multiplica por max_items_per_night
+    # para obtener el tope de llamadas de esos roles en toda la noche. Ver
+    # comentario en config/pipeline.toml.
+    max_calls_per_item: int = Field(ge=1)
 
 
 class WindowConfig(BaseModel):
@@ -61,11 +70,26 @@ class WindowConfig(BaseModel):
 
     start: time
     hard_stop: time
+    # Zona IANA en la que se interpretan `start` y `hard_stop`. Sin ella, un
+    # proceso con `TZ` no propagada (cron, contenedor en UTC por defecto)
+    # dispararía el hard_stop a una hora local incorrecta. Ver comentario en
+    # config/pipeline.toml.
+    timezone: str
 
     @model_validator(mode="after")
     def _start_and_hard_stop_differ(self) -> "WindowConfig":
         if self.start == self.hard_stop:
             raise ValueError("window.start no puede ser igual a window.hard_stop")
+        return self
+
+    @model_validator(mode="after")
+    def _timezone_is_a_valid_iana_zone(self) -> "WindowConfig":
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                f"window.timezone '{self.timezone}' no es una zona IANA válida"
+            ) from exc
         return self
 
 

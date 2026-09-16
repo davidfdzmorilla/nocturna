@@ -6,6 +6,13 @@ concretas de infraestructura (`ArxivClient`, `SqlAlchemyItemRepository`,
 `application/`. `argparse` de la biblioteca estándar, sin `typer` ni
 `click`: dos flags no los justifican.
 
+Es también el único módulo autorizado a ver a la vez `PipelineConfig`
+(Pydantic, `infrastructure/config.py`) y `BudgetPolicy` (dataclass,
+`application/budget.py`): `application/budget.py` no puede importar
+`infrastructure/` (regla 13 de su docstring), así que la traducción entre
+ambos tipos vive aquí, en `budget_policy_from_config`, y en ningún otro
+sitio.
+
 Solo existe el subcomando `run-night`. No hay `run-item`: es alcance de T41
 y `ddd-conventions` prohíbe los stubs — un subcomando que hoy solo sabría
 fallar es peor que su ausencia.
@@ -16,9 +23,16 @@ import asyncio
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 
+from nocturna.application.budget import (
+    BudgetPolicy,
+    effective_nightly_tokens,
+    is_within_window,
+    seconds_until_hard_stop,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
 from nocturna.infrastructure.arxiv.client import (
@@ -27,6 +41,7 @@ from nocturna.infrastructure.arxiv.client import (
     ArxivUnavailable,
 )
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
+from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import SqlAlchemyItemRepository
 from nocturna.infrastructure.db.session import (
@@ -50,6 +65,55 @@ _RUN_NIGHT_WITHOUT_DRY_RUN_MESSAGE = (
     "(Reader, Popularizer, Editor) es la tarea T44 y no existe todavía. "
     "Usa --dry-run para la ingesta real y persistida de arXiv, sin llamar a ningún agente."
 )
+
+# `pipeline.toml` guarda `budget.weekly_reset_weekday` como nombre de día en
+# texto (validado contra ese mismo literal en `infrastructure/config.py`);
+# `BudgetPolicy.weekly_reset_weekday` sigue la convención de
+# `datetime.weekday()` (lunes=0 ... domingo=6, ver docstring de
+# `application/budget.py`). Esta tabla es la traducción entre ambos, y vive
+# aquí porque es la única pieza de `budget_policy_from_config` que no es una
+# copia directa de un campo.
+_WEEKDAY_TO_INT: dict[str, int] = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def budget_policy_from_config(config: PipelineConfig) -> BudgetPolicy:
+    """Traduce `PipelineConfig` (Pydantic, infraestructura) a `BudgetPolicy`
+    (dataclass, aplicación), campo a campo y con argumentos nombrados.
+
+    Deliberadamente sin `**vars()` ni bucles genéricos sobre los campos de
+    `config`: si mañana se añade una clave de gasto a `pipeline.toml` y
+    nadie la mapea aquí, `BudgetPolicy(...)` debe fallar por argumento
+    obligatorio ausente, no colarse con un valor por defecto inventado.
+    """
+    return BudgetPolicy(
+        nightly_tokens=config.budget.nightly_tokens,
+        editor_reserve_tokens=config.budget.editor_reserve_tokens,
+        max_items_per_night=config.limits.max_items_per_night,
+        max_turns_per_agent=config.limits.max_turns_per_agent,
+        max_editor_calls_per_night=config.limits.max_editor_calls_per_night,
+        max_calls_per_item=config.limits.max_calls_per_item,
+        item_timeout_s=config.limits.item_timeout_s,
+        run_timeout_s=config.limits.run_timeout_s,
+        window_start=config.window.start,
+        window_hard_stop=config.window.hard_stop,
+        weekly_reset_weekday=_WEEKDAY_TO_INT[config.budget.weekly_reset_weekday],
+        weekly_reset_hour=config.budget.weekly_reset_hour,
+        reset_day_multiplier=config.budget.reset_day_multiplier,
+    )
+
+
+def system_clock_from_config(config: PipelineConfig) -> SystemClock:
+    """Construye el `SystemClock` de la ventana de ejecución, en la zona de
+    `window.timezone` (`config/pipeline.toml`)."""
+    return SystemClock(ZoneInfo(config.window.timezone))
 
 
 def _parse_since(value: str) -> datetime:
@@ -177,6 +241,43 @@ def _print_dry_run_report(result: IngestResult) -> None:
         )
 
 
+def _print_budget_plan(policy: BudgetPolicy, timezone: str, now: datetime) -> None:
+    """Plan de gasto de la noche: lo que `CLAUDE.md` pide de `--dry-run`
+    ("ingesta + plan de gasto, sin llamar a agentes"), sin instanciar el
+    guarda de gasto de `application/` (necesita un `Run` que en `--dry-run`
+    no existe) ni tocar la base de datos. Solo usa las funciones puras de
+    `application/budget.py` (incluida `seconds_until_hard_stop`, la misma
+    que usa `BudgetGuard.seconds_until_hard_stop`; no hay una segunda copia
+    de ese cálculo en este módulo) y la hora del `SystemClock`.
+    """
+    effective_tokens = effective_nightly_tokens(policy, now)
+    reader_popularizer_available = effective_tokens - policy.editor_reserve_tokens
+    within_window = is_within_window(now, policy.window_start, policy.window_hard_stop)
+    seconds_left = seconds_until_hard_stop(now, policy.window_start, policy.window_hard_stop)
+
+    print()
+    print("Plan de gasto de la noche:")
+    print(
+        f"  presupuesto nocturno efectivo: {effective_tokens} tokens "
+        f"(reserva del Editor: {policy.editor_reserve_tokens} tokens)"
+    )
+    print(
+        f"  disponible para Reader/Popularizer: {reader_popularizer_available} tokens "
+        f"(ya con la reserva del Editor restada)"
+    )
+    print(
+        f"  disponible para el Editor: {effective_tokens} tokens (presupuesto completo, sin restar)"
+    )
+    print(
+        f"  ventana configurada: {policy.window_start.isoformat()}–"
+        f"{policy.window_hard_stop.isoformat()} ({timezone})"
+    )
+    if within_window:
+        print(f"  dentro de la ventana ahora mismo: sí (quedan {seconds_left} s para el hard_stop)")
+    else:
+        print("  dentro de la ventana ahora mismo: no")
+
+
 def _run_night(args: argparse.Namespace) -> int:
     if not args.dry_run:
         print(_RUN_NIGHT_WITHOUT_DRY_RUN_MESSAGE, file=sys.stderr)
@@ -196,6 +297,11 @@ def _run_night(args: argparse.Namespace) -> int:
         return 1
 
     _print_dry_run_report(result)
+
+    policy = budget_policy_from_config(config)
+    clock = system_clock_from_config(config)
+    _print_budget_plan(policy, config.window.timezone, clock.now())
+
     return 0
 
 
