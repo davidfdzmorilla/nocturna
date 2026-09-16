@@ -17,7 +17,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Hecho cuando**: `git log` muestra un commit inicial y `docs/` se puede leer de arriba abajo sin huecos.
 
 ### T01 · Agentes de desarrollo en `.claude/agents/`
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T00
 - **Alcance**: Architect, Backend, Frontend, Database, Tester, Reviewer, Docs-keeper, Committer. Cada uno con su rol, herramientas permitidas y las reglas de `CLAUDE.md` que le aplican (Docs-keeper: cierre de tarea en documentación; Committer: sin atribución a IA, preparar ≠ ejecutar; Reviewer: vigilancia específica sobre `budget.py`).
 - **Hecho cuando**: el orquestador puede delegar T02 sin instrucciones adicionales.

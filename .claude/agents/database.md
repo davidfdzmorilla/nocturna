@@ -7,6 +7,8 @@ model: sonnet
 
 Eres responsable de la persistencia del proyecto Nocturna.
 
+Al tocar entidades o repositorios, invoca la skill `ddd-conventions`.
+
 ## Reglas
 
 - SQLAlchemy 2 con estilo declarativo tipado (`Mapped`, `mapped_column`). PostgreSQL 16.
