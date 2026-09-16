@@ -23,7 +23,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Hecho cuando**: el orquestador puede delegar T02 sin instrucciones adicionales.
 
 ### T02 · Entorno local
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T01
 - **Alcance**: `docker-compose.yml` solo con PostgreSQL 16 y volumen. `backend/pyproject.toml` con `uv`, FastAPI, SQLAlchemy 2, Alembic, Pydantic, `claude-agent-sdk`, pytest. `config/pipeline.toml` con todos los valores iniciales de `CLAUDE.md`. Carga de configuración tipada (Pydantic Settings).
 - **Hecho cuando**: `docker compose up -d`, `uv sync`, `uv run pytest` (con un test trivial) pasan en limpio.

@@ -10,6 +10,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 
 | Componente | Tecnología | Estado |
 |---|---|---|
+| Configuración tipada | Pydantic Settings (`infrastructure/config.py`) | done (T02) |
 | Ingesta arXiv | MCP in-process (`claude-agent-sdk`), `httpx` | pendiente (T20) |
 | Control de gasto | `application/budget.py` | pendiente (T30) |
 | Proveedor LLM | `infrastructure/llm/agent_sdk_provider.py` | pendiente (T40) |
@@ -37,11 +38,11 @@ Dependencias: `api → application → domain ← infrastructure`. La capa `doma
 
 ## Configuración
 
-`config/pipeline.toml`, cargada en un objeto tipado. Secciones: `budget`, `limits`, `window`, `models`, `sources.arxiv`.
+`config/pipeline.toml`, cargada en un objeto tipado por `infrastructure/config.py`. Secciones: `budget`, `limits`, `window`, `models`, `llm`, `sources.arxiv`.
 
 ## Proveedor LLM
 
-La interfaz `LLMProvider` en `domain/llm.py` define el contrato mínimo (`run_agent(agent, input) -> AgentResult`). Fase 1 usa `AgentSDKProvider` en `infrastructure/llm/agent_sdk_provider.py`, autenticado con el CLI de Claude Code sin `ANTHROPIC_API_KEY`. El hueco de `ApiKeyProvider` (alternativa seleccionable por configuración si la política de suscripción cambia) queda documentado e implementable en una tarea futura. Ver [ADR 0001](adr/0001-suscripcion-como-proveedor.md).
+La interfaz `LLMProvider` en `domain/llm.py` define el contrato mínimo (`run_agent(agent, input) -> AgentResult`). Fase 1 usa `AgentSDKProvider` en `infrastructure/llm/agent_sdk_provider.py`, autenticado con el CLI de Claude Code sin `ANTHROPIC_API_KEY`. El campo `llm.provider` en `pipeline.toml` está tipado como `Literal["agent_sdk"]` a propósito: impide un camino silencioso hacia una API key. Ese `Literal` se ampliará en la misma tarea que implemente `ApiKeyProvider`, reflejando una decisión consciente. Ver [ADR 0001](adr/0001-suscripcion-como-proveedor.md).
 
 ## Lo que no existe en fase 1 (a propósito)
 
