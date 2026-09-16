@@ -27,6 +27,7 @@ testpaths = ["tests"]
 addopts = "-m 'not manual'"
 markers = [
     "manual: llama a Claude de verdad; solo lo lanza el autor a mano",
+    "db: corre contra el PostgreSQL de docker compose (base nocturna_test)",
 ]
 
 [tool.ruff]

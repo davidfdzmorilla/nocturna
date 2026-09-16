@@ -147,5 +147,5 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="NOCTURNA_", env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://nocturna:nocturna@localhost:5432/nocturna"
+    database_url: str = "postgresql+psycopg://nocturna:nocturna@localhost:5433/nocturna"
     config_path: Path = Field(default_factory=_default_config_path)

@@ -39,7 +39,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Hecho cuando**: tests de dominio cubren transiciones e invariantes. Cero imports de SQLAlchemy o del SDK en `domain/`.
 
 ### T11 · Persistencia
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T10
 - **Alcance**: modelos SQLAlchemy, migración inicial Alembic, repositorios en `infrastructure/`. Índices en `items(source, external_id)` (único) y `findings(published_at)`.
 - **Hecho cuando**: `alembic upgrade head` limpio; tests de repositorio contra PostgreSQL de compose.
