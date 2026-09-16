@@ -33,7 +33,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 1 — Dominio y persistencia
 
 ### T10 · Modelo de dominio
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T02
 - **Alcance**: entidades `Item`, `Reading`, `Finding`, `Run`, `AgentCall` en `domain/`, con sus reglas (transiciones de `status`, `interest_score` en 1–5, `confidence` en 0–1). Interfaces de repositorio. Interfaz `LLMProvider`.
 - **Hecho cuando**: tests de dominio cubren transiciones e invariantes. Cero imports de SQLAlchemy o del SDK en `domain/`.
