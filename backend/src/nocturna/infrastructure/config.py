@@ -80,11 +80,19 @@ class ModelsConfig(BaseModel):
 
 
 class ArxivConfig(BaseModel):
-    """Categorías arXiv de las que se ingesta contenido."""
+    """Categorías arXiv de las que se ingesta contenido y límites de paginación."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     categories: list[str] = Field(min_length=1)
+    page_size: int = Field(gt=0)
+    max_results_per_fetch: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _page_size_within_max_results(self) -> "ArxivConfig":
+        if self.page_size > self.max_results_per_fetch:
+            raise ValueError("page_size no puede ser mayor que max_results_per_fetch")
+        return self
 
 
 class SourcesConfig(BaseModel):

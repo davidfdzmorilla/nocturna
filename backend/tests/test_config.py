@@ -43,6 +43,8 @@ editor = "opus"
 
 [sources.arxiv]
 categories = ["astro-ph.EP", "astro-ph.GA"]
+page_size = 100
+max_results_per_fetch = 400
 
 [llm]
 provider = "agent_sdk"
@@ -74,6 +76,13 @@ def test_las_categorias_arxiv_no_estan_vacias():
 
     assert len(config.sources.arxiv.categories) > 0
     assert all(c.startswith("astro-ph") for c in config.sources.arxiv.categories)
+
+
+def test_arxiv_page_size_y_max_results_se_cargan():
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+
+    assert config.sources.arxiv.page_size == 100
+    assert config.sources.arxiv.max_results_per_fetch == 400
 
 
 def test_una_clave_desconocida_falla(tmp_path):
@@ -215,6 +224,34 @@ def test_categorias_vacias_fallan(tmp_path):
     path = _write_toml(tmp_path, content)
 
     with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("page_size = 100", "page_size = 0"),
+        ("max_results_per_fetch = 400", "max_results_per_fetch = 0"),
+        ("page_size = 100", "page_size = -1"),
+        ("max_results_per_fetch = 400", "max_results_per_fetch = -1"),
+    ],
+)
+def test_arxiv_page_size_y_max_results_no_positivos_fallan(tmp_path, old, new):
+    content = BASE_TOML.replace(old, new)
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_arxiv_page_size_mayor_que_max_results_per_fetch_falla(tmp_path):
+    content = BASE_TOML.replace(
+        "page_size = 100",
+        "page_size = 500",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="page_size"):
         load_pipeline_config(path)
 
 

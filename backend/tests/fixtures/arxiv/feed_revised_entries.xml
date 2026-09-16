@@ -1,0 +1,278 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/zliI3CXwp399fQwTjWKS1gfoJP0</id>
+  <title>arXiv Query: search_query=cat:astro-ph.EP OR cat:astro-ph.GA&amp;id_list=&amp;start=0&amp;max_results=8</title>
+  <updated>2026-09-16T14:01:26Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:astro-ph.EP+OR+cat:astro-ph.GA&amp;start=0&amp;max_results=8&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>8</opensearch:itemsPerPage>
+  <opensearch:totalResults>113100</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17526v1</id>
+    <title>Secular evolution of viscous and self-gravitating protoplanetary discs with magnetic winds</title>
+    <updated>2026-09-15T17:57:06Z</updated>
+    <link href="https://arxiv.org/abs/2609.17526v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17526v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Traditionally, the disc is believed to evolve under the influence of turbulent viscosity, although the importance of this mechanism has recently been questioned. Alternatively, magnetic disc wind or gravitational instability could be considered, but which of these three mechanisms contributes the most at a given evolutionary stage remains an open question. We present global numerical hydrodynamic simulations of protoplanetary disc evolution in the thin-disc limit on disc lifetime timescales, including all three mechanisms of mass and angular momentum transport. We calculate the gravitational, viscous, and magnetic torques to assess the contribution of each mechanism. We found that these transport mechanisms occupy distinct zones of influence in the disc depending on the stage of evolution: the dominance of disc self-gravity during the early phase is replaced by the prevalence of magnetic disc wind and viscosity, with the latter being especially relevant at the disc periphery. We show that a noticeable decrease in disc mass occurs only after the termination of the embedded phase. The suppression of disc viscous spreading is achieved only for the most intense wind; otherwise, the disc continues to grow in size till the end of simulations. The spiral structure contributes to the temporary retention of dust in the disc. However, this is insufficient to prevent the depletion of dust on long timescales. The results emphasize the importance of a comprehensive approach to long-term simulations of protoplanetary discs with no single mechanism of mass and angular momentum transport regarded as exclusive.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T17:57:06Z</published>
+    <arxiv:comment>Accepted for publication in MNRAS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Evgenii R. Redkin</name>
+      <arxiv:affiliation>Research Institute of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+      <arxiv:affiliation>Faculty of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Eduard I. Vorobyov</name>
+      <arxiv:affiliation>Institut fuer Astro- und Teilchenphysik, Universitaet Innsbruck, Innsbruck, Austria</arxiv:affiliation>
+      <arxiv:affiliation>Research Institute of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Paola Pinilla</name>
+      <arxiv:affiliation>Mullard Space Science Laboratory, University College London, UK</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Fabiola A. Gerosa</name>
+      <arxiv:affiliation>Mullard Space Science Laboratory, University College London, UK</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Konstanze Zwintz</name>
+      <arxiv:affiliation>Institut fuer Astro- und Teilchenphysik, Universitaet Innsbruck, Innsbruck, Austria</arxiv:affiliation>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.00140v2</id>
+    <title>Using Ringed Disks to Determine Fundamental Parameters of Planet Formation</title>
+    <updated>2026-09-15T17:48:03Z</updated>
+    <link href="https://arxiv.org/abs/2609.00140v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.00140v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Two non-dimensional parameters, Stokes number (St) and turbulent $α$, critically control the early stage of planet formation. In spite of their importance, these two numbers are notoriously difficult to obtain and remain largely unconstrained, except in ringed disks. In particular, E. J. Lee (2024) showed that ringed disks can be uniquely leveraged to derive local St and $α$ through a simple model combining dust radial equation of motion with the measured distribution of dust masses in Class 0/I disks. We apply their model to the currently known census of ringed disks, finding 19 viable rings in 10 systems, which more than doubles the previous sample. Similar to previous findings, we obtain generally low St$\sim 10^{-4}$--$10^{-2}$ and $α\sim 10^{-5}$--10$^{-2}$ across a wide range of system parameters, consistent with all the disks that we study to be rich in gas and the dust-to-gas ratio of the rings to be too low to generate planetesimals. Disks around low mass host stars likely have leakier traps, broadly consistent with massive, gap-carving giants to be rare around low mass hosts, if the rings are generated by planets.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-31T18:00:04Z</published>
+    <arxiv:comment>Accepted to ApJ. No change from previous version</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Olivia Wu</name>
+    </author>
+    <author>
+      <name>Luca Camarra</name>
+    </author>
+    <author>
+      <name>Eve J. Lee</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17505v1</id>
+    <title>Stellar Ages of M Dwarf Hosts of Temperate Sub-Neptunes</title>
+    <updated>2026-09-15T17:44:39Z</updated>
+    <link href="https://arxiv.org/abs/2609.17505v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17505v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Measuring M dwarf ages is a central challenge in stellar astrophysics. These stars evolve so slowly that isochrone fitting gives little constraint, requiring alternative methods based on rotation, activity, and kinematics. Reliable ages help constrain the formation and evolution of planetary systems around M dwarfs, including the temperate sub-Neptunes now being characterised with the James Webb Space Telescope (JWST). We present an age analysis of six nearby M dwarf planet hosts (TOI-732, TOI-736, TOI-270, TOI-1468, TOI-1231, and K2-18) using lithium absorption at 6708 Å, rotation periods, and Galactic kinematics. The Li I 6708 Åfeature is absent above 3$σ$ in all targets, implying substantial depletion and ages exceeding 200 Myr. Rotation periods of 39-145 days yield ages of 2.8-8.6 Gyr, calibrated against open cluster M dwarfs and including the intrinsic dispersion of the rotation-age relation. Kinematic ages span 0.8-13 Gyr with uncertainties of 4-6 Gyr. These are less precise per star but help identify outliers such as TOI-1231 (~13 Gyr) and K2-18 ( ~1-2 Gyr) and place the stars in Galactic context. Rotation yields age constraints 2-6 times tighter than kinematics where periods are measured, and comparable constraints where periods must be inferred from chromospheric activity. Combining multiple indicators enables more secure classification of these stars' evolutionary states, providing reference points for future comparative studies.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.SR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T17:44:39Z</published>
+    <arxiv:comment>12 pages, 9 Figures, accepted for publication in MNRAS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Lalitha Sairam</name>
+    </author>
+    <author>
+      <name>Nikku Madhusudhan</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.11270v2</id>
+    <title>The Curious Case of Centaurus A: On the Subject of the Quenched satellites</title>
+    <updated>2026-09-15T17:22:15Z</updated>
+    <link href="https://arxiv.org/abs/2602.11270v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2602.11270v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The satellite system of Centaurus A presents a curious cosmological puzzle: while the global population is consistent with theoretical expectations, its inner regions (d&lt;150 kpc) exhibit a deficit of luminous satellite galaxies. Using the Galacticus semi-analytic model applied to high-resolution N-body merger trees, we investigate potential quenching mechanisms to explain this trend. Our fiducial models, calibrated to the Milky Way, reproduce the overall Cen A population but overpredict the number of bright inner-halo satellites by a factor of 4 +- 1 at Mv &lt; -15.8. We find that this is not due to statistical variance. Instead, the spatial coincidence of this deficiency with Cen A's massive, kiloparsec-scale radio lobes suggests a powerful environmental driver. We explore a range of physical scenarios, including enhanced tidal disruption, reionization quenching, and suppressed accretion into halos from the surrounding intergalactic medium. Our results indicate that AGN-driven thermal feedback at z &lt; 5 can significantly suppress star formation in satellites, effectively truncating the bright end of the inner luminosity function. Our work suggests that the "Curious Case of Centaurus A" may provide evidence of AGN feedback within the host galaxy that regulates the survival and evolution of its dwarf galaxy satellites.</summary>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-02-11T19:00:03Z</published>
+    <arxiv:comment>Published in the Open Journal of Astrophysics, 18 pages, 18 figures</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.GA"/>
+    <author>
+      <name>Sachi Weerasooriya</name>
+    </author>
+    <author>
+      <name>Mia Sauda Bovill</name>
+    </author>
+    <author>
+      <name>Matthew A. Taylor</name>
+    </author>
+    <author>
+      <name>Andrew J. Benson</name>
+    </author>
+    <author>
+      <name>Cameron Leahy</name>
+    </author>
+    <author>
+      <name>Alexis Vazquez</name>
+    </author>
+    <author>
+      <name>Niusha Ahvazi</name>
+    </author>
+    <author>
+      <name>Pamela M. Marcum</name>
+    </author>
+    <author>
+      <name>Alejandro S. Borlaff</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2605.14693v2</id>
+    <title>Discovery of a Compact Hub-Filament System in G286.21+0.17 with JWST and ALMA: Insights into Protocluster Formation and Competitive Accretion</title>
+    <updated>2026-09-15T16:30:42Z</updated>
+    <link href="https://arxiv.org/abs/2605.14693v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2605.14693v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a multi-wavelength study of the massive protocluster G286.21+0.17 (G286) using \emph{JWST} near-infrared (NIR) imaging and ALMA H$^{13}$CO$^{+}$(1--0) observations. The \emph{JWST} images uncover a compact ($\sim$0.5 pc) hub-filament system (HFS), comprising a dense central hub connected by at least four converging filaments seen in absorption, along with multiple H$_2$ protostellar jets/outflows. The hub hosts the dense core G286c1. H$^{13}$CO$^{+}$ emission confirms this HFS over [$-$19.2, $-$16.4]~km~s$^{-1}$, while the \emph{JWST} images also trace prominent photodissociation regions surrounding H\,{\sc ii}~region~A, powered by a B-type star. The identified H$^{13}$CO$^{+}$ skeletons closely trace the major \emph{JWST} absorption structures and show steep velocity gradients indicative of inflow. The radial distribution of ALMA 1.3 mm continuum cores (ALMAGAL and Cheng et al. 2020) exhibits power-law trends toward the hub center. The core number density, surface density, and core mass follow $Y \propto r^α$ with $α_ρ$ $\sim$$-$2.8 to $-$1.1, $α_Σ$ $\sim$$-$0.4 to $-$0.6, and $α_M$ $\sim$$-$0.7, whereas the core diameter remains nearly constant. Together with filament mass accretion rates of 7.6--11$\times10^{-5}$ M$_\odot$ yr$^{-1}$, these results are consistent with competitive accretion, highlighting preferential core growth toward the hub. Increasing filament linewidths toward the hub imply gravity-driven inflow, but misaligned local velocity gradient and gravitational force directions along filaments point to a dynamically evolved system. The HFS likely formed through large-scale gas-layer interactions aided by compression from the adjacent H\,{\sc ii} region. Overall, star formation in G286 appears to be regulated by filamentary accretion, competitive core growth in the hub, and stellar feedback.</summary>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-05-14T11:09:59Z</published>
+    <arxiv:comment>Accepted for publication in MNRAS, the manuscript consists of 19 pages, 14 figures, and 1 table</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.GA"/>
+    <author>
+      <name>L. K. Dewangan</name>
+    </author>
+    <author>
+      <name>N. K. Bhadari</name>
+    </author>
+    <author>
+      <name>Ram K. Yadav</name>
+    </author>
+    <author>
+      <name>A. K. Maity</name>
+    </author>
+    <author>
+      <name>O. R. Jadhav</name>
+    </author>
+    <author>
+      <name>Kee-Tae Kim</name>
+    </author>
+    <author>
+      <name>Paul F. Goldsmith</name>
+    </author>
+    <author>
+      <name>A. Saha</name>
+    </author>
+    <author>
+      <name>Dana Alina</name>
+    </author>
+    <author>
+      <name>Chang Won Lee</name>
+    </author>
+    <author>
+      <name>Saurabh Sharma</name>
+    </author>
+    <author>
+      <name>Tie Liu</name>
+    </author>
+    <author>
+      <name>Patricio Sanhueza</name>
+    </author>
+    <author>
+      <name>Tapas Baug</name>
+    </author>
+    <author>
+      <name>E. Sharma</name>
+    </author>
+    <author>
+      <name>Fengwei Xu</name>
+    </author>
+    <author>
+      <name>Ariful Hoque</name>
+    </author>
+    <author>
+      <name>James O. Chibueze</name>
+    </author>
+    <author>
+      <name>Dana Makarova</name>
+    </author>
+    <author>
+      <name>Wenyu Jiao</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17383v1</id>
+    <title>X-ray to Mid-IR Spectral Energy Distributions: A Catalog of X-ray Selected AGNs in the XMM-COSMOS Survey</title>
+    <updated>2026-09-15T16:25:10Z</updated>
+    <link href="https://arxiv.org/abs/2609.17383v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17383v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a component-resolved analysis of the IR--X-ray connection in a sample of 104 spectroscopically confirmed Type~1 AGN. By combining \xmm, \swift/UVOT, and new high--angular resolution \jwst/NIRCam imaging for a subset of the sources, we constructed detailed SEDs in which the IR emission was explicitly decomposed into accretion-disk, torus, and polar-dust components. This approach enables us to isolate the intrinsic AGN-IR luminosities with minimal host-galaxy contamination, providing a clean assessment of the physical relationship between the accretion flow, circumnuclear dust, and the X-ray corona. By incorporating JWST/NIRCam observations into our SED decomposition, we significantly reduce host-galaxy contamination and isolate the nuclear infrared emission with greater fidelity, particularly at near-infrared (NIR) wavelengths. This improvement is most apparent at 1 $μ\mathrm{m}$, where sources with JWST coverage exhibit a markedly steeper relation between $ν$L$_ν$ (2 keV) and the NIR luminosity than those without JWST data. This behavior is naturally explained by starlight dilution, whereby host-galaxy emission dominates lower-resolution measurements.</summary>
+    <category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T16:25:10Z</published>
+    <arxiv:comment>accepted for publication in ApJS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.HE"/>
+    <author>
+      <name>Şeyda Şen</name>
+    </author>
+    <author>
+      <name>Eda Sonbas</name>
+    </author>
+    <author>
+      <name>Ece Kilerci</name>
+    </author>
+    <author>
+      <name>Hasan Avdan</name>
+    </author>
+    <author>
+      <name>Kalvir S. Dhuga</name>
+    </author>
+    <author>
+      <name>Ersin Göğüş</name>
+    </author>
+    <author>
+      <name>W. N. Brandt</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17379v1</id>
+    <title>DewTwin-Coin: an onboard autonomous framework for lunar water-ice prospecting using Chandrayaan-3 LIBS and ChaSTE data</title>
+    <updated>2026-09-15T16:21:52Z</updated>
+    <link href="https://arxiv.org/abs/2609.17379v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17379v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>It is important to locate water-ice in the lunar regolith to build futuristic, sustainable bases there. But communication delays from Earth, limited bandwidth, and power constraints demand an onboard, autonomous, time-efficient decision-making framework for locating volatiles such as water-ice in the lunar regolith. In this work, we present a framework, DewTwin-Coin, that can locate potential water-ice sites in real time without drilling. Its decision-making principle is based on a find-S learning algorithm that uses surface temperature and the Hydrogen-to-Oxygen intensity ratio at a location. The core idea is a physics-based rule $-$ water-ice is stable only if the temperature is below 110 K and the Hydrogen-to-Oxygen intensity ratio is between 1.7 and 2.3. We validate DewTwin-Coin on Chandrayaan-3's 3165 laser-induced breakdown spectroscopy (LIBS) elemental data with 387 Chandra's surface thermophysical experiment (ChaSTE) data. On a 16 GB RAM system, it classified all 3165 locations within 615 seconds, yielding no strong signatures of water-ice, which matches the Chandrayaan-3 in-situ analysis. This framework is very important for future lunar and other planetary missions in which an onboard rover can autonomously determine feasible drilling locations for water-ice without issuing false drilling commands in warm terrains. Thus, the mission's onboard setup can stretch its technical limits in both power and memory capacity.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.IM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T16:21:52Z</published>
+    <arxiv:comment>9 pages, 2 figures, 1 table, 1 algorithm. Comments are welcome</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Soundarya R.</name>
+    </author>
+    <author>
+      <name>Debasish Mondal</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2606.12137v2</id>
+    <title>A Unified Halo Mass Function Across Dark Matter Models from High-Resolution Multi-Scale Simulations</title>
+    <updated>2026-09-15T15:41:29Z</updated>
+    <link href="https://arxiv.org/abs/2606.12137v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2606.12137v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We measure the dark matter halo mass function, with backsplash halos removed, from a wide range of cosmological-box and zoom-in simulations. These include the MultiDark Planck boxes, along with a suite of zoom-in simulations of Group, Milky Way, and LMC-mass halos. The Milky Way simulations include both CDM and non-CDM initial conditions. Using these measurements, we calibrate the parameters of flexible fitting functions for the halo mass function and the window function, along with parameterized models for various systematics, including finite box size effects, halo isolation criteria, halo detection efficiency, and contamination by artificial halos (objects forming from particle noise in the initial conditions). We show that this model shows remarkable consistency with N-body simulations over a broad range of redshifts, and ten orders of magnitude in halo mass ($10^6\mathrm{M}_\odot$ to $10^{16}\mathrm{M}_\odot$). Our model typically maintains a high precision of 12% and captures complex behaviors, including small-scale cut-offs, oscillations, and enhancements. In specific mass intervals for certain power spectra, we see larger deviations of 40-50%. Furthermore, when integrated with a simple model for environmental dependence, this fitting function provides a robust description of how environmental density influences the halo mass function. This precision model captures a wide variety of dark matter paradigms (including thermal relics, axions, and models with dark-sector interactions), is accurate for halo masses down to $10^7\mathrm{M}_\odot$, and is a critical ingredient for model-independent dark-matter inference from forthcoming data.</summary>
+    <category term="astro-ph.CO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-06-10T14:32:43Z</published>
+    <arxiv:comment>30 pages, 29 figures. Published in the Open Journal of Astrophysics</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.CO"/>
+    <author>
+      <name>Andrew J. Benson</name>
+      <arxiv:affiliation>Carnegie Institution for Science</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Ethan O. Nadler</name>
+      <arxiv:affiliation>University of California, San Diego</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Xiaolong Du</name>
+      <arxiv:affiliation>University of California, Los Angeles</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Vera Gluscevic</name>
+      <arxiv:affiliation>University of Southern California</arxiv:affiliation>
+    </author>
+  </entry>
+</feed>

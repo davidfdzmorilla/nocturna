@@ -1,0 +1,96 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/Xh8ndHuaDpHz+ATKunHXDQmOti8</id>
+  <title>arXiv Query: search_query=cat:astro-ph.EP OR cat:astro-ph.GA&amp;id_list=&amp;start=0&amp;max_results=3</title>
+  <updated>2026-09-16T14:00:42Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:astro-ph.EP+OR+cat:astro-ph.GA&amp;start=0&amp;max_results=3&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+  <opensearch:totalResults>113100</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17526v1</id>
+    <title>Secular evolution of viscous and self-gravitating protoplanetary discs with magnetic winds</title>
+    <updated>2026-09-15T17:57:06Z</updated>
+    <link href="https://arxiv.org/abs/2609.17526v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17526v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Traditionally, the disc is believed to evolve under the influence of turbulent viscosity, although the importance of this mechanism has recently been questioned. Alternatively, magnetic disc wind or gravitational instability could be considered, but which of these three mechanisms contributes the most at a given evolutionary stage remains an open question. We present global numerical hydrodynamic simulations of protoplanetary disc evolution in the thin-disc limit on disc lifetime timescales, including all three mechanisms of mass and angular momentum transport. We calculate the gravitational, viscous, and magnetic torques to assess the contribution of each mechanism. We found that these transport mechanisms occupy distinct zones of influence in the disc depending on the stage of evolution: the dominance of disc self-gravity during the early phase is replaced by the prevalence of magnetic disc wind and viscosity, with the latter being especially relevant at the disc periphery. We show that a noticeable decrease in disc mass occurs only after the termination of the embedded phase. The suppression of disc viscous spreading is achieved only for the most intense wind; otherwise, the disc continues to grow in size till the end of simulations. The spiral structure contributes to the temporary retention of dust in the disc. However, this is insufficient to prevent the depletion of dust on long timescales. The results emphasize the importance of a comprehensive approach to long-term simulations of protoplanetary discs with no single mechanism of mass and angular momentum transport regarded as exclusive.</summary>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T17:57:06Z</published>
+    <arxiv:comment>Accepted for publication in MNRAS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Evgenii R. Redkin</name>
+      <arxiv:affiliation>Research Institute of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+      <arxiv:affiliation>Faculty of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Eduard I. Vorobyov</name>
+      <arxiv:affiliation>Institut fuer Astro- und Teilchenphysik, Universitaet Innsbruck, Innsbruck, Austria</arxiv:affiliation>
+      <arxiv:affiliation>Research Institute of Physics, Southern Federal University, Rostov-on-Don, Russia</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Paola Pinilla</name>
+      <arxiv:affiliation>Mullard Space Science Laboratory, University College London, UK</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Fabiola A. Gerosa</name>
+      <arxiv:affiliation>Mullard Space Science Laboratory, University College London, UK</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Konstanze Zwintz</name>
+      <arxiv:affiliation>Institut fuer Astro- und Teilchenphysik, Universitaet Innsbruck, Innsbruck, Austria</arxiv:affiliation>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17505v1</id>
+    <title>Stellar Ages of M Dwarf Hosts of Temperate Sub-Neptunes</title>
+    <updated>2026-09-15T17:44:39Z</updated>
+    <link href="https://arxiv.org/abs/2609.17505v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17505v1" rel="related" type="application/pdf" title="pdf"/>
+    <category term="astro-ph.EP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.SR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T17:44:39Z</published>
+    <arxiv:comment>12 pages, 9 Figures, accepted for publication in MNRAS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.EP"/>
+    <author>
+      <name>Lalitha Sairam</name>
+    </author>
+    <author>
+      <name>Nikku Madhusudhan</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.17383v1</id>
+    <title>X-ray to Mid-IR Spectral Energy Distributions: A Catalog of X-ray Selected AGNs in the XMM-COSMOS Survey</title>
+    <updated>2026-09-15T16:25:10Z</updated>
+    <link href="https://arxiv.org/abs/2609.17383v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.17383v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a component-resolved analysis of the IR--X-ray connection in a sample of 104 spectroscopically confirmed Type~1 AGN. By combining \xmm, \swift/UVOT, and new high--angular resolution \jwst/NIRCam imaging for a subset of the sources, we constructed detailed SEDs in which the IR emission was explicitly decomposed into accretion-disk, torus, and polar-dust components. This approach enables us to isolate the intrinsic AGN-IR luminosities with minimal host-galaxy contamination, providing a clean assessment of the physical relationship between the accretion flow, circumnuclear dust, and the X-ray corona. By incorporating JWST/NIRCam observations into our SED decomposition, we significantly reduce host-galaxy contamination and isolate the nuclear infrared emission with greater fidelity, particularly at near-infrared (NIR) wavelengths. This improvement is most apparent at 1 $μ\mathrm{m}$, where sources with JWST coverage exhibit a markedly steeper relation between $ν$L$_ν$ (2 keV) and the NIR luminosity than those without JWST data. This behavior is naturally explained by starlight dilution, whereby host-galaxy emission dominates lower-resolution measurements.</summary>
+    <category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-15T16:25:10Z</published>
+    <arxiv:comment>accepted for publication in ApJS</arxiv:comment>
+    <arxiv:primary_category term="astro-ph.HE"/>
+    <author>
+      <name>Şeyda Şen</name>
+    </author>
+    <author>
+      <name>Eda Sonbas</name>
+    </author>
+    <author>
+      <name>Ece Kilerci</name>
+    </author>
+    <author>
+      <name>Hasan Avdan</name>
+    </author>
+    <author>
+      <name>Kalvir S. Dhuga</name>
+    </author>
+    <author>
+      <name>Ersin Göğüş</name>
+    </author>
+    <author>
+      <name>W. N. Brandt</name>
+    </author>
+  </entry>
+</feed>

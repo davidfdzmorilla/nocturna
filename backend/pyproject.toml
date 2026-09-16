@@ -10,7 +10,14 @@ dependencies = [
     "pydantic-settings>=2.5",
     "psycopg[binary]>=3.2",
     "claude-agent-sdk>=0.1",
+    "httpx>=0.27",
+    # anyio es dependencia de RUNTIME, no solo de test: infrastructure/arxiv/rate_limit.py
+    # usa anyio.sleep como valor por defecto del espaciado entre peticiones.
+    "anyio>=4",
 ]
+
+[project.scripts]
+nocturna = "nocturna.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
