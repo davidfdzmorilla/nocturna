@@ -7,7 +7,9 @@ services:
       POSTGRES_PASSWORD: nocturna
       POSTGRES_DB: nocturna
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 5433 por defecto: el 5432 suele estar ocupado por un PostgreSQL nativo,
+      # que taparía al contenedor en localhost. Ver README § Configuración sin .env.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - nocturna_pgdata:/var/lib/postgresql/data
     healthcheck:
