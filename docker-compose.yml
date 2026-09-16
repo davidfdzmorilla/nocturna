@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nocturna-postgres
+    environment:
+      POSTGRES_USER: nocturna
+      POSTGRES_PASSWORD: nocturna
+      POSTGRES_DB: nocturna
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - nocturna_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocturna -d nocturna"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  nocturna_pgdata:

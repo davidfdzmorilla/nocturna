@@ -1,0 +1,37 @@
+# Configuración del pipeline nocturno de Nocturna.
+# Ninguna clave de esta sección tiene valor por defecto en código: si falta o
+# está mal escrita, la carga debe fallar (ver infrastructure/config.py).
+
+[budget]
+# nightly_tokens: tope fijado en CLAUDE.md ("Control de gasto"), valor inicial conservador.
+nightly_tokens = 300000
+# editor_reserve_tokens: propuesto, se calibra en T60 con Settings > Usage.
+editor_reserve_tokens = 60000
+# weekly_reset_weekday / weekly_reset_hour: PLACEHOLDER, decisión abierta (docs/OPEN_DECISIONS.md).
+weekly_reset_weekday = "monday"
+weekly_reset_hour = 0
+reset_day_multiplier = 1.0
+
+[limits]
+# max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").
+max_items_per_night = 40
+max_turns_per_agent = 3
+# item_timeout_s y run_timeout_s: propuestos, se calibran en T60.
+item_timeout_s = 180
+run_timeout_s = 16200
+
+[window]
+start = "00:00"
+hard_stop = "04:45"
+
+[models]
+reader = "sonnet"
+popularizer = "sonnet"
+editor = "opus"
+
+[sources.arxiv]
+# PROVISIONAL · decisión abierta (docs/OPEN_DECISIONS.md, T20); astro-ph.HE en evaluación
+categories = ["astro-ph.EP", "astro-ph.GA"]
+
+[llm]
+provider = "agent_sdk"

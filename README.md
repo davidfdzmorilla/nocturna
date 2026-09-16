@@ -55,10 +55,10 @@ Estructura objetivo de la fase 1. Hoy solo existen la documentación y las carpe
 
 ## Comandos locales
 
-Referencia de la fase 1 completa. Ninguno funciona todavía: dependen de T02 en adelante.
+Referencia de la fase 1 completa. Tras T02, `docker compose up -d`, `uv sync` y `uv run pytest` funcionan; los comandos `nocturna run-night` existen en fase posterior.
 
 ```bash
-# Inicia PostgreSQL
+# Inicia PostgreSQL (puerto 5432 por defecto, configurable con POSTGRES_PORT)
 docker compose up -d
 
 # Instala dependencias Python y crea base de datos
@@ -83,6 +83,15 @@ cd web
 pnpm install
 pnpm dev
 ```
+
+### Configuración sin `.env`
+
+Por defecto, todos los comandos funcionan sin fichero `.env`. La conexión a PostgreSQL es `postgresql://nocturna:nocturna@localhost:5432/nocturna`.
+
+- `POSTGRES_PORT`: si el puerto 5432 está ocupado, cambia el de PostgreSQL en Docker. Ejemplo: `POSTGRES_PORT=5433 docker compose up -d`.
+- `NOCTURNA_DATABASE_URL`: sobrescribe la conexión completa a la base de datos. Ejemplo: `NOCTURNA_DATABASE_URL=postgresql://user:pass@host/db uv run pytest`.
+
+Si necesitas un fichero `.env` (no es obligatorio), créalo a mano: Claude Code no puede, por política de seguridad.
 
 ## Advertencia
 
