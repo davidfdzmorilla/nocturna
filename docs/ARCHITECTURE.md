@@ -62,9 +62,26 @@ La puerta verifica en orden: (1) ¿el `Run` está `RUNNING`?, (2) ¿estamos dent
 
 ## Proveedor LLM
 
-La interfaz `LLMProvider` en `domain/llm.py` define el contrato: `async run_agent(request: AgentRequest) -> AgentResult`. El `AgentRequest` transporta `role`, `model`, `prompt`, `max_turns`, `timeout_s` e `item_id`; de esta forma ningún proveedor lee configuración global, y la firma async permite a T44 cancelar una llamada en vuelo al llegar `hard_stop`.
+Implementado en T40. La interfaz `LLMProvider` en `domain/llm.py` define el contrato: `async run_agent(request: AgentRequest) -> AgentResult`. El `AgentRequest` transporta `role`, `model`, `prompt`, `max_turns`, `timeout_s` e `item_id`; de esta forma ningún proveedor lee configuración global, y la firma async permite a T44 cancelar una llamada en vuelo al llegar `hard_stop`.
 
-Fase 1 usa `AgentSDKProvider` en `infrastructure/llm/agent_sdk_provider.py`, autenticado con el CLI de Claude Code sin `ANTHROPIC_API_KEY`. El campo `llm.provider` en `pipeline.toml` está tipado como `Literal["agent_sdk"]` a propósito: impide un camino silencioso hacia una API key. Ese `Literal` se ampliará en la misma tarea que implemente `ApiKeyProvider`, reflejando una decisión consciente. Ver [ADR 0001](adr/0001-suscripcion-como-proveedor.md).
+**Frontera arquitectónica** (congelada por `test_llm_call_sites.py`): el proveedor no conoce `BudgetGuard`, `config`, ni `db`. Todo llega resuelto en `AgentRequest`. El proveedor es estructuralmente incapaz de persistir; la secuencia `authorize → run_agent → record_call` vive en el caso de uso de cada agente (T41–T43) y en T44. Esta separación permite reemplazar el proveedor (pasar a `ApiKeyProvider`) sin tocar la orquestación.
+
+**Contabilidad de tokens** ([ADR 0007](adr/0007-contabilidad-de-tokens-con-modelos-internos.md), supersede ADR 0006 § 3): la fuente de verdad es `ResultMessage.usage` (tokens del modelo pedido) y `model_usage` (costos de todos los modelos internos que el CLI usó). El gasto contabilizado es el **máximo componente a componente** entre:
+- `usage.input_tokens + usage.output_tokens` (incluye caché: `cache_creation_input_tokens` + `cache_read_input_tokens`)
+- Suma de `(inputTokens + outputTokens)` para cada entrada en `model_usage` dict
+
+Fórmula: `tokens_in = max(usage.input_tokens, sum_model_usage_input)`, idem para output. **Por qué máximo**: `usage` reporta solo el modelo pedido; si el CLI usó modelos internos (Haiku para control de sesión, verificación), su gasto viaja en `model_usage` pero no en `usage`. Ambas fuentes reportan el mismo evento, así que máximo evita duplicación; suma sería contar dos veces.
+
+**Dato observado en prueba real (2026-09-17)**: una sola llamada al Reader gastó 523 tokens visibles en `usage` pero 1.475 reales (946 Haiku + 529 Sonnet), confirmado por aritmética de `total_cost_usd`. Subregistro de 35,9% sin este arreglo. Políticas de máximo y suma de `model_usage` viven en todos los sitios de extracción de tokens (T40 implementó, T41–T44 heredan).
+
+`LLMError`/`LLMTimeout` transportan `tokens_in` y `tokens_out` ya conocidos (extraídos con este máximo); quien captura es responsable de contabilizar. `CancelledError` viene con atributos tras el primer `await`, pero un segundo `await` sobre cancelación externa puede dar un `CancelledError` nuevo **sin** atributos — T44 debe usar `getattr(exc, "tokens_in", 0)`. Sin `ResultMessage` (timeout de socket): no hay fuente de verdad, se contabiliza cero (fuga documentada en TECHNICAL_DEBT.md, acotada a ~600–800k tokens/noche en escenario de arXiv caído).
+
+**Cifras económicas** (por qué `setting_sources=[]`, `tools=[]`, `skills=[]` son no negociables):
+
+- `setting_sources=None` (default del SDK) carga `CLAUDE.md`, `.claude/settings.json` y agentes de desarrollo en **cada** `query()`: ~3.500–5.000 tokens extras × ~51 llamadas/noche = **180.000–255.000 tokens/noche (60–85% del presupuesto), 5,5–7,7 millones/mes**. Una sola noche con esa carga quema el presupuesto completo. Solución: `setting_sources=[]` explícito en `ClaudeAgentOptions`.
+- `tools=None` (default del SDK) hace que el CLI declare su toolset por defecto en cada llamada (herramientas del proyecto): **240.000–800.000 tokens/noche de preámbulo, equivalente a 1–3 noches de presupuesto**, cada una. Solución: `tools=[]` + `skills=[]` explícitos.
+
+Fase 1 usa `AgentSDKProvider` en `infrastructure/llm/agent_sdk_provider.py`, autenticado con el CLI de Claude Code sin `ANTHROPIC_API_KEY`. El campo `llm.provider` en `pipeline.toml` está tipado como `Literal["agent_sdk"]` a propósito: impide un camino silencioso hacia una API key. Ese `Literal` se ampliará en la misma tarea que implemente `ApiKeyProvider`, reflejando una decisión consciente. Ver [ADR 0001](adr/0001-suscripcion-como-proveedor.md) y [ADR 0006](adr/0006-frontera-del-proveedor-y-contabilidad-de-tokens.md).
 
 ## Persistencia
 

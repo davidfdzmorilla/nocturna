@@ -70,17 +70,21 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 4 — Agentes
 
 ### T40 · `AgentSDKProvider` y `FakeLLMProvider`
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T30
 - **Alcance**: implementación de `LLMProvider` sobre `claude-agent-sdk` con `query()` y `ClaudeAgentOptions`: modelo por rol, `max_turns` desde configuración, servidores MCP inyectados, sin `setting_sources` (todo programático), sin `ANTHROPIC_API_KEY`. Extracción de tokens y modelo de los mensajes `result`. `FakeLLMProvider` para tests que devuelve JSON fijo por agente.
 - **Hecho cuando**: un test de humo **manual y marcado como tal** (`pytest -m manual`) hace una llamada real mínima y registra tokens en `AgentCall`. El resto de la suite no toca Claude.
-- **Antes de empezar**: consultar la documentación vigente del SDK de Python (`platform.claude.com/docs/en/agent-sdk/python`) para nombres de opciones y estructura de mensajes; no fiarse de memoria.
+- **Ejecución real completada**: 2026-09-17 · `env -u ANTHROPIC_API_KEY uv run pytest -m manual -s` desde `backend/` ejercitó autenticación real, registró tokens en `AgentCall` y validó que `BudgetGuard` + `AgentSDKProvider` + persistencia funcionan juntos. Suite: 472 passed.
+- **Cuatro revisiones completadas · rondas 1–2 rechazadas, ronda 3 aprobada, ronda 4 aprobada.** Ronda 1: guarda anti-Claude no cubría `ClaudeSDKClient` y `pytest -m db` ejecutaba el test de humo por `argparse` (sustituir ≠ componer). Ronda 2: `sys.exc_info()` es estado global del hilo, falla si `run_agent` se invoca desde dentro de un `except` (reintento de T41); parcheo faltaba tests. Ronda 3: cierre de frontera + `test_llm_call_sites.py` congela que gasto se persista antes de devolver resultado. Ronda 4: humo destapó subregistro de 2,8× en la contabilidad (`ResultMessage.usage` no incluye gastos de herramientas internas, solo del modelo pedido). El CLI factura tokens de Haiku (946 tokens/sesión en fase 1) no visibles en `usage`, solo en `model_usage` y `total_cost_usd`. Arreglo: máximo entre `usage` y suma de `model_usage`, componente a componente, en nueve caminos de extracción (tests: 472 passed). Incidente registrado en ronda 1: durante mutación de guarda, suite llamó CLI real (8,78 s, `LLMTimeout`), gastando suscripción. El humo manual pagó por sí mismo al encontrar el agujero de 2,8×.
+- **Decisiones abiertas afectadas**: línea 33 de `OPEN_DECISIONS.md` (modelo efectivo sí disponible), `RateLimitEvent` (observado en llamada normal con éxito), gasto lateral del CLI (no configurable, debe calibrarse en T60).
+- **Cerrada: 2026-09-17**
 
 ### T41 · Agente Reader
 - **Estado**: pending
 - **Depende de**: T40, T20
 - **Alcance**: prompt en `prompts/reader.md`, esquema Pydantic de salida (`Reading`), caso de uso `ReadItem` que pasa por `BudgetGuard`, valida JSON, reintenta una vez, marca `failed` si vuelve a fallar. Una conversación por ítem.
 - **Hecho cuando**: `nocturna run-item <id>` produce una `Reading` persistida. Tests con `FakeLLMProvider` para el camino feliz, JSON inválido y presupuesto agotado.
+- **Nota crítica**: T40 demuestra que el proveedor extrae tokens correctamente en aislamiento. T41 debe verificar **la cadena completa** `BudgetGuard.authorize` → `run_agent` → persistencia de `AgentCall` intacta. Eso requiere test con orquestador real (no `FakeLLMProvider`) que llame al proveedor, gaste presupuesto, y compruebe que la fila de `AgentCall` refleja el gasto real. Es condición **necesaria y no suficiente** de que `BudgetGuard` funcione. Obligatorio antes de T42.
 
 ### T42 · Agente Popularizer
 - **Estado**: pending

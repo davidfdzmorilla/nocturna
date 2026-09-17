@@ -75,18 +75,62 @@ class GuardedFieldAssignment(InvariantViolation):
 
 
 class LLMError(DomainError):
-    """Fallo al invocar un agente a través de `LLMProvider`."""
+    """Fallo al invocar un agente a través de `LLMProvider`.
+
+    `tokens_in`/`tokens_out` transportan el gasto ya incurrido cuando se
+    conoce (T40, `AgentSDKProvider`): un `ResultMessage` de fallo puede
+    traer `usage` igualmente, porque la suscripción ya pagó esos tokens
+    aunque la llamada no haya producido una salida utilizable. Por defecto
+    `0`, no porque el gasto real pueda ser cero "por si acaso", sino porque
+    la mayoría de fallos (timeout, error de proceso) no tienen ningún
+    `usage` que propagar. Quien captura esta excepción (T41-T44) es
+    responsable de contabilizar estos tokens en `AgentCall` igual que si la
+    llamada hubiera tenido éxito: el presupuesto ya se gastó.
+
+    `api_error_status` transporta el código HTTP (429/500/529/...) que el
+    CLI informó para el fallo, cuando lo informó; `None` si el fallo no
+    vino acompañado de un status HTTP (timeout, error de proceso, JSON
+    inválido...). Se expone como atributo, no solo incrustado en el texto
+    del mensaje, porque este módulo dice explícitamente que estas
+    excepciones "se capturan por su nombre, no por texto": quien reaccione
+    a un límite de tasa (T41/T44) necesita poder escribir
+    `exc.api_error_status == 429` sin parsear `str(exc)`.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        api_error_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.tokens_in = tokens_in
+        self.tokens_out = tokens_out
+        self.api_error_status = api_error_status
 
 
 class LLMRateLimited(LLMError):
     """El proveedor LLM ha rechazado la llamada por límite de tasa.
 
-    Sin consumidor en fase 1: la lanza `AgentSDKProvider` en T40.
+    Sin emisor todavía, pero no por falta de señal del SDK: `claude-agent-sdk`
+    (0.2.153, versión instalada en T40) sí exporta señal de límite de tasa —
+    `RateLimitEvent`/`RateLimitInfo` (`claude_agent_sdk/types.py`), con
+    `status` (`allowed`/`allowed_warning`/`rejected`), `utilization` y
+    `resets_at` — emitida como mensaje más en el mismo stream que recorre
+    `AgentSDKProvider.run_agent` (ver ese módulo). Lo que falta no es la
+    señal sino decidir la reacción (reintentar, cortar la noche, avisar):
+    eso es alcance de T41/T44, no de T40. `AgentSDKProvider` no lanza esta
+    excepción todavía.
     """
 
 
 class LLMTimeout(LLMError):
     """El proveedor LLM no ha respondido dentro del tiempo permitido.
 
-    Sin consumidor en fase 1: la lanza `AgentSDKProvider` en T40.
+    La lanza `AgentSDKProvider` (T40) cuando `request.timeout_s` se agota
+    dentro de `asyncio.timeout`. Distinta de una cancelación externa
+    (`asyncio.CancelledError`, p. ej. el corte de `hard_stop` en T44):
+    `AgentSDKProvider` nunca traduce una cancelación a este error.
     """
