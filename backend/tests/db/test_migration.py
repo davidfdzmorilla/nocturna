@@ -6,6 +6,10 @@ la base de datos después de correr la migración de verdad.
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
+
+import pytest
 import sqlalchemy as sa
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -15,6 +19,10 @@ from sqlalchemy import inspect
 from nocturna.infrastructure.db.models import Base
 
 EXPECTED_TABLES = {"items", "readings", "findings", "runs", "agent_calls"}
+
+# Revisión anterior a "950738867fb9" (item failed status and agent call
+# prompt version): el `down_revision` declarado en esa migración.
+_REVISION_BEFORE_FAILED_STATUS = "a318e7fd86a9"
 
 
 def test_upgrade_head_crea_las_cinco_tablas(scratch_database_url):
@@ -155,7 +163,7 @@ def test_columnas_y_nulabilidad_de_agent_calls(scratch_database_url):
         "duration_ms",
         "status",
     }
-    expected_nullable = {"item_id"}
+    expected_nullable = {"item_id", "prompt_version"}
     assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:
         assert columns[name]["nullable"] is False, f"'{name}' debería ser NOT NULL"
@@ -183,6 +191,49 @@ def test_downgrade_base_deja_el_esquema_vacio_y_permite_upgrade_de_nuevo(scratch
         inspector = inspect(engine)
         tables = set(inspector.get_table_names()) - {"alembic_version"}
         assert tables == EXPECTED_TABLES
+    finally:
+        engine.dispose()
+
+
+def test_downgrade_con_item_en_estado_failed_falla_ruidosamente_y_no_lo_reescribe(
+    scratch_database_url,
+):
+    """La migración `950738867fb9` documenta que su `downgrade()` rechaza
+    bajar el esquema si hay filas `items.status = 'failed'`, en vez de
+    reescribirlas en silencio a otro estado: reabrir en silencio un ítem
+    dado por perdido le haría gastar presupuesto otra vez la noche
+    siguiente sin que nadie lo decidiera.
+    """
+    run_alembic_upgrade(scratch_database_url, "head")
+
+    engine = sa.create_engine(scratch_database_url)
+    item_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO items "
+                    "(id, source, external_id, title, abstract, categories, "
+                    "published_at, fetched_at, status) "
+                    "VALUES (:id, 'arxiv', 'ext-failed-1', 'título', 'abstract', "
+                    "ARRAY['astro-ph.EP'], :now, :now, 'failed')"
+                ),
+                {"id": item_id, "now": now},
+            )
+
+        with pytest.raises(RuntimeError, match="failed"):
+            run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE_FAILED_STATUS)
+
+        # La fila no se reescribió en silencio: sigue en 'failed', y el
+        # esquema sigue teniendo la columna que el downgrade iba a borrar.
+        with engine.connect() as connection:
+            status = connection.execute(
+                sa.text("SELECT status FROM items WHERE id = :id"), {"id": item_id}
+            ).scalar_one()
+            columns = {c["name"] for c in inspect(engine).get_columns("agent_calls")}
+        assert status == "failed"
+        assert "prompt_version" in columns
     finally:
         engine.dispose()
 

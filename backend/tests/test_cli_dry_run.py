@@ -48,6 +48,7 @@ editor_reserve_tokens = 60000
 weekly_reset_weekday = "{weekday}"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
+reader_estimated_tokens = 6000
 
 [limits]
 max_items_per_night = 40

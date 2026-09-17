@@ -36,6 +36,19 @@ class BudgetConfig(BaseModel):
     weekly_reset_weekday: _WeeklyResetWeekday
     weekly_reset_hour: int = Field(ge=0, le=23)
     reset_day_multiplier: float = Field(ge=1.0)
+    # reader_estimated_tokens: estimación de coste que `run-item`/T44 pasan a
+    # `BudgetGuard.authorize` para el Reader (`ReadItem.estimated_tokens`).
+    # No es una regla del guard (por eso no vive en `BudgetPolicy`, que
+    # describe el guard, no estimaciones por rol): es lo que se compara
+    # contra el presupuesto restante *antes* de saber el gasto real. Si el
+    # gasto real de una llamada supera esta estimación, `nightly_tokens` se
+    # rebasa en (real − estimado) de esa última llamada -- modo de fallo que
+    # ya tenía el diseño de T30 (`authorize` autoriza contra una estimación,
+    # nunca contra el gasto real, que no se conoce todavía); T41 no lo
+    # empeora, pero el valor de esta clave sí importa para el tamaño del
+    # rebase. Ver comentario en config/pipeline.toml. Valor a calibrar en
+    # T60, como item_timeout_s.
+    reader_estimated_tokens: int = Field(gt=0)
 
     @model_validator(mode="after")
     def _reserve_within_nightly_budget(self) -> "BudgetConfig":

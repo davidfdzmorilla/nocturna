@@ -230,6 +230,10 @@ class AgentCallRow(Base):
     status: Mapped[AgentCallStatus] = mapped_column(
         _str_enum(AgentCallStatus, "agent_call_status"), nullable=False
     )
+    # Nullable a propósito (T41): las filas del humo manual de T40 no llevan
+    # versión de prompt y no hay que inventársela. Sin índice: no se
+    # consulta por ella, se lee en informes de calibración de T60.
+    prompt_version: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
 
     __table_args__ = (
         sa.CheckConstraint("tokens_in >= 0", name="tokens_in_non_negative"),

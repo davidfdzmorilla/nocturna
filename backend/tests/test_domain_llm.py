@@ -63,6 +63,21 @@ def test_agent_result_es_frozen():
         result.tokens_in = 0
 
 
+# --- AgentRequest.system_prompt --------------------------------------------
+
+
+def test_agent_request_sin_system_prompt_usa_none_por_defecto():
+    request = _make_request()
+
+    assert request.system_prompt is None
+
+
+def test_agent_request_con_system_prompt_lo_conserva():
+    request = _make_request(system_prompt="Eres el Lector del pipeline Nocturna.")
+
+    assert request.system_prompt == "Eres el Lector del pipeline Nocturna."
+
+
 # --- Conformidad con el protocolo LLMProvider -----------------------------
 
 

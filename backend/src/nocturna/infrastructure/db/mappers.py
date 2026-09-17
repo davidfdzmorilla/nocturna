@@ -167,6 +167,7 @@ def agent_call_to_row(call: AgentCall) -> AgentCallRow:
         tokens_out=call.tokens_out,
         duration_ms=call.duration_ms,
         status=call.status,
+        prompt_version=call.prompt_version,
     )
 
 
@@ -181,4 +182,5 @@ def agent_call_from_row(row: AgentCallRow) -> AgentCall:
         tokens_out=row.tokens_out,
         duration_ms=row.duration_ms,
         status=row.status,
+        prompt_version=row.prompt_version,
     )

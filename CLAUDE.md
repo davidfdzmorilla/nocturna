@@ -69,11 +69,11 @@ El análisis corre contra la **suscripción Claude Max personal del autor**, no 
 
 ## Modelo de dominio (fase 1)
 
-- **Item**: unidad de ingesta. `source` (arxiv), `external_id`, `title`, `abstract`, `categories`, `published_at`, `fetched_at`, `status` (new / read / discarded / published).
+- **Item**: unidad de ingesta. `source` (arxiv), `external_id`, `title`, `abstract`, `categories`, `published_at`, `fetched_at`, `status` (new / read / discarded / published / failed).
 - **Reading**: salida del Lector para un Item. `summary`, `objects` (lista de nombres), `claims` (lista), `interest_score` (1–5), `tokens_in`, `tokens_out`, `model`.
 - **Finding** (hallazgo): lo que se publica. `item_id`, `type` (fase 1: `paper_explained`), `title`, `level_curious`, `level_amateur`, `level_technical`, `confidence` (0–1, asignado por Editor), `published_at`, `run_id`.
 - **Run**: una ejecución nocturna. `started_at`, `finished_at`, `status` (completed / partial / failed / killed), `budget_tokens`, `tokens_used`, `items_fetched`, `items_read`, `findings_published`, `notes`.
-- **AgentCall**: registro de cada llamada a un agente. `run_id`, `item_id` (nullable), `agent` (reader / popularizer / editor), `model`, `tokens_in`, `tokens_out`, `duration_ms`, `status`.
+- **AgentCall**: registro de cada llamada a un agente. `run_id`, `item_id` (nullable), `agent` (reader / popularizer / editor), `model`, `tokens_in`, `tokens_out`, `duration_ms`, `status`, `prompt_version` (nullable).
 
 DDD real, sin sobrearquitectura: entidades y casos de uso claros, repositorios como interfaces en `domain` implementadas en `infrastructure`. No inventar agregados, eventos ni bounded contexts que la fase 1 no necesita.
 

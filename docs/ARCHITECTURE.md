@@ -48,6 +48,18 @@ Implementada en T20. La lógica vive en `application/use_cases/ingest_arxiv.py` 
 
 `cli.py` es el composition root: único sitio que abre `unit_of_work`, instancia `ArxivClient` e invoca `IngestArxiv` dentro de la transacción. T20 introduce el subcomando `nocturna run-night --dry-run` que ingesta sin llamar a agentes.
 
+## Agente Reader (fase 1)
+
+Implementado en T41. Lee un `Item` con `status = new` y produce una `Reading` persistida. Definición programática en `application/agents/` con prompt de rol en `prompts/reader.md` (versionado).
+
+**Contrato de entrada y salida**: `AgentRequest` con abstract del paper envuelto en tags `<abstract>` (mitigación de inyección de prompt), rol `reader`, modelo de configuración (Sonnet). Salida esperada: JSON validado por Pydantic que mapea a `ReadingOutput` con campos `summary`, `objects` (lista de nombres de objetos astronómicos), `claims` (lista de afirmaciones), `interest_score` (1–5 entero). Salida en dominio: entidad `Reading`.
+
+**Parseo tolerante y reintento**: si el JSON no valida, se reintenta una sola vez dentro de la misma `ReadItem`. Si falla nuevamente, el ítem se marca `Item.FAILED` de forma terminal; se **no** reintenta al noche siguiente (el cliente MCP siempre da `FAILED`, no `NEW`). La validación de `Reading.__post_init__` rechaza cadenas en blanco, lo que quedó capturado solo por revisión manual en T41: `ReaderOutput` las aceptaba sin regla defensiva.
+
+**Patrón de transacciones**: `ReadItem` sigue el ciclo `BudgetGuard.authorize` + `timeout_for_call()` (leve, misma sesión) → `LLMProvider.run_agent` (sin transacción, 0 conexiones en espera) → **nueva sesión solo para `record_call`** (fila en `AgentCall`) → **tercera sesión para persistencia de `Reading` + actualización de `Item.status`**. Las tres unidades de trabajo están separadas: `record_call` nunca comparte transacción con `Reading`+`Item`. Razón: si compartieran, un `IntegrityError` en el insert de `readings` tiraría por rollback la fila de `AgentCall` de una llamada ya cobrada al presupuesto, causando fuga irrecuperable (se gastó y se olvidó). El reintento ocurre **fuera de `except`** (nunca dentro): si la primera llamada rechaza JSON, se crea un nuevo `AgentRequest` y se vuelve al `authorize` para la segunda, contando ambas como intentos y ambas en `AgentCall`. Timeout inaplicable al reintento (se cuenta en presupuesto, eso es todo).
+
+**Prompt de rol en `system_prompt`**: el abstract del paper va en el `prompt` estándar envuelto en `<abstract>`/`</abstract>` (escaped por Pydantic al serializar). El rol (instrucciones del Reader) viaja en un campo nuevo `AgentRequest.system_prompt` separado, que el `AgentSDKProvider` pasa como `system_prompt` a `ClaudeAgentOptions`, no mezclado con el abstract. Así se evita confundir instrucciones con datos de terceros.
+
 ## Control de gasto
 
 Implementado en T30 con `BudgetGuard` en `application/budget.py` y el reloj inyectable `domain/clock.py` (`infrastructure/clock.py`). **Toda llamada a un agente pasa por `BudgetGuard.authorize` antes de llegar a `LLMProvider`.**
@@ -72,9 +84,11 @@ Implementado en T40. La interfaz `LLMProvider` en `domain/llm.py` define el cont
 
 Fórmula: `tokens_in = max(usage.input_tokens, sum_model_usage_input)`, idem para output. **Por qué máximo**: `usage` reporta solo el modelo pedido; si el CLI usó modelos internos (Haiku para control de sesión, verificación), su gasto viaja en `model_usage` pero no en `usage`. Ambas fuentes reportan el mismo evento, así que máximo evita duplicación; suma sería contar dos veces.
 
-**Dato observado en prueba real (2026-09-17)**: una sola llamada al Reader gastó 523 tokens visibles en `usage` pero 1.475 reales (946 Haiku + 529 Sonnet), confirmado por aritmética de `total_cost_usd`. Subregistro de 35,9% sin este arreglo. Políticas de máximo y suma de `model_usage` viven en todos los sitios de extracción de tokens (T40 implementó, T41–T44 heredan).
+**Datos observados en pruebas reales (2026-09-17)**: T40 registró una llamada con 523 tokens en `usage` pero 1.475 reales (946 Haiku + 529 Sonnet), subregistro de 35,9%. T41 registró `input_tokens: 2` + `cache_creation: 1269` + `output_tokens: 442` = 2.796 contabilizados; sin caché habrían sido 444, subregistro de 6,3×. Ambas ejecutan la política de máximo componente a componente (ADR 0007). Políticas de máximo y suma de `model_usage` viven en todos los sitios de extracción de tokens (T40 implementó, T41–T44 heredan).
 
 `LLMError`/`LLMTimeout` transportan `tokens_in` y `tokens_out` ya conocidos (extraídos con este máximo); quien captura es responsable de contabilizar. `CancelledError` viene con atributos tras el primer `await`, pero un segundo `await` sobre cancelación externa puede dar un `CancelledError` nuevo **sin** atributos — T44 debe usar `getattr(exc, "tokens_in", 0)`. Sin `ResultMessage` (timeout de socket): no hay fuente de verdad, se contabiliza cero (fuga documentada en TECHNICAL_DEBT.md, acotada a ~600–800k tokens/noche en escenario de arXiv caído).
+
+**Semántica de cancelación al contabilizar**: si `record_call` falla durante una cancelación por `hard_stop`, la misma instancia de `CancelledError` se propaga y su fallo se traga con `logging.warning`. Si la propia contabilización levantara una **nueva** `CancelledError` (distinta instancia del mismo tipo), se propaga la nueva y se pierden los tokens adjuntos a la original. El corte de las 04:45 sigue funcionando en ambos casos (T44 cancela), lo que varía es si se conserva en base de datos el gasto de esa última llamada. T41–T43 usan `try/except CancelledError` para capturar, contabilizar y relanzar la misma instancia; el tratamiento es defensivo.
 
 **Cifras económicas** (por qué `setting_sources=[]`, `tools=[]`, `skills=[]` son no negociables):
 
@@ -98,11 +112,11 @@ Las decisiones arquitectónicas (fronteras transaccionales, caché de gasto, ín
 
 Cinco entidades inmutables o mutables con guardas:
 
-- **Item** (mutable): unidad de ingesta (abstract de arXiv). Estados terminales: `new → read → {discarded, published}`. Ningún estado permite volver atrás; repetir la misma transición lanza `InvalidTransition`. Solo se asigna `status` a través de métodos `mark_read()`, `discard()`, `publish()`.
+- **Item** (mutable): unidad de ingesta (abstract de arXiv). Estados: `new → {read, failed}` (ambos terminales). `read → {discarded, published}` (también terminal). `failed` se alcanza cuando el JSON de salida del Reader no valida dos intentos seguidos. Ningún estado permite volver atrás; repetir la misma transición lanza `InvalidTransition`. Solo se asigna `status` a través de métodos `mark_read()`, `fail()`, `discard()`, `publish()`.
 - **Reading** (inmutable): salida del Reader para un Item. Contiene `summary`, `objects`, `claims`, `interest_score` (1–5), tokens y modelo. No tiene `created_at`: es un hecho, no una entidad con ciclo de vida.
 - **Finding** (mutable): candidato de hallazgo con `title` y tres niveles de lectura. Solo `confidence` y `published_at` se asignan en el método `publish()`, juntos o no en absoluto. Antes de `publish()`, ambos son `None`.
 - **Run** (mutable): una ejecución nocturna. Estados: `running` → {`completed`, `partial`, `failed`, `killed`}. El campo `budget_tokens` es el presupuesto efectivo (ya con el multiplicador del día). Los contadores `items_fetched`, `items_read`, `findings_published` son monótonos no decrecientes (se permite asignar un valor ≥ al actual, nunca menor). Solo se asignan `status`, `finished_at`, `tokens_used` a través del método `finish()` y `record_agent_call()`.
-- **AgentCall** (inmutable): registro de una llamada ya ocurrida, con `tokens_in`, `tokens_out`, `duration_ms` y `status` (ok / invalid_output / error / timeout).
+- **AgentCall** (inmutable): registro de una llamada ya ocurrida, con `tokens_in`, `tokens_out`, `duration_ms`, `status` (ok / invalid_output / error / timeout) y `prompt_version` (cadena de versión del prompt usado, para trazabilidad futura).
 
 **Implementación en dataclasses (estándar de Python)**, no Pydantic: las reglas de negocio fallan con excepciones de dominio (`InvalidTransition`, `InterestScoreOutOfRange`), no con errores de validación. Los `__post_init__` y `__setattr__` protegen invariantes; quien necesita cambiar un campo guarded usa `object.__setattr__` internamente. Todos los `datetime` son *aware* (con `tzinfo`); el dominio no convierte zonas horarias, solo rechaza naive.
 

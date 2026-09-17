@@ -114,15 +114,20 @@ class LLMError(DomainError):
 class LLMRateLimited(LLMError):
     """El proveedor LLM ha rechazado la llamada por límite de tasa.
 
-    Sin emisor todavía, pero no por falta de señal del SDK: `claude-agent-sdk`
-    (0.2.153, versión instalada en T40) sí exporta señal de límite de tasa —
-    `RateLimitEvent`/`RateLimitInfo` (`claude_agent_sdk/types.py`), con
-    `status` (`allowed`/`allowed_warning`/`rejected`), `utilization` y
-    `resets_at` — emitida como mensaje más en el mismo stream que recorre
-    `AgentSDKProvider.run_agent` (ver ese módulo). Lo que falta no es la
-    señal sino decidir la reacción (reintentar, cortar la noche, avisar):
-    eso es alcance de T41/T44, no de T40. `AgentSDKProvider` no lanza esta
-    excepción todavía.
+    Ya con emisor y consumidor: `AgentSDKProvider` (T40, `_llm_error_class`)
+    la lanza cuando el `api_error_status` que informa el CLI corresponde a
+    un límite de tasa -- `claude-agent-sdk` (0.2.153, versión instalada en
+    T40) exporta señal de límite de tasa, `RateLimitEvent`/`RateLimitInfo`
+    (`claude_agent_sdk/types.py`), con `status`
+    (`allowed`/`allowed_warning`/`rejected`), `utilization` y `resets_at`,
+    emitida como mensaje más en el mismo stream que recorre
+    `AgentSDKProvider.run_agent` (ver ese módulo). `ReadItem` (T41,
+    `application/use_cases/read_item.py`) es el primer consumidor: la
+    captura antes que `LLMError` (de la que es subclase) para reaccionar
+    distinto -- contabiliza el gasto ya incurrido y corta el intento sin
+    reintentar, porque un límite de tasa es señal de que la noche debe
+    terminar, no un fallo transitorio de un ítem concreto
+    (`budget-guard-review` § 6).
     """
 
 

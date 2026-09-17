@@ -80,11 +80,13 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Cerrada: 2026-09-17**
 
 ### T41 · Agente Reader
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T40, T20
 - **Alcance**: prompt en `prompts/reader.md`, esquema Pydantic de salida (`Reading`), caso de uso `ReadItem` que pasa por `BudgetGuard`, valida JSON, reintenta una vez, marca `failed` si vuelve a fallar. Una conversación por ítem.
 - **Hecho cuando**: `nocturna run-item <id>` produce una `Reading` persistida. Tests con `FakeLLMProvider` para el camino feliz, JSON inválido y presupuesto agotado.
-- **Nota crítica**: T40 demuestra que el proveedor extrae tokens correctamente en aislamiento. T41 debe verificar **la cadena completa** `BudgetGuard.authorize` → `run_agent` → persistencia de `AgentCall` intacta. Eso requiere test con orquestador real (no `FakeLLMProvider`) que llame al proveedor, gaste presupuesto, y compruebe que la fila de `AgentCall` refleja el gasto real. Es condición **necesaria y no suficiente** de que `BudgetGuard` funcione. Obligatorio antes de T42.
+- **Ejecución completada**: 2026-09-17 · 567 passed · Dos revisiones completadas · Ronda 1 rechazada: reintento interno de validación JSON se saltaba `authorize`, permitiendo gasto no contabilizado; se arregló con reintento manual en `ReadItem`. Ronda 2 aprobada. Bloqueante detectado por revisión: `ReaderOutput` aceptaba cadenas en blanco que `Reading.__post_init__` rechazaba, causando `InvariantViolation` sin `AgentCall` ni tokens contabilizados, fuga permanente cada noche. El ítem volvía a `next_unread` sin saber el motivo real. Arreglado con regla defensiva explícita.
+- **Humo manual ejecutado**: 2026-09-17 · Suite: 571 passed, 2 deselected. Volcado real del Reader: `input_tokens: 2`, `cache_creation_input_tokens: 1269`, `cache_read_input_tokens: 0`, `output_tokens: 442`. Contabilizado: 2.796 tokens. Sin caché, solo `input_tokens: 2 + output: 442 = 444`, subregistro de 6,3×. **Valida ADR 0007: máximo componente a componente es correcto con datos reales.** Prompt: entrada unitaria (abstract 1.269 tokens de caché). Reintento: ninguno. `interest_score: 4` (binario de estrella de neutrones / enana blanca, período de 83 minutos). `RateLimitEvent` presente en stream, sin incidencia. Test reproducible: ambas ejecuciones del humo devuelven idénticas cifras.
+- **Cerrada: 2026-09-17** · Reader con humo real validó contabilidad de tokens; máximo componente a componente es necesario incluso con datos distintos a T40.
 
 ### T42 · Agente Popularizer
 - **Estado**: pending
@@ -128,6 +130,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Estado**: pending
 - **Depende de**: T44, T51
 - **Alcance**: el autor ejecuta `run-night` a mano (o con `cron` local) durante dos semanas. Cada mañana anota en `docs/CALIBRACION.md`: tokens del `Run`, porcentaje semanal consumido según Settings > Usage, ítems leídos, hallazgos publicados, calidad percibida. Al final se ajusta `nightly_tokens` para acercarse al 30% semanal y se decide si el `interest_score >= 4` es el umbral correcto.
+- **Nota**: `READER_PROMPT_VERSION` es `reader-v2` y el abstract va envuelto en `<abstract>`/`</abstract>`. Eso rompe la comparabilidad de datos de calibración frente a filas previas de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.).
 - **Hecho cuando**: `pipeline.toml` tiene valores calibrados con datos reales y un ADR documenta el criterio.
 
 ### T61 · Retrospectiva y plan de fase 2

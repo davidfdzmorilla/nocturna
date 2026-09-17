@@ -24,7 +24,24 @@ class AgentRole(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AgentRequest:
-    """Petición a un agente: todo lo que necesita el proveedor para ejecutarla."""
+    """Petición a un agente: todo lo que necesita el proveedor para ejecutarla.
+
+    `system_prompt` es opcional y va al final para no romper construcciones
+    existentes (el dataclass es `frozen=True, slots=True`, así que un campo
+    nuevo con default al final es la única forma aditiva de extenderlo).
+
+    Existe porque mezclar el prompt de rol (instrucciones fijas del Reader/
+    Popularizer/Editor) con el prompt de usuario (que lleva el abstract, texto
+    de un tercero no confiable) en un único bloque `prompt` es la superficie
+    de inyección más ancha disponible: cualquier abstract que incluya algo
+    con forma de instrucción compite en el mismo canal que las instrucciones
+    reales del agente. Separar rol/instrucciones en `system_prompt` y datos
+    del ítem en `prompt` es la mitigación más barata que hay. El paquete
+    instalado (`claude-agent-sdk` 0.2.153) confirma que un `str` plano en
+    `ClaudeAgentOptions.system_prompt` sustituye el system prompt entero del
+    CLI (no lo añade a uno por defecto), que es justo el comportamiento que
+    se quiere aquí.
+    """
 
     role: AgentRole
     model: str
@@ -32,6 +49,7 @@ class AgentRequest:
     max_turns: int
     timeout_s: int
     item_id: UUID | None = None
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

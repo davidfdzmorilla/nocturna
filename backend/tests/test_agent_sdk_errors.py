@@ -22,10 +22,10 @@ from helpers.sdk_doubles import (
     make_result_message,
 )
 
-from nocturna.domain.errors import LLMError, LLMTimeout
+from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRequest, AgentRole
 from nocturna.infrastructure.llm import agent_sdk_provider
-from nocturna.infrastructure.llm.agent_sdk_provider import AgentSDKProvider
+from nocturna.infrastructure.llm.agent_sdk_provider import AgentSDKProvider, _llm_error_class
 
 
 def _request(**overrides: object) -> AgentRequest:
@@ -640,3 +640,66 @@ async def test_cancelled_error_externo_antes_de_cualquier_result_message_lleva_t
 
     assert excinfo.value.tokens_in == 0
     assert excinfo.value.tokens_out == 0
+
+
+# --- _llm_error_class: elección de excepción según api_error_status --------
+
+
+def test_llm_error_class_con_429_devuelve_llm_rate_limited():
+    assert _llm_error_class(429) is LLMRateLimited
+
+
+def test_llm_error_class_con_500_devuelve_llm_error_a_secas():
+    assert _llm_error_class(500) is LLMError
+
+
+def test_llm_error_class_con_none_devuelve_llm_error_a_secas():
+    assert _llm_error_class(None) is LLMError
+
+
+@pytest.mark.anyio
+async def test_result_error_con_api_error_status_429_lanza_llm_rate_limited(monkeypatch):
+    """Integración: un fallo de `ResultError` con `api_error_status=429` debe
+    propagarse como `LLMRateLimited`, no como `LLMError` a secas -- para que
+    T44 pueda distinguir un límite de tasa de cualquier otro fallo de API y
+    cortar la noche sin reintentar.
+    """
+    from claude_agent_sdk import ResultError
+
+    result_error = ResultError(
+        "límite de tasa alcanzado",
+        data={"api_error_status": 429, "usage": {"input_tokens": 30, "output_tokens": 2}},
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(raise_after=result_error), raising=True
+    )
+    provider = AgentSDKProvider()
+
+    with pytest.raises(LLMRateLimited) as excinfo:
+        await provider.run_agent(_request())
+
+    assert excinfo.value.api_error_status == 429
+
+
+@pytest.mark.anyio
+async def test_llm_rate_limited_sigue_siendo_capturable_como_llm_error(monkeypatch):
+    """`LLMRateLimited` es subclase de `LLMError`: el consumidor del paso 6
+    (T41-siguiente) ordena sus `except` contando con que un `except LLMError`
+    también atrape un límite de tasa, no solo `LLMError` a secas.
+    """
+    from claude_agent_sdk import ResultError
+
+    result_error = ResultError(
+        "límite de tasa alcanzado",
+        data={"api_error_status": 429, "usage": {"input_tokens": 30, "output_tokens": 2}},
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(raise_after=result_error), raising=True
+    )
+    provider = AgentSDKProvider()
+
+    try:
+        await provider.run_agent(_request())
+        pytest.fail("se esperaba que run_agent lanzara una excepción")
+    except LLMError as exc:
+        assert isinstance(exc, LLMRateLimited)

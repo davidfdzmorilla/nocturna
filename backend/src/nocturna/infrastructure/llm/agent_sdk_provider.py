@@ -106,10 +106,30 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultError, ResultMessage, query
 
-from nocturna.domain.errors import LLMError, LLMTimeout
+from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRequest, AgentResult
 
 _logger = logging.getLogger(__name__)
+
+#: Código HTTP que el CLI informa como `api_error_status` cuando la llamada
+#: se rechaza por límite de tasa de la suscripción.
+RATE_LIMIT_STATUS = 429
+
+
+def _llm_error_class(status: int | None) -> type[LLMError]:
+    """Elige la excepción a lanzar según `api_error_status`.
+
+    `LLMRateLimited` (subclase de `LLMError`, `domain/errors.py`) señala un
+    límite de tasa (`status == 429`); cualquier otro código, o su ausencia,
+    usa `LLMError` sin más. Quien capture `LLMError` sigue atrapando ambas
+    (`budget-guard-review` § 6: un límite de tasa termina la noche, no se
+    reintenta; esa reacción es del consumidor, T44 — este proveedor solo da
+    la señal tipada).
+    """
+    if status == RATE_LIMIT_STATUS:
+        return LLMRateLimited
+    return LLMError
+
 
 #: Variables de entorno que este proveedor nunca tolera. Solo
 #: `ANTHROPIC_API_KEY`: este proyecto corre contra la suscripción Claude Max
@@ -176,6 +196,19 @@ def build_options(
     - `model` y `max_turns` salen de `request`, nunca hardcodeados ni
       releídos de `pipeline.toml` aquí: ese mapeo rol → modelo/turnos ya lo
       hizo quien construyó `AgentRequest` (T41-T43).
+    - `system_prompt=request.system_prompt`, tal cual, sin transformar.
+      Verificado contra el paquete instalado
+      (`_internal/transport/subprocess_cli.py`,
+      `SubprocessCLITransport._build_command`): con `request.system_prompt
+      is None` (el default de `AgentRequest`) el argv resultante es **byte a
+      byte idéntico** al de omitir el parámetro por completo —
+      `ClaudeAgentOptions.system_prompt` ya tiene `None` como default en el
+      SDK, así que pasarlo explícito no cambia nada; en ambos casos el CLI
+      recibe `--system-prompt ""`, no `--system-prompt` ausente. Con un
+      `str`, el CLI recibe `--system-prompt <str>`, que sustituye el system
+      prompt entero (no lo añade a un preset): así separan
+      `application/agents/` el prompt de rol del prompt de usuario (el
+      abstract, texto no confiable) sin mezclarlos en un único bloque.
     - `tools=[]` **siempre explícito**, nunca omitido ni confundido con
       `allowed_tools=[]`. Verificado en
       `_internal/transport/subprocess_cli.py` del paquete instalado:
@@ -252,6 +285,7 @@ def build_options(
         strict_mcp_config=True,
         permission_mode="default",
         setting_sources=[],
+        system_prompt=request.system_prompt,
     )
 
 
@@ -429,7 +463,15 @@ class AgentSDKProvider:
           lo informa, y también viaja como atributo
           `LLMError.api_error_status` (no solo en el texto: estas
           excepciones "se capturan por su nombre, no por texto",
-          `domain/errors.py`).
+          `domain/errors.py`). Cuando `api_error_status == 429` la excepción
+          lanzada es `LLMRateLimited` (subclase de `LLMError`,
+          `_llm_error_class`), no `LLMError` a secas: sigue siendo
+          atrapable por `except LLMError`, pero quien orquesta (T44) puede
+          distinguir un límite de tasa de cualquier otro fallo de API y
+          cortar la noche sin reintentar (`budget-guard-review` § 6), en vez
+          de tratarlo como el reintento habitual de JSON inválido. Este
+          mismo mapeo se aplica también en la rama `except ResultError` más
+          abajo, con `exc.api_error_status`.
         - `ResultMessage` de éxito (`subtype == "success"`,
           `is_error=False`) cuyo `terminal_reason` no es `None` ni
           `"completed"` (p. ej. `"max_turns"`): el CLI lo cuenta como
@@ -619,7 +661,7 @@ class AgentSDKProvider:
                 if exc.api_error_status is not None
                 else ""
             )
-            raise LLMError(
+            raise _llm_error_class(exc.api_error_status)(
                 f"el agente '{request.role.value}' falló: {exc}{status_suffix}",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
@@ -678,7 +720,7 @@ class AgentSDKProvider:
                 if last_result.api_error_status is not None
                 else ""
             )
-            raise LLMError(
+            raise _llm_error_class(last_result.api_error_status)(
                 f"el agente '{request.role.value}' terminó con "
                 f"subtype='{last_result.subtype}', is_error={last_result.is_error}"
                 f"{status_suffix}",

@@ -34,7 +34,7 @@ Dependencias solo hacia dentro: `api → application → domain`, `infrastructur
 
 ## Unidad de trabajo
 
-- Una sesión SQLAlchemy por ítem procesado, commit al terminar el ítem. `AgentCall` y la actualización de `Run.tokens_used` van en la misma transacción.
+- Patrón de tres transacciones por llamada a agente: `(1) authorize + timeout_for_call` leve en la misma sesión; `(2) run_agent` fuera de toda transacción (retiene la conexión 0 segundos durante la espera); `(3) record_call + persistencia de Reading/Finding` en una tercera sesión. ADR 0006 § 2. Ninguna transacción retiene conexión durante `item_timeout_s = 180 s` esperando al modelo.
 
 ## Qué es sobrearquitectura aquí (y se rechaza)
 

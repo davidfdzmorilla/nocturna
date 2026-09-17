@@ -11,6 +11,16 @@ editor_reserve_tokens = 60000
 weekly_reset_weekday = "monday"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
+# reader_estimated_tokens: estimación de coste que se compara contra el
+# presupuesto restante antes de llamar al Reader (`BudgetGuard.authorize`),
+# no el gasto real, que no se conoce hasta después de la llamada. Composición
+# aproximada (T41): prompt de rol (~290 tokens medidos) + abstract medio
+# (~350) + el gasto lateral de Haiku que T40 midió por llamada (~950) +
+# salida (~600) ≈ 2.200, doblado por margen ≈ 6.000. Si el gasto real de una
+# llamada supera esta estimación, nightly_tokens se rebasa en (real −
+# estimado) de esa última llamada: modo de fallo que ya tenía el diseño de
+# T30, no uno nuevo de T41. Valor a calibrar en T60, como item_timeout_s.
+reader_estimated_tokens = 6000
 
 [limits]
 # max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").

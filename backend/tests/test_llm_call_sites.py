@@ -48,12 +48,16 @@ siga bloqueando la llamada real -- el objetivo es que ese import quede
 señalado como una decisión consciente (ampliar la lista de sitios legítimos
 aquí) y no un descuido silencioso.
 
-También congela, para T41-T43, que hoy `run_agent(` no se llama desde
-ningún sitio de `src/` fuera de `infrastructure/llm/`: el valor no es que
-esa cifra vaya a seguir siendo cero -- el orquestador de T41 tendrá que
-llamarlo --, sino que la primera vez que aparezca fuera de esa carpeta sea
-una decisión consciente que rompa este test y lo obligue a actualizarse
-explícitamente, no un descuido.
+También congela, para T41-T43, QUIÉN llama a `run_agent(` fuera de
+`infrastructure/llm/`: hasta T41 el valor era "cero llamantes"; desde T41
+es "exactamente los de `ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM"
+(`application/use_cases/read_item.py`, el primero). El valor no es la cifra
+en sí -- iba a crecer, el orquestador tenía que llamarlo --, sino que
+cualquier llamante nuevo (T42, T43) que no esté ya en esa lista rompa este
+test y obligue a una actualización explícita, no a un descuido. Un segundo
+test, `test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize`,
+añade una regla AST débil (presencia en el fichero, no orden ni flujo) para
+que ningún llamante nuevo se salte `BudgetGuard.authorize()` en silencio.
 """
 
 import ast
@@ -63,6 +67,21 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = BACKEND_ROOT / "src" / "nocturna"
 TESTS_DIR = BACKEND_ROOT / "tests"
 AGENT_SDK_PROVIDER_PATH = SRC_DIR / "infrastructure" / "llm" / "agent_sdk_provider.py"
+
+#: Sitios permitidos para llamar a `run_agent()` fuera de `infrastructure/llm/`
+#: (T41 en adelante, ver `test_run_agent_no_se_llama_fuera_de_infrastructure_llm`
+#: más abajo). `ReadItem` (T41, `application/use_cases/read_item.py`) es el
+#: primero: pasa por `BudgetGuard.authorize` antes de construir el
+#: `AgentRequest`, tal y como exige ADR 0006 § 2. `PopularizeReading` (T42) y
+#: `EditNight` (T43) añadirán el suyo cuando les toque -- cada adición a este
+#: conjunto es la "decisión consciente" que este test exige: no basta con que
+#: el test deje de fallar, hay que entender y anotar por qué el nuevo sitio es
+#: seguro antes de ampliarlo.
+ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM = frozenset(
+    {
+        SRC_DIR / "application" / "use_cases" / "read_item.py",
+    }
+)
 
 FORBIDDEN_IN_AGENT_SDK_PROVIDER = (
     "nocturna.application",
@@ -129,6 +148,27 @@ def _run_agent_call_sites(path: Path) -> list[str]:
     return sites
 
 
+def _authorize_call_sites(path: Path) -> list[str]:
+    """Igual que `_run_agent_call_sites`, pero para `BudgetGuard.authorize(`.
+
+    Existe solo para la regla débil de
+    `test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize`: no
+    distingue `guard.authorize(...)` de cualquier otro método llamado
+    `authorize` que pudiera existir en el árbol -- no hace falta más
+    precisión para lo que esa prueba comprueba (presencia en el fichero, no
+    identidad del símbolo ni orden de ejecución).
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    sites: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name == "authorize":
+                sites.append(f"{path}:{node.lineno}")
+    return sites
+
+
 def _module_imports(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
     modules: list[str] = []
@@ -153,19 +193,108 @@ def test_query_de_claude_agent_sdk_se_importa_en_un_unico_fichero():
     )
 
 
-def test_run_agent_no_se_llama_fuera_de_infrastructure_llm():
+def test_run_agent_no_se_llama_fuera_de_infrastructure_llm_salvo_los_sitios_permitidos():
+    """Congela QUIÉN llama a `run_agent()` fuera de `infrastructure/llm/`, no
+    solo que la cifra sea cero.
+
+    Hasta T41 esta prueba exigía "cero llamantes"; T41 (`ReadItem`) es el
+    primero en llamar a `run_agent()` desde `application/`, exactamente
+    donde ADR 0006 § 2 exige que viva esa llamada -- una decisión
+    consciente, no un descuido, así que el test se actualiza para reflejarla
+    en vez de desactivarse. A partir de ahora comprueba dos cosas
+    simétricas:
+
+    1. Ningún sitio fuera de `infrastructure/llm/` que NO esté en
+       `ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM` puede llamar a
+       `run_agent()`: un segundo llamante nuevo (T42, T43) pone esto en
+       rojo hasta que se añada a la lista a propósito.
+    2. Todo fichero de esa lista debe llamar a `run_agent()` de verdad: si
+       `read_item.py` dejara de hacerlo, la entrada quedaría obsoleta y
+       debería quitarse explícitamente, no arrastrarse sin uso.
+    """
     infrastructure_llm_dir = SRC_DIR / "infrastructure" / "llm"
-    sites: list[str] = []
+    unexpected_sites: list[str] = []
     for path in _python_files():
         if infrastructure_llm_dir in path.parents:
             continue
-        sites.extend(_run_agent_call_sites(path))
+        sites = _run_agent_call_sites(path)
+        if sites and path not in ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM:
+            unexpected_sites.extend(sites)
 
-    assert not sites, (
-        "run_agent() llamado fuera de infrastructure/llm/ por primera vez: "
-        "esto es esperado a partir de T41 (el orquestador), pero es una "
-        "decisión consciente, no un descuido -- actualiza este test para "
-        f"reflejarlo. Sitios encontrados: {sites}"
+    assert not unexpected_sites, (
+        "run_agent() llamado fuera de infrastructure/llm/ desde un fichero no "
+        "incluido en ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM: esto es "
+        "esperado según vayan llegando T42/T43, pero es una decisión "
+        "consciente -- añade el fichero a esa lista a la vez que revisas por "
+        f"qué es seguro. Sitios encontrados: {unexpected_sites}"
+    )
+
+    stale_allowlist_entries = [
+        str(path)
+        for path in ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM
+        if not _run_agent_call_sites(path)
+    ]
+    assert not stale_allowlist_entries, (
+        "fichero(s) en ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM que ya no "
+        f"llaman a run_agent(): {stale_allowlist_entries} -- si ya no lo "
+        "necesitan, quítalos de la lista explícitamente en vez de dejarlos "
+        "sin uso"
+    )
+
+
+def test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize():
+    """Regla AST deliberadamente débil: no prueba orden ni flujo, solo que
+    todo fichero que invoca `LLMProvider.run_agent()` invoca también
+    `BudgetGuard.authorize()` en algún punto del mismo fichero.
+
+    No demuestra que `authorize()` proteja de verdad a esa llamada concreta
+    a `run_agent()` -- eso requeriría seguir el flujo de control, fuera del
+    alcance de una regla AST simple -- pero convierte "se me olvidó la
+    puerta" (un caso de uso nuevo que llama al proveedor sin pasar antes por
+    el guard) en un fallo visible en vez de un descuido silencioso, que es
+    justo el hueco que la revisión de T40 señaló sobre
+    `test_run_agent_no_se_llama_fuera_de_infrastructure_llm`: ese test cuenta
+    llamantes, pero nunca comprobaba que ataran `run_agent` a `authorize`.
+
+    **Un alias evade esta regla por completo -- comprobado, no solo
+    hipotético.** `_run_agent_call_sites`/`_authorize_call_sites` solo miran
+    `ast.Call` cuyo `func` termine literalmente en el atributo `run_agent`/
+    `authorize` (`node.func.attr == "run_agent"`, o un `Name` con ese `id`).
+    Un caso de uso que haga `call = self._provider.run_agent` (una
+    `ast.Attribute` fuera de cualquier `ast.Call`) y más tarde invoque
+    `call(request)` nunca aparece en `_run_agent_call_sites`: el nodo de
+    llamada tiene `func = Name(id="call")`, no `Attribute(attr="run_agent")`.
+    Ese fichero queda con `sites == []`, así que ni siquiera entra en la
+    comprobación de "sitios no permitidos" de
+    `test_run_agent_no_se_llama_fuera_de_infrastructure_llm`, y esta prueba
+    tampoco lo exige llamar a `authorize()` -- se demostró con un caso de uso
+    real, sin `authorize()` en ningún punto del fichero: la suite entera
+    (28 tests de este módulo) sigue en verde. **T42/T43 no deben leer que
+    esta prueba pasó como garantía de que su caso de uso respeta
+    `BudgetGuard`**: solo lo es si el llamante escribe `self._provider.run_agent(...)`
+    o `provider.run_agent(...)` de forma literal, como hace `read_item.py` hoy.
+
+    Hoy el único llamante de `run_agent()` en `backend/src` es
+    `application/use_cases/read_item.py` (T41), que sí llama a
+    `w.guard.authorize(...)` antes de construir el `AgentRequest` -- sin
+    falsos positivos conocidos: `infrastructure/llm/agent_sdk_provider.py`
+    solo DEFINE `run_agent` (no lo invoca), así que no lo alcanza esta
+    regla. T42 (`PopularizeReading`) y T43 (`EditNight`) tendrán que hacer lo
+    mismo en su propio fichero para no poner esto en rojo -- y, dado el
+    hueco de arriba, revisar a mano (no solo confiar en este test) que su
+    llamada a `run_agent` no pasa por un alias que la esconda.
+    """
+    offenders = [
+        str(path)
+        for path in _python_files()
+        if _run_agent_call_sites(path) and not _authorize_call_sites(path)
+    ]
+
+    assert not offenders, (
+        "fichero(s) que llaman a run_agent() sin llamar a authorize() en el mismo "
+        "fichero (regla débil a propósito: no comprueba orden ni que authorize() "
+        "proteja de verdad esta llamada concreta, solo presencia en el fichero -- "
+        f"ver el docstring de este test): {offenders}"
     )
 
 

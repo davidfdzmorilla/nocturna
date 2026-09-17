@@ -362,6 +362,7 @@ def test_item_status_contiene_exactamente_los_valores_esperados():
         "read",
         "discarded",
         "published",
+        "failed",
     }
 
 
@@ -394,8 +395,50 @@ def test_finding_type_contiene_exactamente_los_valores_esperados():
 
 def test_item_transitions_tiene_exactamente_las_transiciones_esperadas():
     assert _ITEM_TRANSITIONS == {
-        ItemStatus.NEW: frozenset({ItemStatus.READ}),
+        ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED}),
         ItemStatus.READ: frozenset({ItemStatus.DISCARDED, ItemStatus.PUBLISHED}),
         ItemStatus.DISCARDED: frozenset(),
         ItemStatus.PUBLISHED: frozenset(),
+        ItemStatus.FAILED: frozenset(),
     }
+
+
+# --- Item.mark_failed(): NEW -> FAILED, terminal --------------------------
+
+
+def test_mark_failed_lleva_de_new_a_failed():
+    item = _make_item()
+
+    item.mark_failed()
+
+    assert item.status == ItemStatus.FAILED
+
+
+def test_read_a_failed_es_ilegal():
+    item = _make_item()
+    item.mark_read()
+
+    with pytest.raises(InvalidTransition):
+        item.mark_failed()
+
+
+@pytest.mark.parametrize("action_name", ["mark_read", "discard", "publish", "mark_failed"])
+def test_desde_failed_cualquier_transicion_falla(action_name):
+    item = _make_item(status=ItemStatus.FAILED)
+
+    with pytest.raises(InvalidTransition):
+        getattr(item, action_name)()
+
+
+def test_agent_call_prompt_version_por_defecto_es_none():
+    run = _make_run()
+    call = _make_agent_call(run.id)
+
+    assert call.prompt_version is None
+
+
+def test_agent_call_prompt_version_construible_con_valor():
+    run = _make_run()
+    call = _make_agent_call(run.id, prompt_version="reader-v1")
+
+    assert call.prompt_version == "reader-v1"

@@ -59,6 +59,23 @@ FORBIDDEN_APPLICATION_MODULES = (
     "pydantic",
 )
 
+# `application/agents/` es la única excepción al veto de `pydantic` de
+# arriba, aprobada explícitamente por el autor para T41. El motivo original
+# del veto (T30, revisión de `BudgetPolicy`) es "no repetir una validación
+# que ya ocurrió en `infrastructure/config.py`": el TOML ya se valida una
+# vez al cargarlo, así que `application/budget.py` no necesita una segunda
+# capa de validación sobre datos que ya son de confianza. Ese motivo no
+# cubre `application/agents/reader_output.py`: la salida cruda de un agente
+# LLM no se valida en NINGÚN otro punto del pipeline -- ni antes ni después
+# -- así que aquí sí hace falta una primera (y única) validación real, y
+# `CLAUDE.md` (sección "Agentes (fase 1)": "Salida siempre en JSON validado
+# con Pydantic") y `ARCHITECTURE.md:109` piden Pydantic exactamente para
+# esto. La excepción es del subpaquete `application/agents/`, no de
+# `application/` entero: cualquier otro módulo de `application/` (empezando
+# por `budget.py` o un futuro caso de uso) sigue vetado, y así lo comprueba
+# `test_pydantic_solo_se_permite_dentro_de_application_agents` más abajo.
+APPLICATION_MODULES_ALLOWING_PYDANTIC = ("nocturna.application.agents",)
+
 
 def _forbidden_root(module_name: str, forbidden_modules: tuple[str, ...]) -> str | None:
     for forbidden in forbidden_modules:
@@ -126,12 +143,59 @@ def test_fichero_de_domain_no_importa_infraestructura_ni_sdk(path):
     assert not violations, "imports prohibidos:\n" + "\n".join(violations)
 
 
+def _is_under(path: Path, package_dotted: str) -> bool:
+    """`True` si `path` vive dentro del subpaquete `package_dotted` (p. ej.
+    `"nocturna.application.agents"`) relativo a `APPLICATION_DIR`.
+    """
+    package_relative = Path(*package_dotted.split(".")[2:])  # sin "nocturna.application"
+    package_dir = APPLICATION_DIR / package_relative
+    return package_dir == path or package_dir in path.parents
+
+
+def _forbidden_modules_for(path: Path) -> tuple[str, ...]:
+    if any(_is_under(path, allowed) for allowed in APPLICATION_MODULES_ALLOWING_PYDANTIC):
+        return tuple(m for m in FORBIDDEN_APPLICATION_MODULES if m != "pydantic")
+    return FORBIDDEN_APPLICATION_MODULES
+
+
 @pytest.mark.parametrize(
     "path",
     _application_files(),
     ids=[p.relative_to(APPLICATION_DIR).as_posix() for p in _application_files()],
 )
 def test_fichero_de_application_no_importa_infraestructura_ni_sdk_ni_httpx(path):
-    violations = _find_forbidden_imports(path, FORBIDDEN_APPLICATION_MODULES)
+    violations = _find_forbidden_imports(path, _forbidden_modules_for(path))
 
     assert not violations, "imports prohibidos:\n" + "\n".join(violations)
+
+
+# --- El veto a pydantic solo se levanta para application/agents/ ----------
+
+
+def test_pydantic_solo_se_permite_dentro_de_application_agents():
+    """La excepción de `APPLICATION_MODULES_ALLOWING_PYDANTIC` es del
+    subpaquete `application/agents/`, no un agujero general en
+    `application/`: cualquier fichero de `application/` que NO esté bajo
+    `application/agents/` sigue vetado para `pydantic`, `budget.py`
+    incluido.
+    """
+    non_agents_files = [
+        path for path in _application_files() if not _is_under(path, "nocturna.application.agents")
+    ]
+
+    assert non_agents_files, "no hay ficheros de application/ fuera de agents/ que comprobar"
+    for path in non_agents_files:
+        assert "pydantic" in _forbidden_modules_for(path)
+
+
+def test_reader_output_importa_pydantic_de_verdad_no_es_una_excepcion_vacia():
+    """Ancla de mutación: si `application/agents/reader_output.py` dejara de
+    importar `pydantic`, la excepción del test anterior sería una excepción
+    para nada -- este test confirma que hay un import real que la necesita.
+    """
+    reader_output_path = APPLICATION_DIR / "agents" / "reader_output.py"
+
+    assert reader_output_path.is_file(), f"no existe {reader_output_path}"
+    violations = _find_forbidden_imports(reader_output_path, ("pydantic",))
+
+    assert violations, "reader_output.py debería importar pydantic (y esta prueba lo confirma)"

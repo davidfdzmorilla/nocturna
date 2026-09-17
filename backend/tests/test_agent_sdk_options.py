@@ -119,3 +119,19 @@ def test_env_no_introduce_credenciales():
     options = build_options(request, mcp_servers={}, allowed_tools=[])
 
     assert options.env == {}
+
+
+def test_system_prompt_ausente_llega_como_none():
+    request = _request()
+
+    options = build_options(request, mcp_servers={}, allowed_tools=[])
+
+    assert options.system_prompt is None
+
+
+def test_system_prompt_presente_llega_tal_cual():
+    request = _request(system_prompt="Eres el Lector del pipeline Nocturna.")
+
+    options = build_options(request, mcp_servers={}, allowed_tools=[])
+
+    assert options.system_prompt == "Eres el Lector del pipeline Nocturna."

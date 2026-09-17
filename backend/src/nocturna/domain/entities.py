@@ -57,19 +57,28 @@ def _require_non_empty(value: str, field_name: str) -> None:
 
 
 class ItemStatus(StrEnum):
-    """Estado de un ítem de ingesta a lo largo del pipeline."""
+    """Estado de un ítem de ingesta a lo largo del pipeline.
+
+    `FAILED` (decidido por el autor, ex `OPEN_DECISIONS.md:13`) es terminal:
+    un ítem cuyo Reader agotó los reintentos de JSON inválido no vuelve a
+    `NEW`. Sin un estado terminal de fallo, un ítem así sería un ítem
+    envenenado permanente: `next_unread` lo devolvería cada noche y volvería
+    a gastar `max_calls_per_item` llamadas contra él para siempre.
+    """
 
     NEW = "new"
     READ = "read"
     DISCARDED = "discarded"
     PUBLISHED = "published"
+    FAILED = "failed"
 
 
 _ITEM_TRANSITIONS: Mapping[ItemStatus, frozenset[ItemStatus]] = {
-    ItemStatus.NEW: frozenset({ItemStatus.READ}),
+    ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED}),
     ItemStatus.READ: frozenset({ItemStatus.DISCARDED, ItemStatus.PUBLISHED}),
     ItemStatus.DISCARDED: frozenset(),
     ItemStatus.PUBLISHED: frozenset(),
+    ItemStatus.FAILED: frozenset(),
 }
 
 
@@ -131,6 +140,15 @@ class Item:
     def publish(self) -> None:
         """Marca el ítem como publicado tras generar su `Finding`."""
         self._transition_to(ItemStatus.PUBLISHED)
+
+    def mark_failed(self) -> None:
+        """Marca el ítem como fallido tras agotar los reintentos del Reader.
+
+        Terminal: solo alcanzable desde `NEW` (el Reader falla antes de
+        producir un `Reading` válido). Un ítem ya `READ` no puede fallar
+        retroactivamente por esta vía.
+        """
+        self._transition_to(ItemStatus.FAILED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +420,13 @@ class AgentCall:
 
     Se construye con los datos ya conocidos tras la llamada: no hay estado
     intermedio "en curso" en esta entidad.
+
+    `prompt_version` es nullable a propósito: las filas históricas del humo
+    manual de T40 no llevan versión de prompt y no hay que inventárselas.
+    T60 son dos semanas de calibración ajustando los prompts de
+    `application/agents/prompts/`; sin este campo desde la primera noche que
+    lo tiene, los datos de distintas versiones de un mismo prompt no son
+    comparables entre sí.
     """
 
     run_id: UUID
@@ -413,6 +438,7 @@ class AgentCall:
     duration_ms: int
     status: AgentCallStatus
     id: UUID = field(default_factory=uuid4)
+    prompt_version: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.model, "model")
