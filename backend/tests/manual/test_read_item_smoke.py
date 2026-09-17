@@ -84,6 +84,17 @@ lateral de Haiku que T40 midió por llamada + salida, doblado por margen). El
 ya incurrido -- no es una garantía que este test imponga de antemano, y un
 segundo intento (si el primero produce JSON inválido) la dobla sin que eso
 sea, por sí mismo, un fallo de este test.
+
+**Revisado en T42** (mismo criterio que 'Corrección T42' de
+`test_sdk_smoke.py`): este umbral, a diferencia del que T40 rompió, no
+afirma nada estrecho sobre un solo modelo -- mide `result.tokens_spent`, la
+cifra total que `BudgetGuard` carga contra el presupuesto de la noche, así
+que el preámbulo de Haiku debe contar aquí a propósito, no aislarse. Su
+composición ya incluye ~950 tokens de Haiku por diseño (ver arriba) más un
+doblado de margen para el segundo intento: sin datos de una llamada real
+todavía (a diferencia del Popularizer, que T42 sí midió: 9.120/~4.560), no
+se ajusta el número sin evidencia -- se deja constancia de que se revisó y
+no tiene el mismo defecto.
 """
 
 from __future__ import annotations
@@ -110,6 +121,7 @@ from nocturna.infrastructure.config import load_pipeline_config
 from nocturna.infrastructure.db.models import AgentCallRow, ItemRow
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
+    SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
@@ -203,6 +215,7 @@ def _work_factory(db_session_factory, run_id: UUID, policy: BudgetPolicy) -> Age
                 runs=runs,
                 items=SqlAlchemyItemRepository(session),
                 readings=SqlAlchemyReadingRepository(session),
+                findings=SqlAlchemyFindingRepository(session),
                 agent_calls=agent_calls,
             )
 

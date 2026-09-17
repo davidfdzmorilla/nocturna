@@ -17,7 +17,9 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Control de gasto | `application/budget.py` + `domain/clock.py` | done (T30) |
 | Proveedor LLM | `infrastructure/llm/agent_sdk_provider.py` | done (T40) |
 | Ejecutor de agentes | `application/agents/runner.py` | done (T42 refactor) |
-| Agentes | Reader, Popularizer, Editor | pendiente (T41–T43) |
+| Agente Reader | `application/agents/reader`, `application/use_cases/read_item.py` | done (T41) |
+| Agente Popularizer | `application/agents/popularizer`, `application/use_cases/popularize_reading.py` | done (T42) |
+| Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | pendiente (T43) |
 | Orquestador nocturno | `application/use_cases/run_night.py` | pendiente (T44) |
 | API de lectura | FastAPI | pendiente (T50) |
 | Web | Next.js | pendiente (T51) |
@@ -60,6 +62,26 @@ Implementado en T41. Lee un `Item` con `status = new` y produce una `Reading` pe
 **Patrón de transacciones**: la secuencia de gasto vive en un punto único, `AgentRunner.run()` en `application/agents/runner.py`. Por intento son **tres unidades de trabajo**, y la llamada al modelo no está en ninguna: (1) `BudgetGuard.authorize` + `timeout_for_call()` + lectura del `run_id`, que cierra antes de llamar; (2) `record_call`, **sola**, sin ninguna otra escritura; (3) la persistencia de la entidad de dominio, que abre el **caso de uso** después de que `run()` devuelva — el runner no persiste entidades de negocio, solo `AgentCall`. Entre (1) y (2) ocurren `LLMProvider.run_agent` **sin ninguna transacción abierta** (cero conexiones retenidas mientras se espera al modelo, hasta `item_timeout_s`) y `build(result, run_id)`, que es una función pura: parsea la salida y construye la entidad, sin tocar la base de datos. Que `record_call` no comparta transacción con la persistencia es la lección de T41: si la compartieran, un `IntegrityError` tiraría por rollback la fila de una llamada ya cobrada, y el gasto quedaría hecho y olvidado. Que `build` se ejecute **dentro** del runner es la lección del bloqueante de T41: si lanza `InvalidAgentOutput` o `InvariantViolation`, el intento se contabiliza con `status = invalid_output` y se reintenta, de modo que ninguna llamada pagada puede terminar sin `AgentCall`. El reintento va en el bucle con `continue`, **nunca dentro de un `except`**, y cada intento pasa por su propio `authorize`: el segundo se pesa contra lo que ya gastó el primero, porque su `record_call` cerró antes.
 
 **Prompt de rol en `system_prompt`**: el abstract del paper va en el `prompt` estándar envuelto en `<abstract>`/`</abstract>` (escaped por Pydantic al serializar). El rol (instrucciones del Reader) viaja en un campo nuevo `AgentRequest.system_prompt` separado, que el `AgentSDKProvider` pasa como `system_prompt` a `ClaudeAgentOptions`, no mezclado con el abstract. Así se evita confundir instrucciones con datos de terceros.
+
+## Agente Popularizer (fase 1)
+
+Implementado en T42. Lee una `Reading` con `interest_score >= min_interest_score` (umbral configurable, por defecto 4) y produce una `Finding` persistida sin publicar. Definición programática en `application/agents/` con prompt de rol en `prompts/popularizer.md`.
+
+**Contrato de entrada y salida**: `AgentRequest` con `Reading` envuelto en tags `<reading>`, rol `popularizer`, modelo Sonnet. Salida esperada: JSON validado por `PopularizerOutput` con tres campos de texto libre — `level_curious` (~100 palabras), `level_amateur` (~200 palabras), `level_technical` (~300 palabras) — correspondientes a tres audiencias y direccionado a lectores sin contexto de astronomía. Salida en dominio: entidad `Finding` con `title` (resumido del `Reading.summary`) y los tres niveles.
+
+**Umbral como palanca de gasto**: `interest_score < min_interest_score` retorna **antes de cualquier `authorize`**, sin gastar nada, y es la decisión que acota cuántas llamadas al Popularizer hay por noche. `min_interest_score` se lee de `limits.popularizer_min_interest_score` en `pipeline.toml`, no es literal, de modo que T60 puede calibrar el tope de gasto por noche sin tocar código.
+
+**Transiciones asimétricas de estado**: una lectura exitosa (`Reading` creada) establece `Item.status = READ` y es irreversible; desde aquí divergen los caminos. Si el Popularizer produce JSON válido (`Finding` creado), la lectura pasa a `POPULARIZED` (cambio de estado en `Item`). Si el Popularizer falla por `TIMEOUT`, `ERROR` o `RATE_LIMITED`, la lectura vuelve a `READ` (reintentable otra noche). Si el Popularizer retorna JSON inválido o si el `interest_score` estaba por debajo del umbral, el `Item` es `DISCARDED` (terminal, nunca reintentable). Esta asimetría es el equivalente del «ítem envenenado» de T41: sin `DISCARDED`, T44 reintentaría cada noche un ítem que el `interest_score` rechazó, quemando presupuesto indefinidamente. Nota: `SKIPPED_LOW_SCORE` en el prompt del Popularizer desencadena `DISCARDED` en base de datos.
+
+**Aritmética de la noche medida (2026-09-17)**:
+- Presupuesto lector + popularizer = 240.000 tokens
+- Reader: 40 ítems × 3.056 tokens/ítem (datos reales T41) = 122.240 tokens
+- Quedan: 240.000 − 122.240 = 117.760 tokens
+- Popularizer medido: ~4.560 tokens/candidato sin reintento (T42, intento 1 falló por JSON inválido; intento 2 ~4.521)
+- Candidatos esperados: 117.760 ÷ 4.560 ≈ **25,8 → ~26** (presupuesto puro)
+- **Tasa de reintento**: una observación de dos intentos (1º rechazado por saltos de línea en literal JSON, 2º válido) no es suficiente para saber si es sistemática. Si todos reintentan: 117.760 ÷ (4.560 × 2) ≈ **~13 candidatos**. Diferencia crítica: 26 vs 13. Calibración: T60 mide varios días y documenta si `popularizer-v2` resuelve la tasa.
+- **Reparador de JSON**: `extract_json_object` repara caracteres de control crudos (`\n`, `\r`, `\t`) dentro de literales de cadena, solo después de que `json.loads` falle. Costo: cero tokens (no se llama a modelo). Garantía: **no-op sobre cualquier JSON que `json.loads` ya acepte**, porque el JSON válido exige comillas balanceadas y prohíbe esos caracteres crudos dentro de cadenas — exactamente lo único que toca. Filosofía: el reparador es una red de seguridad, no una excusa; prompts versión 2+ buscan salida limpia al primer intento.
+- **Degradación elegante**: guard deniega en límite de presupuesto. La noche se degrada en cantidad, no en corrección (los candidatos se leen bien, solo hay menos).
 
 ## Control de gasto
 

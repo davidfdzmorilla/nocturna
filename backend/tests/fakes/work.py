@@ -33,7 +33,7 @@ from uuid import UUID
 
 from nocturna.application.budget import BudgetGuard
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
-from nocturna.domain.entities import AgentCall, Item, ItemStatus, Reading, Run, RunStatus
+from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
 from nocturna.domain.llm import AgentRole
 
 
@@ -129,6 +129,33 @@ class InMemoryReadingRepository:
         return next((r for r in self.readings if r.item_id == item_id), None)
 
 
+class InMemoryFindingRepository:
+    """Cumple `domain.repositories.FindingRepository`. Se añade en T42:
+    `PopularizeReading` es el primer caso de uso que persiste un `Finding`
+    (ver el docstring de `AgentWork.findings`).
+
+    Indexado por `id` (no una lista plana, a diferencia de
+    `InMemoryReadingRepository`): a diferencia de `Reading`, `Finding` se
+    actualiza tras su construcción (`save()`, cuando el Editor lo publica en
+    T43), así que hace falta poder localizarlo por id para mutarlo -- mismo
+    motivo que `InMemoryItemRepository` usa un `dict`.
+    """
+
+    def __init__(self) -> None:
+        self._findings: dict[UUID, Finding] = {}
+
+    def add(self, finding: Finding) -> None:
+        self._findings[finding.id] = finding
+
+    def unpublished_for_run(self, run_id: UUID) -> list[Finding]:
+        return [f for f in self._findings.values() if f.run_id == run_id and f.published_at is None]
+
+    def save(self, finding: Finding) -> None:
+        if finding.id not in self._findings:
+            raise LookupError(f"no existe Finding con id={finding.id}")
+        self._findings[finding.id] = finding
+
+
 def make_work_factory(
     *,
     guard: BudgetGuard,
@@ -136,17 +163,31 @@ def make_work_factory(
     items: InMemoryItemRepository,
     readings: InMemoryReadingRepository,
     agent_calls: InMemoryAgentCallRepository,
+    findings: InMemoryFindingRepository | None = None,
 ) -> AgentWorkFactory:
     """Construye el `AgentWorkFactory` en memoria que `ReadItem` espera.
 
     Cada llamada cede el mismo `AgentWork` (los mismos objetos en memoria,
     no copias por unidad de trabajo): ver el docstring del módulo.
+
+    `findings` es opcional (T42 añadió el campo obligatorio a `AgentWork`,
+    ver su docstring): con `None` se construye un `InMemoryFindingRepository`
+    vacío propio, para que las llamadas existentes de `test_agent_runner.py`
+    y `test_read_item.py` -- que nunca tocan `Finding` -- no tengan que
+    pasarlo. `PopularizeReading` (y sus tests) sí lo pasa explícito para
+    poder inspeccionar lo que persiste.
     """
+    resolved_findings = findings if findings is not None else InMemoryFindingRepository()
 
     @contextmanager
     def _work() -> Iterator[AgentWork]:
         yield AgentWork(
-            guard=guard, runs=runs, items=items, readings=readings, agent_calls=agent_calls
+            guard=guard,
+            runs=runs,
+            items=items,
+            readings=readings,
+            findings=resolved_findings,
+            agent_calls=agent_calls,
         )
 
     return _work

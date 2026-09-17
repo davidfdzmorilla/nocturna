@@ -21,6 +21,28 @@ reset_day_multiplier = 1.0
 # estimado) de esa última llamada: modo de fallo que ya tenía el diseño de
 # T30, no uno nuevo de T41. Valor a calibrar en T60, como item_timeout_s.
 reader_estimated_tokens = 6000
+# popularizer_estimated_tokens: misma lógica que reader_estimated_tokens,
+# para el Popularizer. Composición aproximada (T42): prompt de rol (~600-700
+# tokens, define tres niveles, más largo que los ~290 del Reader) + la
+# Reading serializada (título, resumen ~100, objetos ~30, hasta 5 claims
+# ~150) ≈ 1.000 de entrada; el gasto lateral de Haiku que T40 midió por
+# llamada (~950); salida de hasta 660 palabras entre los tres niveles y el
+# titular, en español a ~1,6 tokens/palabra ≈ 1.300-1.400 -- el componente
+# que domina y donde el Popularizer se separa del Reader (442 de salida en el
+# humo real). Real esperado ≈ 3.350, con el mismo margen que T41 aplicó
+# (6.000 sobre 2.796 medidos ≈ 2,15x) → 7.000. Si el gasto real de una
+# llamada supera esta estimación, nightly_tokens se rebasa en (real -
+# estimado) de esa última llamada, igual que con el Reader. Valor a calibrar
+# en T60, con popularizer-v1 como baseline.
+#
+# Aritmética del pool Reader+Popularizer = nightly_tokens -
+# editor_reserve_tokens = 300.000 - 60.000 = 240.000. Reader: 40 ítems x
+# 2.796 medidos ≈ 112.000. Candidatos con score >= 4 por noche es la
+# incógnita de T60: con 25% -> 145.500 (61% del pool); 40% -> 165.600 (69%);
+# 60% -> 192.400 (80%). Punto de ruptura: ~38 candidatos de 40, y a partir de
+# ahí authorize deniega, el Run queda partial y la reserva del Editor sigue
+# intacta -- comportamiento correcto, no un fallo.
+popularizer_estimated_tokens = 7000
 
 [limits]
 # max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").
@@ -41,6 +63,12 @@ max_editor_calls_per_night = 2
 # esta clave por max_items_per_night, nunca de un "2" escrito a mano en
 # application/budget.py. Valor a calibrar en T60.
 max_calls_per_item = 2
+# popularizer_min_interest_score: umbral de Reading.interest_score a partir
+# del cual se llama al Popularizer. PLAN_TAREAS.md fija en T60 «se decide si
+# el interest_score >= 4 es el umbral correcto»: tiene que ser calibrable sin
+# tocar código, de ahí que sea configuración y no un literal en el
+# orquestador.
+popularizer_min_interest_score = 4
 
 [window]
 start = "00:00"

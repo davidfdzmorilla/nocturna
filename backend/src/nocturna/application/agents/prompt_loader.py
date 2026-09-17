@@ -14,6 +14,14 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 #: informe de calibración de T60 la muestra tal cual, no un hash.
 READER_PROMPT_VERSION: str = "reader-v2"
 
+#: Versión a mano del prompt del Popularizer, mismo criterio que
+#: `READER_PROMPT_VERSION`: se sube a mano al editar `popularizer.md`.
+#: Subida a "popularizer-v2" en T42: se reforzó la regla de no usar saltos
+#: de línea literales dentro de cadenas JSON (medida en producción, causó
+#: un reintento que dobló el coste de la llamada). T60 compara
+#: calibraciones por esta etiqueta.
+POPULARIZER_PROMPT_VERSION: str = "popularizer-v2"
+
 
 def load_prompt(name: str) -> str:
     """Lee `prompts/<name>.md` y devuelve su contenido.

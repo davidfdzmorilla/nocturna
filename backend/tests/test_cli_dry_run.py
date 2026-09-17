@@ -49,6 +49,7 @@ weekly_reset_weekday = "{weekday}"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
 reader_estimated_tokens = 6000
+popularizer_estimated_tokens = 7000
 
 [limits]
 max_items_per_night = 40
@@ -57,6 +58,7 @@ item_timeout_s = 180
 run_timeout_s = 16200
 max_editor_calls_per_night = 2
 max_calls_per_item = 2
+popularizer_min_interest_score = 4
 
 [window]
 start = "00:00"
