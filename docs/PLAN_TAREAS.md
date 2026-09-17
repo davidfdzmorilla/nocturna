@@ -70,10 +70,12 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 4 — Agentes
 
 ### T40 · `AgentSDKProvider` y `FakeLLMProvider`
-- **Estado**: pending
+- **Estado**: in_progress
 - **Depende de**: T30
 - **Alcance**: implementación de `LLMProvider` sobre `claude-agent-sdk` con `query()` y `ClaudeAgentOptions`: modelo por rol, `max_turns` desde configuración, servidores MCP inyectados, sin `setting_sources` (todo programático), sin `ANTHROPIC_API_KEY`. Extracción de tokens y modelo de los mensajes `result`. `FakeLLMProvider` para tests que devuelve JSON fijo por agente.
 - **Hecho cuando**: un test de humo **manual y marcado como tal** (`pytest -m manual`) hace una llamada real mínima y registra tokens en `AgentCall`. El resto de la suite no toca Claude.
+- **Nota importante**: T40 se considera IMPLEMENTADO pero NO `done` hasta que el autor ejecute manualmente el test de humo: `env -u ANTHROPIC_API_KEY uv run pytest -m manual -s`. Eso ejercita la autenticación real, registra tokens en `AgentCall` y valida que `BudgetGuard` + `AgentSDKProvider` + persistencia funcionan juntos. La suite (454 passed) solo demuestra que el código es consistente consigo mismo. Ver `tests/manual/test_sdk_smoke.py` docstring para precondiciones y qué se valida.
+- **Tres revisiones completadas · rondas 1–2 rechazadas, ronda 3 aprobada.** Ronda 1: guarda anti-Claude no cubría `ClaudeSDKClient` y `pytest -m db` ejecutaba el test de humo por `argparse` (sustituir ≠ componer). Ronda 2: `sys.exc_info()` es estado global del hilo, falla si `run_agent` se invoca desde dentro de un `except` (reintento de T41); parcheo faltaba tests. Ronda 3: cierre de frontera + `test_llm_call_sites.py` congela que gasto se persista antes de devolver resultado. Incidente a registrar: durante ronda 1, mutación hizo que suite llamara CLI real (8,78 s, `LLMTimeout`), gastando suscripción. Evidencia empírica de la fuga.
 - **Antes de empezar**: consultar la documentación vigente del SDK de Python (`platform.claude.com/docs/en/agent-sdk/python`) para nombres de opciones y estructura de mensajes; no fiarse de memoria.
 
 ### T41 · Agente Reader
