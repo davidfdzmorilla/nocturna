@@ -2,9 +2,12 @@
 
 Se dividen en dos ficheros:
 
-- Este (`tests/test_cli_dry_run.py`): comportamiento que no necesita tocar
-  PostgreSQL ni una fuente arXiv -- el camino sin `--dry-run` (no debe hacer
-  nada) y el cálculo del valor por defecto de `--since`.
+- Este (`tests/test_cli_dry_run.py`): comportamiento de `--dry-run` que no
+  necesita tocar PostgreSQL ni una fuente arXiv -- traducción de
+  configuración, cálculo del valor por defecto de `--since`, el plan de
+  gasto. El camino sin `--dry-run` (T44, paso 3: ejecuta la noche completa)
+  necesita PostgreSQL de punta a punta y vive en
+  `tests/db/test_cli_run_night_db.py`.
 - `tests/db/test_cli_dry_run_db.py`: todo lo que exige ejecutar `main()` de
   verdad hasta el final -- ingesta con una fuente arXiv falsa, propagación
   de `--since`/`--categories`, errores de arXiv y la comprobación de que
@@ -24,7 +27,6 @@ from datetime import UTC, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import httpx
 import pytest
 
 from nocturna import cli
@@ -62,6 +64,7 @@ run_timeout_s = 16200
 max_editor_calls_per_night = 2
 max_calls_per_item = 2
 popularizer_min_interest_score = 4
+max_consecutive_failures = 5
 
 [window]
 start = "00:00"
@@ -126,34 +129,20 @@ def test_dry_run_imprime_vista_previa_del_abstract_truncada_en_los_largos(
     assert "A" * 201 not in captured
 
 
-def test_run_night_sin_dry_run_devuelve_2_y_menciona_t44(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    code = cli.main(["run-night"])
-
-    captured = capsys.readouterr()
-    assert code == 2
-    assert "T44" in captured.err
-    assert captured.out == ""
-
-
-def test_run_night_sin_dry_run_no_toca_configuracion_ni_red_ni_base_de_datos(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ninguna de las piezas que solo hacen falta para una ingesta real
-    (configuración, cliente HTTP, motor de base de datos) debe invocarse
-    cuando falta `--dry-run`: se sustituyen todas por dobles que revientan
-    si alguien las llama, y `main()` debe devolver 2 sin tocarlas."""
-
-    def _boom(*args, **kwargs):
-        raise AssertionError("no debería llamarse sin --dry-run")
-
-    monkeypatch.setattr(cli, "Settings", _boom)
-    monkeypatch.setattr(cli, "load_pipeline_config", _boom)
-    monkeypatch.setattr(cli, "create_db_engine", _boom)
-    monkeypatch.setattr(httpx, "AsyncClient", _boom)
-
-    assert cli.main(["run-night"]) == 2
+# `test_run_night_sin_dry_run_devuelve_2_y_menciona_t44` y
+# `test_run_night_sin_dry_run_no_toca_configuracion_ni_red_ni_base_de_datos`
+# vivían aquí hasta T44, paso 3: describían que `run-night` sin `--dry-run`
+# no hacía nada (código 2, sin tocar `Settings`/`load_pipeline_config`/
+# `create_db_engine`/`httpx.AsyncClient`). Ambos asertos dejaron de
+# describir el comportamiento correcto en cuanto `_run_night_for_real`
+# (T44) empezó a ejecutar la noche completa: sin `--dry-run`, `run-night`
+# ahora SÍ toca configuración, red y base de datos a propósito -- es
+# justo lo que la tarea pide. Sustituidos por la batería de
+# `tests/db/test_cli_run_night_db.py` (contra PostgreSQL real, con
+# `AgentSDKProvider` sustituido por `FakeLLMProvider`, mismo patrón que
+# `tests/db/test_cli_run_item.py`), que es la única forma de ejercitar
+# `_run_night_for_real` de punta a punta sin tocar `cli.py` para inyectar
+# dobles.
 
 
 def test_valor_por_defecto_de_since_no_se_calcula_al_construir_el_parser() -> None:
@@ -298,7 +287,7 @@ def test_print_budget_plan_muestra_el_disponible_de_reader_ya_con_la_reserva_res
     policy = _policy(nightly_tokens=300_000, editor_reserve_tokens=60_000)
     now = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now)
+    cli._print_budget_plan(policy, "UTC", now, would_read=12)
 
     captured = capsys.readouterr().out
     assert "presupuesto nocturno efectivo: 300000 tokens" in captured
@@ -307,13 +296,28 @@ def test_print_budget_plan_muestra_el_disponible_de_reader_ya_con_la_reserva_res
     assert "disponible para el Editor: 300000 tokens" in captured
 
 
+def test_print_budget_plan_muestra_cuantos_items_se_leerian_esta_noche(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """T44, paso 8: `_print_budget_plan` recibe `would_read` ya resuelto
+    (`_would_read_count`, lectura pura de `ItemRepository.next_unread`) y
+    lo imprime tal cual, sin tocar la base de datos por su cuenta."""
+    policy = _policy()
+    now = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
+
+    cli._print_budget_plan(policy, "UTC", now, would_read=17)
+
+    captured = capsys.readouterr().out
+    assert "ítems que se leerían esta noche: 17" in captured
+
+
 def test_print_budget_plan_dentro_de_la_ventana_muestra_los_segundos_restantes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     policy = _policy(window_start=time(0, 0), window_hard_stop=time(4, 45))
     now = datetime(2026, 1, 1, 4, 44, 30, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now)
+    cli._print_budget_plan(policy, "UTC", now, would_read=0)
 
     captured = capsys.readouterr().out
     assert "dentro de la ventana ahora mismo: sí (quedan 30 s para el hard_stop)" in captured
@@ -325,7 +329,7 @@ def test_print_budget_plan_fuera_de_la_ventana_no_anuncia_segundos_restantes(
     policy = _policy(window_start=time(0, 0), window_hard_stop=time(4, 45))
     now = datetime(2026, 1, 1, 4, 46, 0, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now)
+    cli._print_budget_plan(policy, "UTC", now, would_read=0)
 
     captured = capsys.readouterr().out
     assert "dentro de la ventana ahora mismo: no" in captured
@@ -348,8 +352,57 @@ def test_print_budget_plan_aplica_el_reset_day_multiplier_al_presupuesto_efectiv
     monday = datetime(2026, 1, 5, 10, 0, tzinfo=UTC)
     assert monday.weekday() == 0
 
-    cli._print_budget_plan(policy, "UTC", monday)
+    cli._print_budget_plan(policy, "UTC", monday, would_read=0)
 
     captured = capsys.readouterr().out
     assert "presupuesto nocturno efectivo: 600000 tokens" in captured
     assert "disponible para Reader/Popularizer: 540000 tokens" in captured
+
+
+# --- _build_run_night: EditNight.run_id frente al run_id del guard --------
+
+
+def _build_run_night_kwargs(**overrides: object) -> dict[str, object]:
+    """Argumentos mínimos para `cli._build_run_night`: ninguno de los
+    colaboradores (`work`/`read_item`/`popularize`/`edit_night`/`clock`)
+    necesita ser un objeto real -- `_build_run_night` los reenvía tal cual
+    al constructor de `RunNight`, que tampoco los valida por tipo (solo los
+    guarda como atributos); lo único que esta función ejercita es la
+    comprobación explícita `work_run_id == run_id` que antecede a esa
+    construcción."""
+    defaults: dict[str, object] = {
+        "work": object(),
+        "work_run_id": "run-a",
+        "clock": object(),
+        "ingest": object(),
+        "read_item": object(),
+        "popularize": object(),
+        "edit_night": object(),
+        "run_id": "run-a",
+        "max_items": 10,
+        "max_consecutive_failures": 5,
+        "deadline_s": 100,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def test_build_run_night_con_run_id_coincidentes_devuelve_un_run_night() -> None:
+    kwargs = _build_run_night_kwargs(work_run_id="run-x", run_id="run-x")
+
+    night = cli._build_run_night(**kwargs)
+
+    assert isinstance(night, cli.RunNight)
+
+
+def test_build_run_night_con_run_id_distintos_lanza_valueerror() -> None:
+    """T43, deuda "`EditNight(run_id)` desacoplada del `BudgetGuard`": con
+    `RunNight` como segundo llamante de `EditNight`, `_build_run_night` es
+    el único punto de `cli.py` donde a la vez se conoce el `run_id` con el
+    que se construyó el `BudgetGuard` de `work` y el `run_id` que se le
+    pasará a `EditNight` a través de `RunNight`. Deben coincidir, o revienta
+    aquí, ruidosamente, antes de construir nada."""
+    kwargs = _build_run_night_kwargs(work_run_id="run-x", run_id="run-y")
+
+    with pytest.raises(ValueError, match="run-y"):
+        cli._build_run_night(**kwargs)

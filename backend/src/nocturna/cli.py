@@ -83,6 +83,85 @@ a esa función. Cierra la decisión abierta nº 72 de
 `docs/OPEN_DECISIONS.md`: el arreglo va en el sitio de llamada, no en
 `budget.py`.
 
+**T44, paso 3: `run-night` sin `--dry-run` ejecuta la noche completa.**
+`_run_night` es ahora solo un despachador entre `_run_night_dry_run` (el
+camino de siempre, con la ingesta y el plan de gasto) y
+`_run_night_for_real`, que instala `configure_json_logging()` (la única
+llamada de todo el proceso, `infrastructure/logging.py`); construye, en
+este orden, todo lo que puede fallar por sí solo, antes de comprometerse
+con ningún `Run` -- `AgentSDKProvider()` (puede lanzar
+`ApiKeyInEnvironment`), los tres prompts (`load_prompt`, puede lanzar
+`FileNotFoundError`) y `deadline_s`/`deadline_reason`
+(`_deadline_for_run_night`, ver más abajo) --; solo entonces adopta o
+cierra un `Run` huérfano y crea el de esta noche
+(`_current_or_new_run_night`, ver más abajo); construye los tres casos de
+uso ya resueltos -- `ReadItem`, `PopularizeReading`, `EditNight`, cada uno
+con su modelo/prompt/turnos/estimación de coste leídos de
+`config/pipeline.toml`, nunca hardcodeados -- y con ellos `RunNight`
+(`application/use_cases/run_night.py`, T44 paso 2, vía `_build_run_night`),
+y lo ejecuta en un único `asyncio.run`. `RunNight` no cierra el `Run` ni
+decide `Run.status` (ver su docstring): ese reparto de responsabilidades
+sigue siendo de `cli.py`, el composition root, igual que en `run-item`.
+
+Revisión de T44, punto 3: antes de este orden, `_current_or_new_run_night`
+iba primero y `AgentSDKProvider()`/`load_prompt(...)` venían después,
+fuera de cualquier `try`. Un fichero de prompt ausente (o
+`ApiKeyInEnvironment`) dejaba un `Run` `RUNNING` colgado -- y, mientras
+tanto, expuesto a que un `run-item` intermedio lo **adoptara** y gastara
+contra su presupuesto. La construcción de `ReadItem`/`PopularizeReading`/
+`EditNight` sí sigue yendo después de abrir el `Run` -- los tres exigen
+`work` (`AgentWorkFactory`), que solo existe una vez que `run_id` existe
+-- pero eso no importa: ninguno de los tres hace nada que pueda fallar en
+su constructor (asignación de atributos), a diferencia de `AgentSDKProvider()`
+y `load_prompt(...)`, que sí se han adelantado.
+
+Códigos de salida de `run-night` sin `--dry-run` (los de `run-item`, 1–6,
+no cambian): `0` `RunNightResult.status is COMPLETED`, `7` `PARTIAL`, `8`
+`KILLED` (`_EXIT_CODE_BY_RUN_STATUS`), `1` una excepción escapó de
+`RunNight` -- se cierra el `Run` como `FAILED` en `_run_night_for_real`,
+con el traceback completo en el log JSON, sin enmascarar la excepción ni
+relanzarla (ver el docstring de esa función).
+
+`deadline_s`, el presupuesto de tiempo que `RunNight` reparte entre su
+vigía de `hard_stop` y su cuerpo, sale de `_deadline_for_run_night(policy,
+clock.now())`: `min(seconds_until_hard_stop(...), policy.run_timeout_s)`
+-- calculado en `cli.py`, no en `RunNight` (que solo conoce segundos,
+nunca horas de pared, ver su docstring): la primera vez que
+`limits.run_timeout_s` tiene un consumidor real. Esa misma función
+devuelve `deadline_reason` (`"hard_stop"` o `"run_timeout"`, según cuál de
+los dos mandó), que viaja hasta `RunNight` para que `notes` diga cuál de
+los dos cortó la noche si el vigía dispara (revisión de T44, punto 2: con
+`run_timeout_s = 16_200` s y la ventana completa en 17_100 s, antes de
+esta revisión una noche que arrancara a las 00:00 la cortaba el timeout de
+ejecución pero `notes` decía `end=hard_stop` igual). `Run.budget_tokens`
+se fija con `effective_nightly_tokens(policy, clock.now())`
+(`_current_or_new_run_night`), nunca con `policy.nightly_tokens` a pelo ni
+con un literal -- cierra la decisión abierta nº 57 de
+`docs/OPEN_DECISIONS.md` por la opción (a), con un test que lo congela.
+
+**`Run` huérfano al arrancar `run-night`.** A diferencia de `run-item`
+(que adopta un `Run` `RUNNING` vivo porque puede ser una noche de verdad
+en marcha), `run-night` nunca deja tras de sí un `Run` `RUNNING` a medio
+camino -- su propio cierre pasa siempre por `_finish_run` --, así que
+cualquier `RUNNING` que `_current_or_new_run_night` encuentre al arrancar
+es, por construcción, el rastro de un proceso anterior que murió sin
+cerrarlo. Se cierra como `KILLED` con una nota explícita y un `warning`
+ruidoso, y se abre un `Run` nuevo a continuación: resuelve la decisión
+abierta nº 20 de `docs/OPEN_DECISIONS.md` para `run-night` (`run-item` no
+cambia) y salda, para este camino, la deuda de T41 sobre
+`uq_runs_status_running`.
+
+**`EditNight.run_id` frente al `run_id` del `BudgetGuard` de `work`.**
+`EditNight` (T43) no valida por sí sola que el `run_id` que recibe en
+`__call__` coincide con el Run que vigila el guard de la unidad de trabajo
+que usa (`docs/TECHNICAL_DEBT.md`, T43: "`EditNight(run_id)` desacoplada
+del `BudgetGuard`"). Con `RunNight` como segundo llamante de `EditNight`
+-- junto a `_edit_one_night`, el camino de `run-item` --, `_build_run_night`
+es el único punto del proyecto donde a la vez se conoce el `run_id` con el
+que se construyó ese `BudgetGuard` y el `run_id` que `RunNight` reenviará
+a `EditNight.__call__`; ahí vive la comprobación explícita, con
+`ValueError` si divergen (ver su docstring).
+
 **Presupuesto de noche entre invocaciones sueltas de `run-item`.** Cada
 invocación sin un `Run` `RUNNING` vivo crea el suyo propio con
 `budget_tokens = effective_nightly_tokens(...)` -- un presupuesto de noche
@@ -107,7 +186,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from collections.abc import Generator, Sequence
+from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
@@ -141,6 +220,7 @@ from nocturna.application.use_cases.popularize_reading import (
     PopularizeResult,
 )
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition
@@ -166,12 +246,13 @@ from nocturna.infrastructure.db.session import (
     create_session_factory,
     unit_of_work,
 )
+from nocturna.infrastructure.logging import configure_json_logging
 
 # `AgentSDKProvider` (infrastructure/llm/agent_sdk_provider.py) NO se importa
 # aquí arriba: un test de T20 comprueba que `claude_agent_sdk` no entra en
 # `sys.modules` durante `run-night --dry-run`, y un import a nivel de módulo
-# lo rompería. `_run_item` lo importa dentro de su propio cuerpo, el único
-# camino que de verdad lo necesita.
+# lo rompería. `_run_item` y `_run_night_for_real` lo importan dentro de su
+# propio cuerpo, los dos únicos caminos que de verdad lo necesitan.
 
 _logger = logging.getLogger(__name__)
 
@@ -186,11 +267,18 @@ _HTTP_TIMEOUT_S = 30.0
 # basta para revisar un ítem (o una noche) de un vistazo por consola.
 _ABSTRACT_PREVIEW_CHARS = 200
 
-_RUN_NIGHT_WITHOUT_DRY_RUN_MESSAGE = (
-    "run-night sin --dry-run todavía no hace nada: el orquestador nocturno "
-    "(Reader, Popularizer, Editor) es la tarea T44 y no existe todavía. "
-    "Usa --dry-run para la ingesta real y persistida de arXiv, sin llamar a ningún agente."
-)
+#: Traduce `RunNightResult.status` (T44, paso 2) al código de salida de
+#: `run-night` sin `--dry-run` (T44, paso 3; ver el docstring del módulo).
+#: `RunStatus.FAILED` no aparece aquí a propósito: `RunNight` nunca lo
+#: propone (`application/use_cases/run_night.py`, `_STATUS_RANK` solo cubre
+#: `COMPLETED`/`PARTIAL`/`KILLED`) -- `FAILED` lo decide `_run_night_for_real`
+#: directamente cuando una excepción escapa de `RunNight`, sin pasar por
+#: esta tabla (ver "T44, paso 3" en el docstring del módulo).
+_EXIT_CODE_BY_RUN_STATUS: dict[RunStatus, int] = {
+    RunStatus.COMPLETED: 0,
+    RunStatus.PARTIAL: 7,
+    RunStatus.KILLED: 8,
+}
 
 # `pipeline.toml` guarda `budget.weekly_reset_weekday` como nombre de día en
 # texto (validado contra ese mismo literal en `infrastructure/config.py`);
@@ -243,6 +331,37 @@ def system_clock_from_config(config: PipelineConfig) -> SystemClock:
     return SystemClock(ZoneInfo(config.window.timezone))
 
 
+def _deadline_for_run_night(policy: BudgetPolicy, now: datetime) -> tuple[int, str]:
+    """Calcula `deadline_s` para `RunNight` y qué lo produjo.
+
+    `deadline_s = min(seconds_until_hard_stop(now, ...), policy.run_timeout_s)`
+    -- la misma fórmula desde que T44 le dio su primer consumidor a
+    `limits.run_timeout_s` --, pero devuelta junto con la etiqueta del
+    motivo que mandó, para que `RunNight._build_killed_result` pueda
+    escribir en `notes` cuál de los dos cortó la noche si el vigía dispara
+    (revisión de T44, punto 2): `"hard_stop"` si queda menos tiempo hasta
+    `window.hard_stop` que `run_timeout_s` (el caso real de una noche que
+    arranca tarde, o que arranca a tiempo con `run_timeout_s` mayor o
+    igual que la ventana completa), `"run_timeout"` si `run_timeout_s` es
+    estrictamente menor que lo que queda de ventana (el caso real de hoy:
+    `run_timeout_s = 16_200` s, `window.start`/`window.hard_stop` = 4h45 =
+    17_100 s -- una noche que arranca a las 00:00 la corta el timeout de
+    ejecución, no la ventana, y `notes` debe decirlo así, no `hard_stop`).
+
+    Extraída a una función de nivel de módulo, en vez de quedar inline en
+    `_run_night_for_real`, precisamente para poder congelar esta distinción
+    con un test que no necesite construir el resto del composition root
+    (`Settings`, motor de base de datos...); antes de esta revisión, la
+    fórmula sin la etiqueta sí se caracterizaba de forma aislada
+    (`test_run_night_hard_stop.py`, test 19) pero la etiqueta no se
+    comprobaba en ningún sitio.
+    """
+    seconds_left = seconds_until_hard_stop(now, policy.window_start, policy.window_hard_stop)
+    if seconds_left <= policy.run_timeout_s:
+        return seconds_left, "hard_stop"
+    return policy.run_timeout_s, "run_timeout"
+
+
 def _parse_since(value: str) -> datetime:
     """Convierte 'YYYY-MM-DD' en un `datetime` aware a las 00:00 UTC."""
     try:
@@ -273,7 +392,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "run-night",
         help="Ejecuta (o simula) la noche de análisis.",
         description=(
-            "Ejecuta la noche de análisis: ingesta de arXiv y, cuando exista T44, los agentes."
+            "Ejecuta la noche de análisis: ingesta de arXiv, Reader, Popularizer y Editor, "
+            "en ese orden y dentro del presupuesto de la noche (--dry-run se queda solo en "
+            "la ingesta y el plan de gasto, sin llamar a ningún agente)."
         ),
     )
     run_night.add_argument(
@@ -386,14 +507,37 @@ def _print_dry_run_report(result: IngestResult) -> None:
         )
 
 
-def _print_budget_plan(policy: BudgetPolicy, timezone: str, now: datetime) -> None:
+def _would_read_count(config: PipelineConfig, settings: Settings) -> int:
+    """Cuántos ítems leería el Reader esta noche
+    (`ItemRepository.next_unread(limits.max_items_per_night)`), lectura pura
+    y sin ningún agente: parte del plan de gasto de `--dry-run` (T44, paso
+    8). Distinto de `IngestResult.new` -- que solo cuenta lo ingerido *esta*
+    noche --: incluye también la cola acumulada de noches anteriores
+    (`docs/OPEN_DECISIONS.md`, T20/T44, "los ítems new que nunca se leen se
+    acumulan"). Abre su propio motor/sesión, igual que `_run_ingest`: no hay
+    ningún motor compartido entre las piezas de `--dry-run`.
+    """
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    with unit_of_work(session_factory) as session:
+        items = SqlAlchemyItemRepository(session)
+        return len(items.next_unread(config.limits.max_items_per_night))
+
+
+def _print_budget_plan(
+    policy: BudgetPolicy, timezone: str, now: datetime, *, would_read: int
+) -> None:
     """Plan de gasto de la noche: lo que `CLAUDE.md` pide de `--dry-run`
     ("ingesta + plan de gasto, sin llamar a agentes"), sin instanciar el
     guarda de gasto de `application/` (necesita un `Run` que en `--dry-run`
-    no existe) ni tocar la base de datos. Solo usa las funciones puras de
-    `application/budget.py` (incluida `seconds_until_hard_stop`, la misma
-    que usa `BudgetGuard.seconds_until_hard_stop`; no hay una segunda copia
-    de ese cálculo en este módulo) y la hora del `SystemClock`.
+    no existe) ni tocar la base de datos por su cuenta. Solo usa las
+    funciones puras de `application/budget.py` (incluida
+    `seconds_until_hard_stop`, la misma que usa
+    `BudgetGuard.seconds_until_hard_stop`; no hay una segunda copia de ese
+    cálculo en este módulo) y la hora del `SystemClock`. `would_read` es la
+    única pieza que sí exige una lectura de base de datos
+    (`_would_read_count`, T44 paso 8): se calcula fuera y se recibe ya
+    resuelta para que esta función se mantenga pura y determinista.
     """
     effective_tokens = effective_nightly_tokens(policy, now)
     reader_popularizer_available = effective_tokens - policy.editor_reserve_tokens
@@ -413,6 +557,7 @@ def _print_budget_plan(policy: BudgetPolicy, timezone: str, now: datetime) -> No
     print(
         f"  disponible para el Editor: {effective_tokens} tokens (presupuesto completo, sin restar)"
     )
+    print(f"  ítems que se leerían esta noche: {would_read}")
     print(
         f"  ventana configurada: {policy.window_start.isoformat()}–"
         f"{policy.window_hard_stop.isoformat()} ({timezone})"
@@ -423,11 +568,182 @@ def _print_budget_plan(policy: BudgetPolicy, timezone: str, now: datetime) -> No
         print("  dentro de la ventana ahora mismo: no")
 
 
-def _run_night(args: argparse.Namespace) -> int:
-    if not args.dry_run:
-        print(_RUN_NIGHT_WITHOUT_DRY_RUN_MESSAGE, file=sys.stderr)
-        return 2
+def _current_or_new_run_night(
+    session_factory: sessionmaker[Session], policy: BudgetPolicy, clock: SystemClock
+) -> UUID:
+    """Abre el `Run` de la noche para `run-night` (T44, paso 3).
 
+    A diferencia de `_current_or_new_run` (`run-item`, T41), que reutiliza
+    un `Run` `RUNNING` porque puede ser una noche de verdad en marcha (el
+    camino de depuración que T41 exige preservar), `run-night` nunca deja
+    tras de sí un `Run` `RUNNING` a medio camino -- su propio cierre pasa
+    siempre por `_finish_run` (paso 3 de esta tarea) --, así que cualquier
+    `RUNNING` que `runs.current()` encuentre al arrancar es, por
+    construcción, el rastro de un proceso anterior que murió sin cerrarlo:
+    un huérfano. Se cierra como `KILLED`, con
+    `notes="cerrado por run-night: quedó RUNNING de un proceso anterior"` y
+    un `warning` ruidoso en el log JSON (`configure_json_logging`, ya
+    instalado por `_run_night_for_real` antes de llegar aquí), y se abre un
+    `Run` nuevo a continuación -- resuelve la decisión abierta nº 20 de
+    `docs/OPEN_DECISIONS.md` para este camino (no para `run-item`, que sigue
+    igual) y salda, para `run-night`, la deuda de T41 sobre
+    `uq_runs_status_running`.
+
+    `budget_tokens` del `Run` nuevo sale de `effective_nightly_tokens`,
+    nunca de `policy.nightly_tokens` a pelo ni de un literal: cierra la
+    decisión abierta nº 57 de `docs/OPEN_DECISIONS.md` por la opción (a) (un
+    test lo congela).
+
+    Esta función **siempre** abre un presupuesto de noche completo -- a
+    diferencia de `_current_or_new_run` (`run-item`), nunca reutiliza un
+    `Run` `RUNNING` vivo -- así que es, junto a `_run_item`, el único
+    camino por el que una noche puede gastar 2 × `nightly_tokens`: dos
+    invocaciones de `run-night` en la misma ventana (un reintento manual
+    tras una noche `PARTIAL`, una unidad systemd con `Restart=`, un cron
+    mal puesto) abren dos `Run` de presupuesto completo cada uno, sin que
+    nada lo note (revisión de T44, punto 5; ver también el docstring del
+    módulo, "Presupuesto de noche entre invocaciones sueltas de
+    run-item"). Se avisa por `stderr`, igual que `_run_item` avisa cada
+    vez que abre un `Run` nuevo; no se implementa ningún límite duro
+    nuevo aquí -- si hay que impedir reabrir presupuesto completo dentro
+    de la misma ventana, es una decisión de diseño para el autor.
+    """
+    now = clock.now()
+    with unit_of_work(session_factory) as session:
+        runs = SqlAlchemyRunRepository(session)
+        orphan = runs.current()
+        if orphan is not None:
+            orphan.finish(
+                RunStatus.KILLED,
+                now,
+                notes="cerrado por run-night: quedó RUNNING de un proceso anterior",
+            )
+            runs.save(orphan)
+            # `uq_runs_status_running` (índice único parcial, T41) solo
+            # admite una fila `running` a la vez. `Session.flush()` no
+            # garantiza que las filas no relacionadas se escriban en el
+            # orden en que se tocaron en Python: sin este `flush()`
+            # explícito, el `INSERT` del Run nuevo de abajo podría llegar a
+            # la base antes que el `UPDATE` que cierra el huérfano, violando
+            # el índice dentro de la misma transacción.
+            session.flush()
+            _logger.warning(
+                "run.orphan_closed",
+                extra={
+                    "event": "run.orphan_closed",
+                    "run_id": str(orphan.id),
+                    "started_at": orphan.started_at.isoformat(),
+                },
+            )
+        run = Run(started_at=now, budget_tokens=effective_nightly_tokens(policy, now))
+        runs.add(run)
+        run_id = run.id
+        budget_tokens = run.budget_tokens
+
+    print(
+        f"run-night abre un Run nuevo ({run_id}) con presupuesto de noche completo "
+        f"({budget_tokens} tokens); dos invocaciones de run-night en la misma ventana "
+        "(un reintento manual, una unidad systemd con Restart=, un cron mal puesto) "
+        "gastan cada una su propio nightly_tokens, sin que nada lo note -- solo "
+        "window.hard_stop las acota.",
+        file=sys.stderr,
+    )
+    return run_id
+
+
+def _build_run_night(
+    *,
+    work: AgentWorkFactory,
+    work_run_id: UUID,
+    clock: Clock,
+    ingest: Callable[[], Awaitable[IngestResult]],
+    read_item: ReadItem,
+    popularize: PopularizeReading,
+    edit_night: EditNight,
+    run_id: UUID,
+    max_items: int,
+    max_consecutive_failures: int,
+    deadline_s: int,
+    deadline_reason: str = "hard_stop",
+) -> RunNight:
+    """Construye `RunNight`, comprobando explícitamente que `run_id` -- el
+    que `RunNight` reenviará a `EditNight.__call__` -- coincide con
+    `work_run_id`, el `run_id` con el que se construyó el `BudgetGuard` de
+    `work` (el argumento que recibió `_agent_work_factory`).
+
+    Cierra la deuda de T43 (`docs/TECHNICAL_DEBT.md`, "`EditNight(run_id)`
+    desacoplada del `BudgetGuard`"): `EditNight` no valida por sí sola que
+    el `run_id` que recibe en `__call__` coincide con el Run que vigila el
+    guard de la unidad de trabajo que usa. Con `RunNight` como segundo
+    llamante de `EditNight` -- junto a `cli.py::_edit_one_night`, el camino
+    de `run-item` --, esta función es el único punto del proyecto donde a
+    la vez se conocen ambos valores, así que la comprobación va aquí. Hoy
+    `work_run_id` y `run_id` son siempre la misma variable en el único
+    sitio que llama a esta función (`_run_night_for_real`); el aserto
+    documenta la invariante en vez de confiar en que dos parámetros con el
+    mismo valor no diverjan nunca, y protege sobre todo contra un futuro
+    cambio en la gestión de `Run` huérfanos (`_current_or_new_run_night`)
+    que sí maneja dos UUID distintos a la vez (el huérfano que cierra, el
+    nuevo que abre).
+
+    `deadline_reason` (por defecto `"hard_stop"`, revisión de T44 punto 2)
+    se reenvía tal cual a `RunNight`: es la etiqueta que
+    `_build_killed_result` fuerza en `notes` si el vigía dispara --
+    `"run_timeout"` cuando `_deadline_for_run_night` decidió que mandaba
+    `limits.run_timeout_s` en vez de la ventana de ejecución. `RunNight` no
+    ve `BudgetPolicy` y no puede decidirlo por su cuenta.
+    """
+    if work_run_id != run_id:
+        raise ValueError(
+            f"run_id de RunNight ({run_id}) no coincide con el run_id del BudgetGuard de "
+            f"work ({work_run_id})"
+        )
+    return RunNight(
+        work=work,
+        clock=clock,
+        ingest=ingest,
+        read_item=read_item,
+        popularize=popularize,
+        edit_night=edit_night,
+        run_id=run_id,
+        max_items=max_items,
+        max_consecutive_failures=max_consecutive_failures,
+        deadline_s=deadline_s,
+        deadline_reason=deadline_reason,
+    )
+
+
+def _print_run_night_report(result: RunNightResult) -> None:
+    """Informe humano de la noche completa, por `stdout` -- igual que el
+    resto de informes de este módulo (`_print_dry_run_report`,
+    `_print_read_item_report`...): la distinción `stdout`/`stderr` de este
+    módulo es informe legible frente a telemetría estructurada
+    (`docs/OPEN_DECISIONS.md`, T20, nº 42), no `run-item` frente a
+    `run-night`.
+    """
+    print()
+    print("Resumen de la noche:")
+    print(f"  estado: {result.status.value}")
+    print(
+        f"  ítems: ingeridos={result.items_fetched} leídos={result.items_read} "
+        f"fallidos={result.items_failed}"
+    )
+    print(f"  candidatos={result.candidates} publicados={result.findings_published}")
+    print(f"  tokens gastados={result.tokens_used}")
+    print(f"  notas: {result.notes}")
+
+
+def _run_night(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        return _run_night_dry_run(args)
+    return _run_night_for_real(args)
+
+
+def _run_night_dry_run(args: argparse.Namespace) -> int:
+    """Ingesta real de arXiv, persistida, más el plan de gasto -- sin llamar
+    a ningún agente ni instanciar `RunNight`. Comportamiento sin cambios
+    respecto a antes de T44 salvo la línea nueva de `_would_read_count` en
+    el plan de gasto (T44, paso 8)."""
     settings = Settings()
     config = load_pipeline_config()
     since = args.since if args.since is not None else _default_since(datetime.now(UTC))
@@ -445,9 +761,145 @@ def _run_night(args: argparse.Namespace) -> int:
 
     policy = budget_policy_from_config(config)
     clock = system_clock_from_config(config)
-    _print_budget_plan(policy, config.window.timezone, clock.now())
+    would_read = _would_read_count(config, settings)
+    _print_budget_plan(policy, config.window.timezone, clock.now(), would_read=would_read)
 
     return 0
+
+
+def _run_night_for_real(args: argparse.Namespace) -> int:
+    """Ejecuta la noche completa: ingesta, Reader, Popularizer, Editor, en
+    ese orden (T44, paso 3; ver el docstring del módulo, "T44, paso 3").
+
+    Códigos de salida (los de `run-item`, 1–6, no cambian): `0`
+    `RunNightResult.status is COMPLETED`, `7` `PARTIAL`, `8` `KILLED`
+    (`_EXIT_CODE_BY_RUN_STATUS`), `1` una excepción escapó de `RunNight` --
+    se cierra el `Run` como `FAILED` aquí mismo, con el traceback completo
+    en el log JSON (`_logger.exception`, nunca silenciado) antes de
+    devolver el código, sin enmascarar la excepción original (no se
+    relanza: un cron nocturno no debe terminar en un traceback crudo sin
+    que quede registro estructurado de qué pasó).
+    """
+    # Import perezoso, igual que en `_run_item`: un test de T20 comprueba
+    # que `claude_agent_sdk` no entra en `sys.modules` durante `--dry-run`,
+    # y este es el único camino de `run-night` que de verdad llama a un
+    # agente.
+    from nocturna.infrastructure.llm.agent_sdk_provider import AgentSDKProvider
+
+    configure_json_logging()
+
+    settings = Settings()
+    config = load_pipeline_config()
+    policy = budget_policy_from_config(config)
+    clock = system_clock_from_config(config)
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+
+    since = args.since if args.since is not None else _default_since(datetime.now(UTC))
+    categories = args.categories if args.categories is not None else config.sources.arxiv.categories
+
+    # Todo lo que puede fallar por sí solo, construido ANTES de abrir
+    # ningún `Run` (revisión de T44, punto 3): `AgentSDKProvider()` puede
+    # lanzar `ApiKeyInEnvironment`, `load_prompt` puede lanzar
+    # `FileNotFoundError` si falta un fichero en
+    # `application/agents/prompts/`. Antes de este orden, `_current_or_new_run_night`
+    # iba primero, y un fallo aquí dejaba un `Run` `RUNNING` colgado --
+    # bloqueando la noche siguiente y expuesto, mientras tanto, a que un
+    # `run-item` intermedio lo adoptara y gastara contra su presupuesto.
+    provider = AgentSDKProvider()
+    reader_prompt = load_prompt("reader")
+    popularizer_prompt = load_prompt("popularizer")
+    editor_prompt = load_prompt("editor")
+    deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
+
+    run_id = _current_or_new_run_night(session_factory, policy, clock)
+    work = _agent_work_factory(session_factory, run_id, policy, clock)
+
+    read_item = ReadItem(
+        work=work,
+        provider=provider,
+        system_prompt=reader_prompt,
+        prompt_version=READER_PROMPT_VERSION,
+        model=config.models.reader,
+        max_turns=config.limits.max_turns_per_agent,
+        estimated_tokens=config.budget.reader_estimated_tokens,
+        max_attempts=config.limits.max_calls_per_item,
+    )
+    popularize = PopularizeReading(
+        work=work,
+        provider=provider,
+        system_prompt=popularizer_prompt,
+        prompt_version=POPULARIZER_PROMPT_VERSION,
+        model=config.models.popularizer,
+        max_turns=config.limits.max_turns_per_agent,
+        estimated_tokens=config.budget.popularizer_estimated_tokens,
+        max_attempts=config.limits.max_calls_per_item,
+        min_interest_score=config.limits.popularizer_min_interest_score,
+    )
+    edit_night = EditNight(
+        work=work,
+        provider=provider,
+        clock=clock,
+        system_prompt=editor_prompt,
+        prompt_version=EDITOR_PROMPT_VERSION,
+        model=config.models.editor,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_editor_calls_per_night,
+        base_tokens=config.budget.editor_base_tokens,
+        tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+    )
+
+    async def _ingest() -> IngestResult:
+        return await _run_ingest(
+            since=since, categories=categories, config=config, settings=settings
+        )
+
+    night = _build_run_night(
+        work=work,
+        work_run_id=run_id,
+        clock=clock,
+        ingest=_ingest,
+        read_item=read_item,
+        popularize=popularize,
+        edit_night=edit_night,
+        run_id=run_id,
+        max_items=config.limits.max_items_per_night,
+        max_consecutive_failures=config.limits.max_consecutive_failures,
+        deadline_s=deadline_s,
+        deadline_reason=deadline_reason,
+    )
+
+    try:
+        result = asyncio.run(night())
+    except Exception:
+        # Ninguna excepción de `RunNight` debe dejar el Run `RUNNING`
+        # bloqueando la noche siguiente. Se cierra `FAILED` aquí mismo, con
+        # el traceback completo en el log JSON -- sin enmascarar la
+        # excepción original, que queda íntegra en `exc_info` -- y sin
+        # relanzarla: a diferencia de `_run_item` (camino interactivo de
+        # depuración, donde un traceback en la terminal es aceptable),
+        # `run-night` es un proceso de cron nocturno que debe terminar con
+        # un código de salida decidido y un registro estructurado, nunca
+        # con una traza cruda sin cerrar el Run.
+        _logger.exception(
+            "night.failed",
+            extra={"event": "night.failed", "run_id": str(run_id)},
+        )
+        _finish_run(session_factory, run_id, RunStatus.FAILED, clock.now())
+        return 1
+
+    _finish_run(
+        session_factory,
+        run_id,
+        result.status,
+        clock.now(),
+        notes=result.notes,
+        items_fetched=result.items_fetched,
+        items_read=result.items_read,
+        findings_published=result.findings_published,
+    )
+    _print_run_night_report(result)
+    return _EXIT_CODE_BY_RUN_STATUS[result.status]
 
 
 # --- run-item -----------------------------------------------------------
@@ -518,16 +970,34 @@ def _agent_work_factory(
 
 
 def _finish_run(
-    session_factory: sessionmaker[Session], run_id: UUID, status: RunStatus, at: datetime
+    session_factory: sessionmaker[Session],
+    run_id: UUID,
+    status: RunStatus,
+    at: datetime,
+    *,
+    notes: str | None = None,
+    items_fetched: int | None = None,
+    items_read: int | None = None,
+    findings_published: int | None = None,
 ) -> None:
-    """Cierra el `Run` que este proceso de `run-item` creó.
+    """Cierra el `Run` que este proceso creó, de `run-item` o de `run-night`.
 
     Cerrarlo es obligatorio: dejarlo `RUNNING` bloquearía la noche siguiente
     contra el índice único parcial `uq_runs_status_running`
     (`infrastructure/db/models.py`). Nunca deja escapar una excepción
     propia -- un fallo al cerrar se registra con `logging` y no debe
     enmascarar la excepción original que ya estaba en vuelo en el llamador
-    (`_run_item`, camino de `except Exception`).
+    (`_run_item`/`_run_night_for_real`, camino de `except Exception`).
+
+    `notes`/`items_fetched`/`items_read`/`findings_published` son `None`
+    por defecto: el camino de `run-item` (T41) no los toca, exactamente
+    igual que antes de T44. Cuando se pasan (`_run_night_for_real`, T44
+    paso 3), escriben los contadores monótonos y las notas de
+    `RunNightResult` que `RunNight` deja sin tocar a propósito (ver su
+    docstring, "Lo que este módulo NO hace") antes de cerrar el `Run` con
+    `Run.finish()`. `Run.finish(..., notes=None)` no toca `Run.notes` (ver
+    `domain/entities.py`), así que pasar `notes=None` desde `run-item`
+    reproduce exactamente el comportamiento de antes de este cambio.
     """
     try:
         with unit_of_work(session_factory) as session:
@@ -535,7 +1005,13 @@ def _finish_run(
             run = runs.get(run_id)
             if run is None:
                 raise LookupError(f"no existe Run con id={run_id} al intentar cerrarlo")
-            run.finish(status, at)
+            if items_fetched is not None:
+                run.items_fetched = items_fetched
+            if items_read is not None:
+                run.items_read = items_read
+            if findings_published is not None:
+                run.findings_published = findings_published
+            run.finish(status, at, notes=notes)
             runs.save(run)
     except Exception:
         _logger.exception(

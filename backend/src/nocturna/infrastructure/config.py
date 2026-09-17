@@ -107,6 +107,19 @@ class LimitsConfig(BaseModel):
     # «se decide si el interest_score >= 4 es el umbral correcto»: tiene que
     # ser calibrable sin tocar código. Ver comentario en config/pipeline.toml.
     popularizer_min_interest_score: int = Field(ge=1, le=5)
+    # max_consecutive_failures: cortacircuitos de fallos consecutivos de
+    # AgentRunner (cualquier rol). Mitigación (a) que docs/TECHNICAL_DEBT.md
+    # asigna a T44 para la fuga de ~600.000-800.000 tokens/noche de llamadas
+    # que mueren antes de un ResultMessage (timeout de socket, cancelación
+    # previa a cualquier respuesta, kill del proceso): sin contabilidad de
+    # tokens que leer, la única defensa es dejar de intentarlo. No vive en
+    # BudgetPolicy (application/budget.py): no es una regla de BudgetGuard
+    # sobre tokens, es una decisión de orquestación de RunNight sobre cuándo
+    # dejar de llamar. cli.py (T44, paso 3) la inyecta directamente en
+    # RunNight. Sin default, mismo motivo que las claves vecinas: que falte
+    # ruidosamente si alguien copia un TOML viejo. Ver comentario en
+    # config/pipeline.toml.
+    max_consecutive_failures: int = Field(gt=0)
 
 
 class WindowConfig(BaseModel):

@@ -20,7 +20,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Agente Reader | `application/agents/reader`, `application/use_cases/read_item.py` | done (T41) |
 | Agente Popularizer | `application/agents/popularizer`, `application/use_cases/popularize_reading.py` | done (T42) |
 | Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | done (T43) |
-| Orquestador nocturno | `application/use_cases/run_night.py` | pendiente (T44) |
+| Orquestador nocturno | `application/use_cases/run_night.py` | done (T44) |
 | API de lectura | FastAPI | pendiente (T50) |
 | Web | Next.js | pendiente (T51) |
 
@@ -28,16 +28,23 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 
 ```
 00:00  cron → nocturna run-night
-       ├─ crea Run
-       ├─ fetch_new(arXiv) → Items(new)               [sin LLM]
-       ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet]
-       ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding    [Sonnet]
-       ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos) → publica  [Opus]
-       └─ cierra Run (completed | partial | killed | failed)
-04:45  hard_stop incondicional
+       ├─ cierra `Run` huérfano si existe
+       ├─ crea `Run` nuevo
+       ├─ fetch_new(arXiv) → Items(new)               [sin LLM, Fase A]
+       ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet, Fase A]
+       ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding    [Sonnet, Fase B]
+       ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos) → publica  [Opus, Fase C]
+       └─ cierra Run (COMPLETED | PARTIAL | KILLED | FAILED)
+04:45  hard_stop incondicional (vigía asyncio + comprobación en cada authorize)
 ```
 
-**Nota**: `_edit_one_night` es la única función que devuelve `COMPLETED`. Reader y Popularizer devuelven su desenlace parcial; Editor cierra la noche.
+**Degradación de estado**: `RunNight` propone estados en orden de severidad decreciente (COMPLETED < PARTIAL < KILLED). Un desenlace de fase se transfiere al siguiente: si fase A devuelve PARTIAL (Reader no completó), fase B hereda PARTIAL y solo puede bajar a KILLED por timeout. Si fase C devuelve PARTIAL (no hay presupuesto para Editor), el Run cierra PARTIAL, pero no se pierde lo publicado de las fases anteriores (eso es decisión del Editor).
+
+**Mapa de desenlaces**: cada fase genera un desenlace que `_run_night_for_real` traduce a `RunStatus`. COMPLETED (noche íntegra) sale solo de fase C. Las fases A y B generan PARTIAL o KILLED; el Editor cierra con COMPLETED o PARTIAL. FAILED sale de una excepción inesperada.
+
+**Códigos de salida**: 0 = COMPLETED, 1 = PARTIAL/FAILED/KILLED, 7 = timeout de ejecución, 8 = error crítico.
+
+**Doble defensa del `hard_stop`**: vigía asyncio cancela en vuelo, comprobación de segundos restantes en cada autorización rechaza nuevo gasto.
 
 ## Capas
 
@@ -97,7 +104,27 @@ Implementado en T43. Orquestador de publicación. Recibe todos los `Finding` can
 
 **Candidatos huérfanos**: si el Editor falla (JSON inválido, timeout, error), sus `Finding` quedan sin `published_at` ni `confidence`. Los `Item` correspondientes quedan en `READ`. La noche se cierra `PARTIAL`. Ninguna noche futura los reintenta: `unpublished_for_run` filtra por `run_id`. Es característica correcta de fase 1.
 
-**`_edit_one_night` es el único cierre de `COMPLETED`**: Reader y Popularizer devuelven su desenlace parcial; solo `_edit_one_night` traduce un desenlace exitoso del Editor a `RunStatus.COMPLETED`. Corrige la deuda de T42.
+**`_edit_one_night` es el único cierre de `COMPLETED`**: Reader y Popularizer devuelven su desenlace parcial; solo `_edit_one_night` traduce un desenlace exitoso del Editor a `RunStatus.COMPLETED`. Corrige la deuda de T42. El Editor es la última etapa de la noche y tiene poder unilateral de cerrar. Si falla (JSON inválido, timeout, gasto), ningún `Finding` se publica y la noche cierra PARTIAL; si no hay gasto ni fallo, aún puede no publicar nada si todos los candidatos son rechazados por criterio editorial.
+
+## Orquestador nocturno (T44)
+
+Implementado en T44. `RunNight` en `application/use_cases/run_night.py` corre las tres fases en orden (Ingesta, Reader, Popularizer, Editor). Cada fase se autoriza antes de ejecutar y reporta un desenlace (`COMPLETED`, `PARTIAL`, `KILLED`). `_run_night_for_real` en `cli.py` instancia `RunNight`, invoca `run()`, recibe el desenlace final y cierra el `Run` con su `status`, contadores y métricas.
+
+**Política de `Run` huérfano**: al iniciar, `_current_or_new_run_night` comprueba si existe un `Run` en `RUNNING` del inicio de hoy (entre `window.start` y ahora). Si existe, lo cierra como `KILLED` (interpretación: interrupción de noche anterior) y abre uno nuevo. Si no existe, abre uno nuevo. Este comportamiento es específico de `run-night`; `run-item` mantiene el camino anterior (adoptar un `RUNNING` vivo para depuración).
+
+**Validación inicial**: `_build_run_night` comprueba que `run.budget_tokens == effective_nightly_tokens(policy, now)` (ley congelada por test), validador de reserva presupuestaria confirma que la estimación del Editor cabe, y `_deadline_for_run_night` calcula segundos hasta `hard_stop`.
+
+**Logging estructurado**: cada línea de log es JSON (line 1 = inicio, línea 2 = por ítem, línea N = cierre con métricas). El flujo usa la utilidad `configure_json_logging()` de `infrastructure/logging.py` que redirige a `stderr` con `default=str` y fallback a línea mínima si la serialización revienta.
+
+**Vigía de `hard_stop`**: `_deadline_for_run_night` retorna un `Deadline` con segundos restantes. Dentro de `RunNight.run()` hay un `asyncio.timeout()` que cancela en vuelo si expira. Además, cada llamada a `authorize()` comprueba `seconds_until_hard_stop() > 0` y rechaza si la ventana se cerró. La doble defensa garantiza que ninguna llamada sobrevive a las 04:45.
+
+**Desenlaces de fase y degradación**: Fase A (Ingesta + Reader) devuelve `COMPLETED` si ingesta OK y `items_read >= 1`, `PARTIAL` si Reader agota presupuesto, `KILLED` si `hard_stop` interrumpe. Fase B (Popularizer) hereda el desenlace y puede bajar a `PARTIAL` si agota presupuesto, `KILLED` por timeout. Fase C (Editor) recibe candidatos de fase B; si los contadores muestran `hard_stop`, rechaza sin llamar; si hay gasto, devuelve `COMPLETED` (Editor publicó algo) o `PARTIAL` (Editor rechazó todo o no hay gasto); si falla (JSON, error), devuelve `PARTIAL`. El desenlace de la noche es el máximo (monotonía descendente: `COMPLETED > PARTIAL > KILLED`).
+
+**Cortacircuitos**: `max_consecutive_failures = 5` (Reader o Popularizer per phase): tras 5 fallos monótonos en la misma fase, se cierra esa fase con `PARTIAL` y se sigue (fuga ~50.000 tokens, acotada). El contador se reinicia al cambiar de fase, de modo que una noche con fallos alternos sigue limitada por `CALL_LIMIT_REACHED` (80 llamadas/rol).
+
+**Reconciliación de tokens**: `run.budget_tokens` fija el presupuesto efectivo al crear el `Run`. Después del cierre, no se toca `run.tokens_used` (campo desnormalizado); el informe de T60 suma `AgentCall` de ese `Run` usando `AgentCallRepository.tokens_used_for_run()`.
+
+**Nota sobre presupuesto agotado en fase B**: `CLAUDE.md` afirma «si el presupuesto se agota antes del Editor… no se publica nada esa noche». Esto es cierto: Reader y Popularizer comparten un pool de presupuesto. Si ese pool se agota en fase B (Popularizer), ningún candidato se crea, fase C no se invoca, no se publica nada. **Pero** si el presupuesto se agota durante fase C (Editor), los candidatos de fase B que ya se crearon se descartan (no se publican). La reserva del Editor es un suelo separado: agotar la reserva de Reader/Popularizer no impide que el Editor intente, pero si no hay presupuesto en su reserva tampoco se publica. No es contradicción: el mecanismo es correcto, pero un lector futuro podría malinterpretar la frase de `CLAUDE.md`. Ver ADR 0005 § 8 para detalle.
 
 ## Control de gasto
 
