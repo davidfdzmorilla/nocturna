@@ -22,32 +22,66 @@ también el único sitio del proyecto que implementa `AgentWorkFactory`
 implementación concreta -- que sí importa `Session` -- vive aquí, en el
 composition root, y en ningún otro sitio.
 
-Códigos de salida de `run-item`: `0` éxito, `1` lectura fallida (JSON
-inválido agotado tras los reintentos, un `LLMTimeout`/`LLMRateLimited` o
-cualquier otro `LLMError` del proveedor -- `ReadItem` (T41) captura los tres
-y los traduce a `ReadItemResult.outcome`; ninguno llega a `cli.py` como
-excepción, ver `_read_one_item`), `2` UUID de `item_id` mal formado (lo
-produce `argparse` al fallar la conversión de tipo, no código propio), `3`
-el ítem no existe o no está en `NEW`, `4` denegación de `BudgetGuard`
-(incluida la ventana de ejecución fuera de horario -- sin ninguna bandera
-para saltarla, `budget-guard-review` § 1; el `Run` que esta invocación haya
-creado se cierra con `terminal_status_for(exc.reason)`, `KILLED` para
-`OUTSIDE_WINDOW` y `PARTIAL` para el resto, nunca un literal a mano; desde
-T42 puede venir tanto del Reader como del Popularizer, `_print_budget_denial`
-nombra el rol), `5` lectura correcta pero divulgación fallida (T42: el mismo
-abanico de `PopularizeOutcome` que el `1`, pero después de una lectura que sí
-tuvo éxito -- distingue "no se pudo leer" de "se leyó pero no se pudo
-divulgar" sin releer la base). El proveedor se construye sin `mcp_servers` ni
-`allowed_tools`: inyectar MCP haría que `query()` emita varios
-`ResultMessage` y que `AgentSDKProvider` se quede solo con el gasto del
-último (`docs/TECHNICAL_DEBT.md`, "obligatorio revisar antes de que T41 pase
-`mcp_servers` a ningún rol").
+Códigos de salida de `run-item`: `0` noche completa (el Editor se ejecutó
+-- con o sin publicaciones -- o no había ningún candidato que ofrecerle),
+`1` lectura fallida (JSON inválido agotado tras los reintentos, un
+`LLMTimeout`/`LLMRateLimited` o cualquier otro `LLMError` del proveedor --
+`ReadItem` (T41) captura los tres y los traduce a `ReadItemResult.outcome`;
+ninguno llega a `cli.py` como excepción, ver `_read_one_item`), `2` UUID de
+`item_id` mal formado (lo produce `argparse` al fallar la conversión de
+tipo, no código propio), `3` el ítem no existe o no está en `NEW`, `4`
+denegación de `BudgetGuard` con un motivo **distinto** de
+`EDITOR_ALREADY_CALLED` (incluida la ventana de ejecución fuera de horario
+-- sin ninguna bandera para saltarla, `budget-guard-review` § 1; el `Run`
+que esta invocación haya creado se cierra con
+`terminal_status_for(exc.reason)`, `KILLED` para `OUTSIDE_WINDOW` y
+`PARTIAL` para el resto, nunca un literal a mano; desde T42 puede venir del
+Reader o del Popularizer, y desde T43 también del Editor,
+`_print_budget_denial` nombra el rol), `5` lectura correcta pero
+divulgación fallida (T42: el mismo abanico de `PopularizeOutcome` que el
+`1`, pero después de una lectura que sí tuvo éxito -- distingue "no se pudo
+leer" de "se leyó pero no se pudo divulgar" sin releer la base), `6` (T43)
+el Editor falló habiendo candidatos que ofrecerle -- JSON inválido agotado
+tras los reintentos, timeout, límite de tasa, error del proveedor, o
+`EDITOR_ALREADY_CALLED` (que **no** pasa por `terminal_status_for`, ver "T43,
+paso 5" más abajo) -- cierra `PARTIAL` en los dos casos. El proveedor se
+construye sin `mcp_servers` ni `allowed_tools`: inyectar MCP haría que
+`query()` emita varios `ResultMessage` y que `AgentSDKProvider` se quede
+solo con el gasto del último (`docs/TECHNICAL_DEBT.md`, "obligatorio
+revisar antes de que T41 pase `mcp_servers` a ningún rol").
 
 **T42, paso 8: se encadena el Popularizer tras una lectura con éxito.** La
 `Reading` se persiste y se confirma en su propia unidad de trabajo, dentro
 de `ReadItem.__call__`, antes de que `_read_one_item` invoque siquiera
 `PopularizeReading`: ningún fallo del Popularizer (`BudgetDenied` incluido)
 puede perder una `Reading` ya escrita.
+
+**T43, paso 5: se encadena el Editor tras el Popularizer.** Es la única
+forma de ejercitar el Editor antes del orquestador nocturno (T44). Los dos
+caminos de éxito de `_popularize_one_reading` -- divulgado, y descartado
+por `interest_score` bajo -- dejan de decidir `COMPLETED` por su cuenta:
+delegan el `(exit_code, run_status)` entero en la nueva `_edit_one_night`,
+que pasa a ser la única función de este módulo que puede devolver
+`RunStatus.COMPLETED` (salda la deuda anotada en `docs/TECHNICAL_DEBT.md`,
+T42, "el arreglo del Run resiste a medias": antes de este paso esos dos
+`return` eran correctos solo porque el Popularizer era la última etapa).
+Sin candidatos (`EditOutcome.NO_CANDIDATES` -- el caso "descartado por score
+bajo", que nunca deja un `Finding` que ofrecer), `EditNight` no autoriza
+nada, coste cero, y la noche cierra `COMPLETED` igual: encaja solo con el
+mismo patrón. `max_attempts` del Editor se ata a
+`limits.max_editor_calls_per_night` (`config/pipeline.toml`), para que el
+bucle de reintento de `AgentRunner` y el tope de `BudgetGuard` nunca puedan
+discrepar entre sí -- un segundo intento pasa por su propio `authorize`,
+que ve `1 < 2` y autoriza; un tercero sería denegado con
+`EDITOR_ALREADY_CALLED`. Ese motivo es el único de `BudgetDenied` que **no**
+pasa por `terminal_status_for`: esa función lanza `ValueError` a propósito
+para él (`application/budget.py`, docstring de `terminal_status_for`)
+porque "el Editor ya agotó sus intentos" es un fin de noche normal, no una
+anomalía que deba forzar el cierre del Run desde ahí -- es responsabilidad
+de quien orquesta, aquí en `_edit_one_night`, distinguirlo antes de llamar
+a esa función. Cierra la decisión abierta nº 72 de
+`docs/OPEN_DECISIONS.md`: el arreglo va en el sitio de llamada, no en
+`budget.py`.
 
 **Presupuesto de noche entre invocaciones sueltas de `run-item`.** Cada
 invocación sin un `Run` `RUNNING` vivo crea el suyo propio con
@@ -83,6 +117,7 @@ import httpx
 from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.application.agents.prompt_loader import (
+    EDITOR_PROMPT_VERSION,
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
     load_prompt,
@@ -98,6 +133,7 @@ from nocturna.application.budget import (
     terminal_status_for,
 )
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
+from nocturna.application.use_cases.edit_night import EditNight, EditNightResult, EditOutcome
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
 from nocturna.application.use_cases.popularize_reading import (
     PopularizeOutcome,
@@ -105,6 +141,7 @@ from nocturna.application.use_cases.popularize_reading import (
     PopularizeResult,
 )
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition
 from nocturna.domain.llm import AgentRole, LLMProvider
@@ -190,6 +227,7 @@ def budget_policy_from_config(config: PipelineConfig) -> BudgetPolicy:
         max_editor_calls_per_night=config.limits.max_editor_calls_per_night,
         max_calls_per_item=config.limits.max_calls_per_item,
         item_timeout_s=config.limits.item_timeout_s,
+        editor_timeout_s=config.limits.editor_timeout_s,
         run_timeout_s=config.limits.run_timeout_s,
         window_start=config.window.start,
         window_hard_stop=config.window.hard_stop,
@@ -452,7 +490,7 @@ def _agent_work_factory(
     toca SQLAlchemy: cada llamada a la función devuelta abre una
     `unit_of_work` nueva y construye el `BudgetGuard` de `run_id` y los
     cinco repositorios que necesita un caso de uso de agente (`ReadItem`,
-    T41; `PopularizeReading`, T42; `EditNight`, T43 más adelante).
+    T41; `PopularizeReading`, T42; `EditNight`, T43).
     """
 
     @contextmanager
@@ -577,6 +615,8 @@ def _popularize_one_reading(
     work: AgentWorkFactory,
     provider: LLMProvider,
     config: PipelineConfig,
+    clock: Clock,
+    run_id: UUID,
 ) -> tuple[int, RunStatus]:
     """Ejecuta el Popularizer sobre `reading` y traduce el resultado a
     `(exit_code, run_status)`.
@@ -585,20 +625,22 @@ def _popularize_one_reading(
     terminal con el que `_run_item` debe cerrar el `Run` que él mismo haya
     creado -- nunca un valor que el llamador tenga que inferir después a
     partir de si hubo o no una `Reading` (ver el docstring de
-    `_read_one_item` para el porqué). `0` si se divulgó o si se descartó
-    por `interest_score` bajo (ninguno de los dos es un fallo: ambos cierran
-    `COMPLETED`, la noche hizo lo que tenía que hacer con este ítem), `4` si
-    `BudgetGuard` deniega la llamada al Popularizer
-    (`terminal_status_for(exc.reason)`, igual que en el Reader), `5` para
-    cualquier otro desenlace que no sea `POPULARIZED` (JSON inválido
-    agotados los reintentos, timeout, límite de tasa o error del
-    proveedor) -- ese `5` cierra `PARTIAL`: el Reader tuvo éxito pero el
+    `_read_one_item` para el porqué). `4` si `BudgetGuard` deniega la
+    llamada al Popularizer (`terminal_status_for(exc.reason)`, igual que en
+    el Reader), `5` para cualquier otro desenlace que no sea `POPULARIZED`
+    (JSON inválido agotados los reintentos, timeout, límite de tasa o error
+    del proveedor) -- ese `5` cierra `PARTIAL`: el Reader tuvo éxito pero el
     ciclo completo del ítem no, y `Run.status` no debe decir lo contrario
     (bug de T42 fijado por
-    `test_popularizer_fallido_devuelve_5_deja_la_reading_intacta`). Toda la
-    configuración del Popularizer (modelo, turnos, versión de prompt,
-    estimación de coste, intentos, umbral) sale de `config`, nunca
-    hardcodeada (T42, paso 8).
+    `test_popularizer_fallido_devuelve_5_deja_la_reading_intacta`). Los dos
+    desenlaces que SÍ son éxito -- se divulgó, o se descartó por
+    `interest_score` bajo -- ya no deciden `COMPLETED` por su cuenta (T43,
+    paso 5): ninguno de los dos es un fallo, pero ambos delegan el
+    `(exit_code, run_status)` entero en `_edit_one_night`, la única función
+    de este módulo que puede devolver `RunStatus.COMPLETED` (ver el
+    docstring del módulo, "T43, paso 5"). Toda la configuración del
+    Popularizer (modelo, turnos, versión de prompt, estimación de coste,
+    intentos, umbral) sale de `config`, nunca hardcodeada (T42, paso 8).
     """
     popularize = PopularizeReading(
         work=work,
@@ -623,7 +665,9 @@ def _popularize_one_reading(
             f"umbral={config.limits.popularizer_min_interest_score} "
             "(no se llama al Popularizer)"
         )
-        return 0, RunStatus.COMPLETED
+        return _edit_one_night(
+            work=work, provider=provider, config=config, clock=clock, run_id=run_id
+        )
 
     if result.outcome is not PopularizeOutcome.POPULARIZED:
         # JSON inválido agotados los reintentos, un timeout, un límite de
@@ -641,6 +685,118 @@ def _popularize_one_reading(
         return 5, RunStatus.PARTIAL
 
     _print_popularize_report(result=result, work=work, config=config)
+    return _edit_one_night(work=work, provider=provider, config=config, clock=clock, run_id=run_id)
+
+
+def _print_edit_night_report(
+    *, result: EditNightResult, work: AgentWorkFactory, config: PipelineConfig
+) -> None:
+    with work() as w:
+        remaining = w.guard.remaining_for(AgentRole.EDITOR)
+
+    print(
+        f"  Editor: modelo={config.models.editor} · prompt={EDITOR_PROMPT_VERSION} · "
+        f"intentos={result.attempts}"
+    )
+    print(f"  tokens gastados={result.tokens_spent} · tokens restantes para el Editor={remaining}")
+    print(
+        f"  candidatos={result.candidates} · publicados={len(result.published)} · "
+        f"descartados={len(result.discarded)}"
+    )
+    for finding in result.published:
+        reason = result.reasons.get(finding.item_id, "")
+        print(
+            f"    publicado: {finding.title} "
+            f"(finding_id={finding.id}, confidence={finding.confidence}, motivo: {reason})"
+        )
+    if result.unknown_item_ids:
+        print(
+            f"  AVISO: el Editor aprobó {len(result.unknown_item_ids)} item_id que no "
+            f"están entre los candidatos, ignorados: {', '.join(result.unknown_item_ids)}",
+            file=sys.stderr,
+        )
+
+
+def _edit_one_night(
+    *,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    config: PipelineConfig,
+    clock: Clock,
+    run_id: UUID,
+) -> tuple[int, RunStatus]:
+    """Ejecuta el Editor sobre los candidatos pendientes de `run_id` y traduce
+    el resultado a `(exit_code, run_status)`.
+
+    Única función de este módulo que puede devolver `RunStatus.COMPLETED`
+    (T43, paso 5; ver el docstring del módulo). `max_attempts` se ata a
+    `limits.max_editor_calls_per_night` -- nunca a `max_calls_per_item`, que
+    es del Reader/Popularizer -- para que el bucle de reintento de
+    `AgentRunner` y el tope de `BudgetGuard` no puedan discrepar.
+
+    `0` si el Editor decidió la noche (con o sin publicaciones,
+    `EditOutcome.EDITED`) o si no había ningún candidato
+    (`EditOutcome.NO_CANDIDATES`, coste cero): en ambos casos la noche hizo
+    lo que tenía que hacer, `COMPLETED`. `4` si `BudgetGuard` deniega la
+    llamada al Editor por un motivo distinto de `EDITOR_ALREADY_CALLED`
+    (`terminal_status_for(exc.reason)`, igual que en el Reader y el
+    Popularizer). `6` en los dos casos que dejan candidatos sin decidir: el
+    Editor falló (JSON inválido agotados los reintentos, timeout, límite de
+    tasa o error del proveedor) o `EDITOR_ALREADY_CALLED` -- este último
+    **no** pasa por `terminal_status_for` (esa función lanza `ValueError` a
+    propósito para ese motivo, ver su docstring en `application/budget.py`,
+    y `docs/OPEN_DECISIONS.md` nº 72): se distingue aquí, en el sitio de
+    llamada, antes de invocarla.
+    """
+    edit_night = EditNight(
+        work=work,
+        provider=provider,
+        clock=clock,
+        system_prompt=load_prompt("editor"),
+        prompt_version=EDITOR_PROMPT_VERSION,
+        model=config.models.editor,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_editor_calls_per_night,
+        base_tokens=config.budget.editor_base_tokens,
+        tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+    )
+    try:
+        result = asyncio.run(edit_night(run_id=run_id))
+    except BudgetDenied as exc:
+        if exc.reason is DenyReason.EDITOR_ALREADY_CALLED:
+            # No cierra la noche por `terminal_status_for` (le lanzaría
+            # `ValueError` a propósito, ver el docstring de esta función):
+            # "el Editor ya agotó sus intentos" es un fin de noche normal,
+            # no una anomalía -- pero con candidatos sin decidir, tampoco es
+            # un `COMPLETED`.
+            print(
+                f"BudgetGuard denegó la llamada al Editor: {exc.reason.value} "
+                f"(quedan {exc.remaining_tokens} tokens); el Editor ya agotó sus intentos "
+                "de esta noche (limits.max_editor_calls_per_night)",
+                file=sys.stderr,
+            )
+            return 6, RunStatus.PARTIAL
+        _print_budget_denial(exc, role="Editor")
+        return 4, terminal_status_for(exc.reason)
+
+    if result.outcome is EditOutcome.NO_CANDIDATES:
+        print("Editor: sin candidatos esta noche (ningún Finding pendiente de publicar)")
+        return 0, RunStatus.COMPLETED
+
+    if result.outcome is not EditOutcome.EDITED:
+        # JSON inválido agotados los reintentos, timeout, límite de tasa o
+        # error del proveedor: `EditNight` (T43) capturó la excepción y la
+        # tradujo aquí a un `outcome` distinto de `EDITED`. Había
+        # candidatos y ninguno se decidió: la noche se queda corta.
+        print(
+            f"decisión del Editor fallida: {result.outcome.value} "
+            f"(candidatos={result.candidates}, intentos={result.attempts}, "
+            f"tokens gastados={result.tokens_spent})",
+            file=sys.stderr,
+        )
+        return 6, RunStatus.PARTIAL
+
+    _print_edit_night_report(result=result, work=work, config=config)
     return 0, RunStatus.COMPLETED
 
 
@@ -667,6 +823,7 @@ def _read_one_item(
     work: AgentWorkFactory,
     provider: LLMProvider,
     config: PipelineConfig,
+    clock: Clock,
     run_id: UUID,
 ) -> tuple[int, RunStatus]:
     """Ejecuta el Reader sobre `item` y, si produce una `Reading`, encadena el
@@ -690,11 +847,13 @@ def _read_one_item(
     no hay booleano que reinterpretar ni `override` opcional que se pueda
     olvidar: cuando el Reader tiene éxito, este método delega el
     `(exit_code, run_status)` entero en `_popularize_one_reading`, tal
-    cual, sin mezclarlo con nada decidido aquí. Cuando T43 añada el Editor
-    como tercera etapa, el mismo patrón aplica -- la función que decide el
+    cual, sin mezclarlo con nada decidido aquí. T43 añadió el Editor como
+    tercera etapa siguiendo el mismo patrón -- la función que decide el
     desenlace de esa etapa decide también, en el mismo `return`, el
     `run_status` que le corresponde; no hay un valor por defecto que
-    "olvidarse de sobrescribir".
+    "olvidarse de sobrescribir" (ver el docstring del módulo, "T43, paso
+    5"). `clock` viaja hasta `_edit_one_night`, que lo necesita para
+    `Finding.publish(confidence, at)`.
 
     La `Reading` se persiste y se confirma en su propia unidad de trabajo
     dentro de `ReadItem.__call__`, antes de que este método siquiera
@@ -754,7 +913,13 @@ def _read_one_item(
         run_id=run_id,
     )
     return _popularize_one_reading(
-        item=item, reading=reading, work=work, provider=provider, config=config
+        item=item,
+        reading=reading,
+        work=work,
+        provider=provider,
+        config=config,
+        clock=clock,
+        run_id=run_id,
     )
 
 
@@ -794,8 +959,8 @@ def _run_item(args: argparse.Namespace) -> int:
     # proceso haya creado (si `run_reused`, nadie lo cierra aquí, ver
     # `_current_or_new_run`). El valor inicial es el que corresponde al
     # camino "item is None" más abajo, el único que se decide en este
-    # método en vez de en `_read_one_item`/`_popularize_one_reading`;
-    # cualquier otro camino lo sobrescribe explícitamente.
+    # método en vez de en `_read_one_item`/`_popularize_one_reading`/
+    # `_edit_one_night`; cualquier otro camino lo sobrescribe explícitamente.
     exit_code = 1
     status = RunStatus.PARTIAL
     try:
@@ -811,6 +976,7 @@ def _run_item(args: argparse.Namespace) -> int:
                 work=work,
                 provider=AgentSDKProvider(),
                 config=config,
+                clock=clock,
                 run_id=run_id,
             )
     except Exception:

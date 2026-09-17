@@ -27,11 +27,14 @@ weekly_reset_hour = 0
 reset_day_multiplier = 1.0
 reader_estimated_tokens = 6000
 popularizer_estimated_tokens = 7000
+editor_base_tokens = 4000
+editor_tokens_per_candidate = 700
 
 [limits]
 max_items_per_night = 40
 max_turns_per_agent = 3
 item_timeout_s = 180
+editor_timeout_s = 300
 run_timeout_s = 16200
 max_editor_calls_per_night = 2
 max_calls_per_item = 2
@@ -67,6 +70,8 @@ def test_carga_el_pipeline_toml_del_repositorio():
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
     assert config.budget.nightly_tokens == 300000
+    assert config.budget.editor_base_tokens == 4000
+    assert config.budget.editor_tokens_per_candidate == 700
     assert config.limits.max_items_per_night == 40
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
@@ -117,6 +122,61 @@ def test_reserva_del_editor_menor_que_el_presupuesto_nocturno(tmp_path):
     content = BASE_TOML.replace(
         "editor_reserve_tokens = 60000",
         "editor_reserve_tokens = 300000",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="editor_reserve_tokens"):
+        load_pipeline_config(path)
+
+
+def test_falta_editor_base_tokens_falla(tmp_path):
+    content = BASE_TOML.replace("editor_base_tokens = 4000\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_editor_tokens_per_candidate_falla(tmp_path):
+    content = BASE_TOML.replace("editor_tokens_per_candidate = 700\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_editor_base_tokens_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "editor_base_tokens = 4000",
+        f"editor_base_tokens = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_editor_tokens_per_candidate_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "editor_tokens_per_candidate = 700",
+        f"editor_tokens_per_candidate = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_reserva_del_editor_no_cubre_el_peor_caso_de_candidatos_falla(tmp_path):
+    # editor_base_tokens (4000) + max_items_per_night (40) *
+    # editor_tokens_per_candidate (700) = 32000, que cabe en
+    # editor_reserve_tokens = 60000. Bajar la reserva por debajo de ese
+    # peor caso debe hacer fallar la carga, de día, no a las 04:00.
+    content = BASE_TOML.replace(
+        "editor_reserve_tokens = 60000",
+        "editor_reserve_tokens = 30000",
     )
     path = _write_toml(tmp_path, content)
 

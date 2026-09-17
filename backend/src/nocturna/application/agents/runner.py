@@ -174,7 +174,7 @@ class AgentRunner:
             # eso (regla 6), así que sale de `run()` sin traducir.
             with self._work() as w:
                 w.guard.authorize(self._role, self._estimated_tokens)
-                timeout_s = w.guard.timeout_for_call()
+                timeout_s = w.guard.timeout_for_call(self._role)
                 run = w.runs.current()
                 # `authorize` ya ha confirmado, en esta misma unidad de
                 # trabajo, que hay un Run en RUNNING vigilado por este

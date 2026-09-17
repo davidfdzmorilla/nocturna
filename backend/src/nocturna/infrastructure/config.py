@@ -56,6 +56,18 @@ class BudgetConfig(BaseModel):
     # TOML viejo. No vive en `BudgetPolicy` (esa describe reglas del guard, no
     # estimaciones por rol). Ver comentario en config/pipeline.toml.
     popularizer_estimated_tokens: int = Field(gt=0)
+    # editor_base_tokens: parte fija de la estimación de coste de la única
+    # llamada al Editor por noche. Sin default, mismo motivo que las claves
+    # de estimación vecinas: que falte ruidosamente si alguien copia un TOML
+    # viejo. `PipelineConfig` la combina con `editor_tokens_per_candidate` y
+    # `limits.max_items_per_night` para comprobar que la reserva del Editor
+    # basta en el peor caso (ver `PipelineConfig._editor_reserve_covers_worst_case`).
+    # Ver comentario en config/pipeline.toml.
+    editor_base_tokens: int = Field(gt=0)
+    # editor_tokens_per_candidate: coste marginal, por candidato, de la
+    # llamada al Editor. Mismo motivo de ausencia de default que
+    # editor_base_tokens. Ver comentario en config/pipeline.toml.
+    editor_tokens_per_candidate: int = Field(gt=0)
 
     @model_validator(mode="after")
     def _reserve_within_nightly_budget(self) -> "BudgetConfig":
@@ -73,6 +85,13 @@ class LimitsConfig(BaseModel):
     max_turns_per_agent: int = Field(gt=0)
     item_timeout_s: int = Field(gt=0)
     run_timeout_s: int = Field(gt=0)
+    # editor_timeout_s: timeout propio de la llamada al Editor, separado de
+    # item_timeout_s (pensado para un único abstract, no para los hasta
+    # max_items_per_night candidatos que recibe el Editor en una sola
+    # llamada a Opus). Sin default, por el mismo motivo que las claves
+    # vecinas: que falte ruidosamente si alguien copia un TOML viejo. Ver
+    # comentario en config/pipeline.toml.
+    editor_timeout_s: int = Field(gt=0)
     # Cuenta intentos, no éxitos: lo que gasta presupuesto es la llamada, no
     # el acierto. Ver comentario en config/pipeline.toml.
     max_editor_calls_per_night: int = Field(ge=1)
@@ -173,6 +192,36 @@ class PipelineConfig(BaseModel):
     models: ModelsConfig
     sources: SourcesConfig
     llm: LLMConfig
+
+    @model_validator(mode="after")
+    def _editor_reserve_covers_worst_case(self) -> "PipelineConfig":
+        """La reserva del Editor debe cubrir el peor caso de candidatos.
+
+        `budget` y `limits` viven en secciones distintas de `pipeline.toml`
+        y este es el único modelo que ve ambas a la vez; el validador vive
+        aquí y no en `BudgetConfig` por eso. El peor caso es que los
+        `limits.max_items_per_night` ítems de la noche lleguen todos como
+        candidatos al Editor: si `editor_base_tokens +
+        max_items_per_night * editor_tokens_per_candidate` no cabe en
+        `editor_reserve_tokens`, quien calibre `max_items_per_night` o las
+        estimaciones por candidato en T60 sin subir la reserva a la vez
+        debe ver la carga de la configuración fallar de día, no descubrirlo
+        a las 04:00 con la noche entera pagada y el Editor sin presupuesto
+        para publicar nada.
+        """
+        worst_case = (
+            self.budget.editor_base_tokens
+            + self.limits.max_items_per_night * self.budget.editor_tokens_per_candidate
+        )
+        if worst_case > self.budget.editor_reserve_tokens:
+            raise ValueError(
+                "editor_reserve_tokens "
+                f"({self.budget.editor_reserve_tokens}) no cubre el peor caso de "
+                f"editor_base_tokens + max_items_per_night * editor_tokens_per_candidate "
+                f"({self.budget.editor_base_tokens} + {self.limits.max_items_per_night} * "
+                f"{self.budget.editor_tokens_per_candidate} = {worst_case})"
+            )
+        return self
 
 
 def _repo_root() -> Path:

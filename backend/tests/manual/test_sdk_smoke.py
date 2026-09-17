@@ -243,6 +243,7 @@ def _test_policy() -> BudgetPolicy:
         # no sale de este literal, sale de `BudgetGuard.timeout_for_call()`
         # aplicado sobre esta política, ver (b) en el docstring del módulo.
         item_timeout_s=30,
+        editor_timeout_s=300,
         run_timeout_s=60,
         window_start=_WINDOW_START,
         window_hard_stop=_WINDOW_HARD_STOP,

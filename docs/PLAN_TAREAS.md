@@ -100,10 +100,16 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Cerrada: 2026-09-17** · Hallazgo real del Popularizer producido. Tres humos ejecutados. Suite: 665 passed.
 
 ### T43 · Agente Editor
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T42
-- **Alcance**: prompt en `prompts/editor.md`. Recibe todos los `Finding` candidatos de la noche en **una sola llamada** con Opus; devuelve lista de `item_id` a publicar, `confidence` y motivo. Caso de uso `EditNight` que publica los aprobados y descarta el resto.
-- **Hecho cuando**: tests: publica solo los aprobados; si `BudgetGuard` no permite la llamada, ningún `Finding` se publica y el `Run` queda `partial`.
+- **Alcance**: prompt en `prompts/editor.md` (versionado `editor-v1`). Recibe todos los `Finding` candidatos de la noche en **una sola llamada** con Opus; devuelve lista de `item_id` a publicar, `confidence` y motivo. Caso de uso `EditNight` que publica los aprobados y cierra el `Run` como `COMPLETED` (único cierre de COMPLETED del proyecto). Timeout rol-dependiente `editor_timeout_s = 300` s. Estimación lineal `base + N×per_candidato`. Validador de reserva presupuestaria cierra al cargar configuración.
+- **Implementación completada**: 2026-09-17 · **720 passed, 4 deselected** · Tests: publica solo los aprobados; si `BudgetGuard` no permite la llamada, ningún `Finding` se publica y el `Run` queda `partial`. Flujo `_edit_one_night` es punto único que devuelve `COMPLETED`, corrigiendo deuda de T42.
+- **Dos revisiones completadas · ambas aprobadas.** Ronda 1 general: estructura de `EditNight`, transiciones de estado, contabilidad de tokens. Ronda 2 control de gasto: validador de reserva, estimación lineal, invariante de `hard_stop` preservada, timeout rol-dependiente no quiebra ADR 0005 (segundo término del `min()` es siempre `seconds_until_hard_stop`).
+- **Humo manual escrito pero NO EJECUTADO**: `tests/manual/test_edit_night_smoke.py` está listo. Es **primer uso de Opus del proyecto**. El autor debe ejecutarlo (`env NOCTURNA_ALLOW_REAL_CLAUDE=1 uv run pytest -m manual tests/manual/test_edit_night_smoke.py -s`) y registrar gasto real en `docs/CALIBRACION.md` (T60).
+- **Decisiones resueltas**: `terminal_status_for(EDITOR_ALREADY_CALLED)` se maneja en `cli.py`, no en `budget.py`. El `ValueError` es correcto como mecanismo defensivo.
+- **Decisiones abiertas nuevas**: (1) motivo del Editor no se persiste (solo log); (2) truncamiento vs denegación de candidatos si no cabe; (3) entrada del Editor: `title+level_curious` vs incluir `level_technical`; (4) candidatos huérfanos tras fallo del Editor; (5) valores `editor_base_tokens=4000`, `editor_tokens_per_candidate=700` sin datos reales de Opus. Nota: asimetría entre `max_editor_calls_per_night=2` e `editor_reserve_tokens=60k` (cubre 1 llamada, no 2 intentos). Ver `docs/adr/0008-el-editor-llamada-n1-y-estimacion-de-coste.md`.
+- **Deuda técnica**: saldada la de T42 sobre cierre del Run; parcialmente la de timeout compartido (Editor ya tiene el suyo). Nuevas: `unpublished_for_run` sin `ORDER BY`, regresión de gasto ante `IntegrityError`, `EditNight.run_id` desacoplada de guard, `timeout_for_call(role)` parámetro opcional.
+- **Cerrada: 2026-09-17**
 
 ### T44 · Orquestador `run-night`
 - **Estado**: pending
@@ -135,7 +141,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Estado**: pending
 - **Depende de**: T44, T51
 - **Alcance**: el autor ejecuta `run-night` a mano (o con `cron` local) durante dos semanas. Cada mañana anota en `docs/CALIBRACION.md`: tokens del `Run`, porcentaje semanal consumido según Settings > Usage, ítems leídos, hallazgos publicados, calidad percibida. Al final se ajusta `nightly_tokens` para acercarse al 30% semanal y se decide si el `interest_score >= 4` es el umbral correcto.
-- **Nota**: `READER_PROMPT_VERSION` es `reader-v2` y el abstract va envuelto en `<abstract>`/`</abstract>`. Eso rompe la comparabilidad de datos de calibración frente a filas previas de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.).
+- **Nota sobre prompt versions**: (1) `READER_PROMPT_VERSION` es `reader-v2` con abstract en `<abstract>`/`</abstract>`; (2) `POPULARIZER_PROMPT_VERSION` es `popularizer-v2` con reparador JSON; (3) `EDITOR_PROMPT_VERSION` es `editor-v1` entrada acotada a `title+level_curious`. Cada uno rompe comparabilidad con datos previos de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.). Humo manual del Editor no ejecutado en T43, será primer dato real de Opus.
 - **Hecho cuando**: `pipeline.toml` tiene valores calibrados con datos reales y un ADR documenta el criterio.
 
 ### T61 · Retrospectiva y plan de fase 2

@@ -96,6 +96,7 @@ def _policy(**overrides: object) -> BudgetPolicy:
         "max_editor_calls_per_night": 2,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
+        "editor_timeout_s": 300,
         "run_timeout_s": 16_200,
         "window_start": time(0, 0),
         "window_hard_stop": time(4, 45),

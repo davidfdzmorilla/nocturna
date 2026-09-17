@@ -19,7 +19,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Ejecutor de agentes | `application/agents/runner.py` | done (T42 refactor) |
 | Agente Reader | `application/agents/reader`, `application/use_cases/read_item.py` | done (T41) |
 | Agente Popularizer | `application/agents/popularizer`, `application/use_cases/popularize_reading.py` | done (T42) |
-| Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | pendiente (T43) |
+| Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | done (T43) |
 | Orquestador nocturno | `application/use_cases/run_night.py` | pendiente (T44) |
 | API de lectura | FastAPI | pendiente (T50) |
 | Web | Next.js | pendiente (T51) |
@@ -30,12 +30,14 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 00:00  cron → nocturna run-night
        ├─ crea Run
        ├─ fetch_new(arXiv) → Items(new)               [sin LLM]
-       ├─ por cada Item (≤ max_items): can_call? → Reader → Reading   [Sonnet]
-       ├─ por cada Reading ≥ 4: can_call? → Popularizer → Finding    [Sonnet]
-       ├─ can_call(editor, reserva)? → Editor (1 llamada) → publica  [Opus]
+       ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet]
+       ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding    [Sonnet]
+       ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos) → publica  [Opus]
        └─ cierra Run (completed | partial | killed | failed)
 04:45  hard_stop incondicional
 ```
+
+**Nota**: `_edit_one_night` es la única función que devuelve `COMPLETED`. Reader y Popularizer devuelven su desenlace parcial; Editor cierra la noche.
 
 ## Capas
 
@@ -82,6 +84,20 @@ Implementado en T42. Lee una `Reading` con `interest_score >= min_interest_score
 - **Tasa de reintento**: una observación de dos intentos (1º rechazado por saltos de línea en literal JSON, 2º válido) no es suficiente para saber si es sistemática. Si todos reintentan: 117.760 ÷ (4.560 × 2) ≈ **~13 candidatos**. Diferencia crítica: 26 vs 13. Calibración: T60 mide varios días y documenta si `popularizer-v2` resuelve la tasa.
 - **Reparador de JSON**: `extract_json_object` repara caracteres de control crudos (`\n`, `\r`, `\t`) dentro de literales de cadena, solo después de que `json.loads` falle. Costo: cero tokens (no se llama a modelo). Garantía: **no-op sobre cualquier JSON que `json.loads` ya acepte**, porque el JSON válido exige comillas balanceadas y prohíbe esos caracteres crudos dentro de cadenas — exactamente lo único que toca. Filosofía: el reparador es una red de seguridad, no una excusa; prompts versión 2+ buscan salida limpia al primer intento.
 - **Degradación elegante**: guard deniega en límite de presupuesto. La noche se degrada en cantidad, no en corrección (los candidatos se leen bien, solo hay menos).
+
+## Agente Editor (fase 1)
+
+Implementado en T43. Orquestador de publicación. Recibe todos los `Finding` candidatos de la noche en **una sola conversación** (`N:1`); devuelve lista de `item_id` a publicar, cada uno con `confidence` (0–1) y motivo (log, no persistido). Caso de uso `EditNight` que publica los aprobados y cierra el `Run` como `COMPLETED`.
+
+**Contrato de entrada y salida**: `AgentRequest` con lista de candidatos (`item_id`, `title`, `level_curious` solamente, no los tres niveles), rol `editor`, modelo Opus. Salida esperada: JSON validado por `EditorOutput` con lista de decisiones `item_id / publish / confidence / reason`. Editor no recibe `level_amateur` ni `level_technical` (reducir entrada ~3.5×) pero su salida publica solo los aprobados, que ya llevan los tres niveles generados por Popularizer.
+
+**Estimación lineal de coste**: `editor_base_tokens + (num_candidates × editor_tokens_per_candidate)`. Configuración de `pipeline.toml`: `editor_base_tokens = 4000`, `editor_tokens_per_candidate = 700`. Validación cerrada al cargar: `base + max_items_per_night × per_candidate ≤ editor_reserve_tokens` (4.000 + 40×700 = 32.000 ≤ 60.000). Si el invariante se rompe, la configuración falla de día, no en plena noche. Detalle arquitectónico en [ADR 0008](adr/0008-el-editor-llamada-n1-y-estimacion-de-coste.md).
+
+**Timeout rol-dependiente**: el Editor tiene 300 segundos (5 min), frente a 180 de Reader/Popularizer. La invariante de `hard_stop` se preserva: ambos están limitados por `min(..., seconds_until_hard_stop())`. Ver ADR 0005 § 10 extensión (T43).
+
+**Candidatos huérfanos**: si el Editor falla (JSON inválido, timeout, error), sus `Finding` quedan sin `published_at` ni `confidence`. Los `Item` correspondientes quedan en `READ`. La noche se cierra `PARTIAL`. Ninguna noche futura los reintenta: `unpublished_for_run` filtra por `run_id`. Es característica correcta de fase 1.
+
+**`_edit_one_night` es el único cierre de `COMPLETED`**: Reader y Popularizer devuelven su desenlace parcial; solo `_edit_one_night` traduce un desenlace exitoso del Editor a `RunStatus.COMPLETED`. Corrige la deuda de T42.
 
 ## Control de gasto
 

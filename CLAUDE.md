@@ -157,4 +157,4 @@ cd web && pnpm install && pnpm dev
 
 ## Estado actual
 
-Fase 1: Reader, Popularizer e hilos de gasto validados con humos reales. Aritmética nocturna medida: ~26 candidatos/noche sin reintento, ~13 con todos reintentando. Reparador JSON implementado; calibración en T60 sobre `popularizer-v2`. Editor (T43) y orquestador nocturno (T44) pendientes.
+Fase 1: Reader (T41), Popularizer (T42) e hilos de gasto validados con humos reales. Estimaciones lineales por rol, timeout rol-dependiente. Editor (T43) completado: llamada N:1 con Opus, validador de reserva presupuestaria, `_edit_one_night` único cierre de `COMPLETED`. Humo manual de Opus escrito, no ejecutado (primer dato de calibración para T60). Orquestador nocturno (T44) próximo.
