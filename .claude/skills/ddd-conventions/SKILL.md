@@ -34,7 +34,7 @@ Dependencias solo hacia dentro: `api → application → domain`, `infrastructur
 
 ## Unidad de trabajo
 
-- Patrón de tres transacciones por llamada a agente: `(1) authorize + timeout_for_call` leve en la misma sesión; `(2) run_agent` fuera de toda transacción (retiene la conexión 0 segundos durante la espera); `(3) record_call + persistencia de Reading/Finding` en una tercera sesión. ADR 0006 § 2. Ninguna transacción retiene conexión durante `item_timeout_s = 180 s` esperando al modelo.
+- Patrón de cuatro transacciones por llamada a agente, implementado en `AgentRunner` (`application/agents/runner.py`): `(1) authorize + timeout_for_call` leve en la misma sesión; `(2) run_agent` fuera de toda transacción (retiene la conexión 0 segundos durante la espera); `(3) build` (parseo y construcción de entidad) en sesión nueva, registra `invalid_output` si lanza; `(4) record_call + persistencia` en sesión nueva. ADR 0006 § 2. Ninguna transacción retiene conexión durante `item_timeout_s = 180 s` esperando al modelo. Este patrón es único para Reader, Popularizer y Editor (no se replica en cada caso de uso), garantizando que toda llamada cobrada tenga `AgentCall` correspondiente incluso si `build` falla.
 
 ## Qué es sobrearquitectura aquí (y se rechaza)
 

@@ -39,6 +39,7 @@ from fakes.work import (
     make_work_factory,
 )
 
+from nocturna.application.agents import runner as runner_module
 from nocturna.application.agents.reader_output import ReaderOutput
 from nocturna.application.budget import (
     BudgetDenied,
@@ -900,14 +901,20 @@ async def test_fallo_al_contabilizar_durante_cancelacion_se_descarta_y_relanza_i
     completa, `tests/db/` corre antes (orden alfabético) y su fixture de
     migraciones invoca `alembic/env.py::fileConfig`, que por defecto
     deshabilita cualquier logger ya existente y no declarado en
-    `alembic.ini` -- incluido `read_item_module._logger`, creado en el
-    import de este módulo. Sin reactivarlo aquí, este test pasaría solo o
-    en el fichero, pero fallaría en la suite completa por un artefacto de
-    orden de ejecución ajeno al código bajo test (alembic corre como
-    proceso propio fuera de tests, así que esto no reproduce nada real de
-    producción).
+    `alembic.ini`. Sin reactivarlo aquí, este test pasaría solo o en el
+    fichero, pero fallaría en la suite completa por un artefacto de orden de
+    ejecución ajeno al código bajo test (alembic corre como proceso propio
+    fuera de tests, así que esto no reproduce nada real de producción).
+
+    Tras T42, el `logging.warning` que este test observa ya no vive en
+    `read_item.py`: `ReadItem` delega toda la maquinaria de gasto -- reintento,
+    `authorize`, contabilización -- en `AgentRunner`
+    (`application/agents/runner.py`), incluido `_record_cancelled_spend`, que
+    tiene su propio logger (`nocturna.application.agents.runner`), el que de
+    verdad emite el mensaje que comprueba este test -- `read_item.py` ya no
+    define ningún `_logger` propio (código muerto tras la migración).
     """
-    monkeypatch.setattr(read_item_module._logger, "disabled", False)
+    monkeypatch.setattr(runner_module._logger, "disabled", False)
     item = _make_item()
     env = _make_environment(item=item)
     failing_work = _failing_at_call_work_factory(env.work, fail_at=2)

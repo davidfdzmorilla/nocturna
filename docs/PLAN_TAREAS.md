@@ -89,10 +89,10 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Cerrada: 2026-09-17** · Reader con humo real validó contabilidad de tokens; máximo componente a componente es necesario incluso con datos distintos a T40.
 
 ### T42 · Agente Popularizer
-- **Estado**: pending
+- **Estado**: in_progress
 - **Depende de**: T41
-- **Alcance**: prompt en `prompts/popularizer.md`, salida con `level_curious`, `level_amateur`, `level_technical`. Caso de uso `PopularizeReading`, solo para `interest_score >= 4`. Crea `Finding` en estado no publicado.
-- **Hecho cuando**: tests equivalentes a T41. Un `Finding` sin publicar en base de datos tras `run-item` sobre un ítem con puntuación alta.
+- **Alcance**: prompt en `prompts/popularizer.md`, salida con `level_curious`, `level_amateur`, `level_technical`. Caso de uso `PopularizeReading`, solo para `interest_score >= 4`. Crea `Finding` en estado no publicado. **Refactor previo: extracción de `AgentRunner` en `application/agents/runner.py`** centraliza el patrón `authorize → run_agent → build → record_call` para los tres agentes. De 571 a 605 tests (+34). Criterio de aceptación: la suite de T41 pasa **sin tocar ni un aserto** (24 asertos de `test_read_item.py` intactos). El refactor fue commit propio, anterior a la implementación del Popularizer.
+- **Hecho cuando**: tests equivalentes a T41. Un `Finding` sin publicar en base de datos tras `run-item` sobre un ítem con puntuación alta. **Criterio no cumplido todavía**: falta la implementación completa del Popularizer (el refactor es preparación).
 
 ### T43 · Agente Editor
 - **Estado**: pending

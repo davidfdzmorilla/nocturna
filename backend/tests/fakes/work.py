@@ -56,6 +56,24 @@ class InMemoryRunRepository:
         self._runs[run.id] = run
 
 
+class RunNotFoundByIdRepository(InMemoryRunRepository):
+    """Como `InMemoryRunRepository`, pero `get()` siempre devuelve `None`.
+
+    `current()` y `save()` se comportan igual que la clase base: solo
+    `get(run_id)` -- el que usa `AgentRunner._record_attempt`,
+    `_record_cancelled_spend` y `_record_build_failure` para releer el
+    `Run` dentro de su propia unidad de trabajo -- devuelve siempre `None`,
+    sin lanzar ninguna excepción. Simula, de la forma más directa posible,
+    la rama defensiva "nunca debería pasar" que ambos métodos contemplan:
+    `RunRepository.get(run_id)` no encuentra el `Run` que el propio guard
+    acaba de confirmar en `current()` unos milisegundos antes -- la rama
+    `else` de `if current_run is not None`, que solo deja un
+    `logging.warning` y ningún `AgentCall`."""
+
+    def get(self, run_id: UUID) -> Run | None:
+        return None
+
+
 class InMemoryAgentCallRepository:
     """Mismo contrato que `_InMemoryAgentCallRepository` de `test_budget_guard.py`."""
 
@@ -145,6 +163,11 @@ def counting_work_factory(
     `calls` es una lista de un elemento (`[0]`) en vez de un `int` suelto
     para que el test pueda leer el conteo tras la llamada sin depender de
     `nonlocal`.
+
+    Cuenta APERTURAS totales, nunca cierres: no basta para distinguir "dos
+    unidades abiertas y cerradas en secuencia" de "dos unidades abiertas a
+    la vez, ambas retenidas durante la espera al LLM" -- dos aperturas en
+    cualquiera de los dos casos. Para eso hace falta `net_counting_work_factory`.
     """
     calls: list[int] = [0]
 
@@ -155,3 +178,36 @@ def counting_work_factory(
             yield w
 
     return _counting, calls
+
+
+def net_counting_work_factory(
+    factory: AgentWorkFactory,
+) -> tuple[AgentWorkFactory, list[int]]:
+    """Envuelve `factory` para llevar la cuenta NETA de unidades de trabajo abiertas.
+
+    A diferencia de `counting_work_factory` (aperturas totales, nunca
+    decrece), `open_count[0]` sube al entrar en el `with` y baja al salir
+    -- con éxito o por excepción, de ahí el `finally` --, así que en
+    cualquier instante refleja cuántas unidades siguen abiertas AHORA
+    MISMO. Pensado para instrumentar un `LLMProvider` de prueba que
+    registre `open_count[0]` en el momento exacto de `run_agent()`: el
+    aserto directo de que ninguna unidad de trabajo (ninguna conexión de
+    PostgreSQL) sigue abierta mientras se espera al LLM (ADR 0006 § 2).
+    `counting_work_factory` no distingue "dos unidades abiertas y cerradas
+    en secuencia" (0 abiertas durante la llamada) de "dos unidades abiertas
+    a la vez, ambas retenidas durante la llamada" (2 abiertas durante la
+    llamada): las dos formas abren dos veces en total. Este contador sí las
+    distingue.
+    """
+    open_count: list[int] = [0]
+
+    @contextmanager
+    def _net_counting() -> Iterator[AgentWork]:
+        open_count[0] += 1
+        try:
+            with factory() as w:
+                yield w
+        finally:
+            open_count[0] -= 1
+
+    return _net_counting, open_count
