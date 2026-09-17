@@ -60,6 +60,43 @@ async def test_query_que_no_responde_a_tiempo_lanza_llm_timeout_y_cierra_el_iter
 
 
 @pytest.mark.anyio
+async def test_timeout_tras_result_message_con_model_usage_no_se_pierde_el_gasto_de_otros_modelos(
+    monkeypatch,
+):
+    """Ancla en `model_usage` la rama `except TimeoutError` de
+    `_extract_tokens` -- mutación superviviente de la revisión de T40: es
+    el final rutinario de un ítem lento con `item_timeout_s=180`, donde
+    perder tokens es lo normal, no lo excepcional. El generador emite un
+    `ResultMessage` con `usage` y `model_usage` poblados y luego se queda
+    dormido más allá del deadline propio (`timeout_s=0.05`), forzando el
+    `TimeoutError` real de `asyncio.timeout` (`cm.expired() is True`), no
+    uno ajeno. El gasto de `LLMTimeout` debe ser 1452/23 (Haiku + Sonnet
+    del hallazgo real de T40), no solo 523/6 del `usage` del Sonnet
+    pedido.
+    """
+    success_result = make_result_message(
+        usage={"input_tokens": 523, "output_tokens": 6},
+        model_usage={
+            "claude-haiku-4-5-20251001": {"inputTokens": 929, "outputTokens": 17},
+            "claude-sonnet-5": {"inputTokens": 523, "outputTokens": 6},
+        },
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(success_result,), sleep_after_s=10),
+        raising=True,
+    )
+    provider = AgentSDKProvider()
+
+    with pytest.raises(LLMTimeout) as excinfo:
+        await provider.run_agent(_request(timeout_s=0.05))
+
+    assert excinfo.value.tokens_in == 1452
+    assert excinfo.value.tokens_out == 23
+
+
+@pytest.mark.anyio
 async def test_timeout_error_ajeno_al_deadline_propio_se_traduce_a_llm_error_no_a_llm_timeout(
     monkeypatch,
 ):
@@ -164,6 +201,41 @@ async def test_claude_sdk_error_tras_un_result_message_de_exito_propaga_sus_toke
 
     assert excinfo.value.tokens_in == 900
     assert excinfo.value.tokens_out == 120
+
+
+@pytest.mark.anyio
+async def test_claude_sdk_error_tras_result_message_con_model_usage_no_pierde_gasto_extra(
+    monkeypatch,
+):
+    """Ancla en `model_usage` la rama `except ClaudeSDKError` de
+    `_extract_tokens` -- mutación superviviente de la revisión de T40.
+    Gemelo de
+    `test_claude_sdk_error_tras_un_result_message_de_exito_propaga_sus_tokens`
+    con `model_usage` poblado además de `usage`: el resultado debe ser
+    1452/23 (Haiku + Sonnet del hallazgo real de T40), no solo 523/6 del
+    `usage` del Sonnet pedido.
+    """
+    success_result = make_result_message(
+        usage={"input_tokens": 523, "output_tokens": 6},
+        model_usage={
+            "claude-haiku-4-5-20251001": {"inputTokens": 929, "outputTokens": 17},
+            "claude-sonnet-5": {"inputTokens": 523, "outputTokens": 6},
+        },
+    )
+    original = ClaudeSDKError("el CLI se cayó después de responder")
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(success_result,), raise_after=original),
+        raising=True,
+    )
+    provider = AgentSDKProvider()
+
+    with pytest.raises(LLMError) as excinfo:
+        await provider.run_agent(_request())
+
+    assert excinfo.value.tokens_in == 1452
+    assert excinfo.value.tokens_out == 23
 
 
 @pytest.mark.anyio
@@ -383,6 +455,41 @@ async def test_excepcion_pelada_del_sdk_tras_result_message_de_exito_se_traduce_
 
 
 @pytest.mark.anyio
+async def test_excepcion_pelada_tras_result_message_con_model_usage_no_pierde_gasto_extra(
+    monkeypatch,
+):
+    """Ancla en `model_usage` la rama catch-all `except Exception` de
+    `_extract_tokens` -- mutación superviviente de la revisión de T40.
+    Gemelo de
+    `test_excepcion_pelada_del_sdk_tras_result_message_de_exito_se_traduce_con_tokens`
+    con `model_usage` poblado además de `usage`: el resultado debe ser
+    1452/23 (Haiku + Sonnet del hallazgo real de T40), no solo 523/6 del
+    `usage` del Sonnet pedido.
+    """
+    success_result = make_result_message(
+        usage={"input_tokens": 523, "output_tokens": 6},
+        model_usage={
+            "claude-haiku-4-5-20251001": {"inputTokens": 929, "outputTokens": 17},
+            "claude-sonnet-5": {"inputTokens": 523, "outputTokens": 6},
+        },
+    )
+    original = RuntimeError("{'type': 'error'} del CLI que el SDK no traduce")
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(success_result,), raise_after=original),
+        raising=True,
+    )
+    provider = AgentSDKProvider()
+
+    with pytest.raises(LLMError) as excinfo:
+        await provider.run_agent(_request())
+
+    assert excinfo.value.tokens_in == 1452
+    assert excinfo.value.tokens_out == 23
+
+
+@pytest.mark.anyio
 async def test_excepcion_pelada_del_sdk_sin_result_message_previo_se_traduce_con_tokens_a_cero(
     monkeypatch,
 ):
@@ -432,6 +539,80 @@ async def test_cancelled_error_externo_lleva_los_tokens_del_result_message_ya_vi
     assert type(excinfo.value) is asyncio.CancelledError
     assert excinfo.value.tokens_in == 400
     assert excinfo.value.tokens_out == 90
+
+
+@pytest.mark.anyio
+async def test_result_error_sin_result_message_recupera_model_usage_del_payload(monkeypatch):
+    """Gemelo de `test_usage_ausente_en_result_message_se_recupera_del_payload_de_result_error`
+    (`test_agent_sdk_usage.py`), pero para `model_usage`: el `query()`
+    termina sin emitir ningún `ResultMessage` (`last_result is None`) y
+    lanza directamente una `ResultError` cuyo payload trae `modelUsage`
+    (las dos entradas del hallazgo real de T40: Haiku y Sonnet). La rama
+    `except ResultError` debe extraer el gasto de `exc.data.get("modelUsage")`
+    -- 929 + 523 = 1452 de entrada, 17 + 6 = 23 de salida -- sin que haga
+    falta ningún `ResultMessage` visto en el stream.
+    """
+    from claude_agent_sdk import ResultError
+
+    result_error = ResultError(
+        "el agente falló antes de emitir ningún ResultMessage",
+        data={
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {"inputTokens": 929, "outputTokens": 17},
+                "claude-sonnet-5": {"inputTokens": 523, "outputTokens": 6},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(raise_after=result_error), raising=True
+    )
+    provider = AgentSDKProvider()
+
+    with pytest.raises(LLMError) as excinfo:
+        await provider.run_agent(_request())
+
+    assert excinfo.value.tokens_in == 1452
+    assert excinfo.value.tokens_out == 23
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_externo_lleva_los_tokens_de_model_usage_no_solo_de_usage(
+    monkeypatch,
+):
+    """Gemelo de `test_cancelled_error_externo_lleva_los_tokens_del_result_message_ya_visto`,
+    pero con `model_usage` poblado en el `ResultMessage` ya visto antes de
+    la cancelación (las cifras del hallazgo real de T40): los atributos
+    `tokens_in`/`tokens_out` que `run_agent` adjunta al `CancelledError`
+    relanzado deben salir de `_extract_tokens` -- es decir, de la suma de
+    `model_usage` (1452/23), no de `usage` solo (523/6) -- para que T44 no
+    pierda el gasto de Haiku cuando `hard_stop` cancela a mitad de una
+    llamada que ya emitió su `ResultMessage`.
+    """
+    success_result = make_result_message(
+        usage={"input_tokens": 523, "output_tokens": 6},
+        model_usage={
+            "claude-haiku-4-5-20251001": {"inputTokens": 929, "outputTokens": 17},
+            "claude-sonnet-5": {"inputTokens": 523, "outputTokens": 6},
+        },
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(success_result,), sleep_after_s=10),
+        raising=True,
+    )
+    provider = AgentSDKProvider()
+
+    task = asyncio.ensure_future(provider.run_agent(_request(timeout_s=3600)))
+    await asyncio.sleep(0.05)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError) as excinfo:
+        await task
+
+    assert type(excinfo.value) is asyncio.CancelledError
+    assert excinfo.value.tokens_in == 1452
+    assert excinfo.value.tokens_out == 23
 
 
 @pytest.mark.anyio

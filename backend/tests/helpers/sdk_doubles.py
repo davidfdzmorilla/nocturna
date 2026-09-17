@@ -32,11 +32,23 @@ def make_result_message(
     is_error: bool = False,
     result: str | None = "resultado del agente",
     usage: dict | None = None,
+    model_usage: dict | None = None,
     api_error_status: int | None = None,
     terminal_reason: str | None = None,
     session_id: str = "session-de-test",
 ) -> ResultMessage:
     """Construye un `ResultMessage` real, con solo los campos que usa el proveedor.
+
+    `model_usage` reproduce `ResultMessage.model_usage` (`dict[str,
+    ModelUsage] | None` en `types.py`, `ModelUsage` un `TypedDict` sin clase
+    propia en tiempo de ejecución): el desglose de gasto por modelo de toda
+    la sesión del CLI, con claves camelCase (`inputTokens`, `outputTokens`,
+    `cacheCreationInputTokens`, `cacheReadInputTokens`), a diferencia de
+    `usage` (snake_case). Ver hallazgo del humo manual de T40 en el
+    docstring de módulo de `agent_sdk_provider.py`: `usage` solo reporta el
+    modelo pedido en `AgentRequest`; `model_usage` puede traer además el
+    gasto de otros modelos que el CLI use por su cuenta (p. ej. Haiku) en
+    la misma sesión, y ese gasto sí se factura.
 
     El resto de campos obligatorios de `ResultMessage` (`duration_ms` propio
     del CLI, `duration_api_ms`, `num_turns`) no los lee `AgentSDKProvider`
@@ -66,6 +78,7 @@ def make_result_message(
         session_id=session_id,
         result=result,
         usage=usage,
+        model_usage=model_usage,
         api_error_status=api_error_status,
         terminal_reason=terminal_reason,
     )
