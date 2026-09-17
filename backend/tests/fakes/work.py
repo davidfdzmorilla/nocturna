@@ -33,7 +33,7 @@ from uuid import UUID
 
 from nocturna.application.budget import BudgetGuard
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
-from nocturna.domain.entities import AgentCall, Item, ItemStatus, Reading, Run, RunStatus
+from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
 from nocturna.domain.llm import AgentRole
 
 
@@ -54,6 +54,24 @@ class InMemoryRunRepository:
 
     def save(self, run: Run) -> None:
         self._runs[run.id] = run
+
+
+class RunNotFoundByIdRepository(InMemoryRunRepository):
+    """Como `InMemoryRunRepository`, pero `get()` siempre devuelve `None`.
+
+    `current()` y `save()` se comportan igual que la clase base: solo
+    `get(run_id)` -- el que usa `AgentRunner._record_attempt`,
+    `_record_cancelled_spend` y `_record_build_failure` para releer el
+    `Run` dentro de su propia unidad de trabajo -- devuelve siempre `None`,
+    sin lanzar ninguna excepción. Simula, de la forma más directa posible,
+    la rama defensiva "nunca debería pasar" que ambos métodos contemplan:
+    `RunRepository.get(run_id)` no encuentra el `Run` que el propio guard
+    acaba de confirmar en `current()` unos milisegundos antes -- la rama
+    `else` de `if current_run is not None`, que solo deja un
+    `logging.warning` y ningún `AgentCall`."""
+
+    def get(self, run_id: UUID) -> Run | None:
+        return None
 
 
 class InMemoryAgentCallRepository:
@@ -111,6 +129,33 @@ class InMemoryReadingRepository:
         return next((r for r in self.readings if r.item_id == item_id), None)
 
 
+class InMemoryFindingRepository:
+    """Cumple `domain.repositories.FindingRepository`. Se añade en T42:
+    `PopularizeReading` es el primer caso de uso que persiste un `Finding`
+    (ver el docstring de `AgentWork.findings`).
+
+    Indexado por `id` (no una lista plana, a diferencia de
+    `InMemoryReadingRepository`): a diferencia de `Reading`, `Finding` se
+    actualiza tras su construcción (`save()`, cuando el Editor lo publica en
+    T43), así que hace falta poder localizarlo por id para mutarlo -- mismo
+    motivo que `InMemoryItemRepository` usa un `dict`.
+    """
+
+    def __init__(self) -> None:
+        self._findings: dict[UUID, Finding] = {}
+
+    def add(self, finding: Finding) -> None:
+        self._findings[finding.id] = finding
+
+    def unpublished_for_run(self, run_id: UUID) -> list[Finding]:
+        return [f for f in self._findings.values() if f.run_id == run_id and f.published_at is None]
+
+    def save(self, finding: Finding) -> None:
+        if finding.id not in self._findings:
+            raise LookupError(f"no existe Finding con id={finding.id}")
+        self._findings[finding.id] = finding
+
+
 def make_work_factory(
     *,
     guard: BudgetGuard,
@@ -118,17 +163,31 @@ def make_work_factory(
     items: InMemoryItemRepository,
     readings: InMemoryReadingRepository,
     agent_calls: InMemoryAgentCallRepository,
+    findings: InMemoryFindingRepository | None = None,
 ) -> AgentWorkFactory:
     """Construye el `AgentWorkFactory` en memoria que `ReadItem` espera.
 
     Cada llamada cede el mismo `AgentWork` (los mismos objetos en memoria,
     no copias por unidad de trabajo): ver el docstring del módulo.
+
+    `findings` es opcional (T42 añadió el campo obligatorio a `AgentWork`,
+    ver su docstring): con `None` se construye un `InMemoryFindingRepository`
+    vacío propio, para que las llamadas existentes de `test_agent_runner.py`
+    y `test_read_item.py` -- que nunca tocan `Finding` -- no tengan que
+    pasarlo. `PopularizeReading` (y sus tests) sí lo pasa explícito para
+    poder inspeccionar lo que persiste.
     """
+    resolved_findings = findings if findings is not None else InMemoryFindingRepository()
 
     @contextmanager
     def _work() -> Iterator[AgentWork]:
         yield AgentWork(
-            guard=guard, runs=runs, items=items, readings=readings, agent_calls=agent_calls
+            guard=guard,
+            runs=runs,
+            items=items,
+            readings=readings,
+            findings=resolved_findings,
+            agent_calls=agent_calls,
         )
 
     return _work
@@ -145,6 +204,11 @@ def counting_work_factory(
     `calls` es una lista de un elemento (`[0]`) en vez de un `int` suelto
     para que el test pueda leer el conteo tras la llamada sin depender de
     `nonlocal`.
+
+    Cuenta APERTURAS totales, nunca cierres: no basta para distinguir "dos
+    unidades abiertas y cerradas en secuencia" de "dos unidades abiertas a
+    la vez, ambas retenidas durante la espera al LLM" -- dos aperturas en
+    cualquiera de los dos casos. Para eso hace falta `net_counting_work_factory`.
     """
     calls: list[int] = [0]
 
@@ -155,3 +219,36 @@ def counting_work_factory(
             yield w
 
     return _counting, calls
+
+
+def net_counting_work_factory(
+    factory: AgentWorkFactory,
+) -> tuple[AgentWorkFactory, list[int]]:
+    """Envuelve `factory` para llevar la cuenta NETA de unidades de trabajo abiertas.
+
+    A diferencia de `counting_work_factory` (aperturas totales, nunca
+    decrece), `open_count[0]` sube al entrar en el `with` y baja al salir
+    -- con éxito o por excepción, de ahí el `finally` --, así que en
+    cualquier instante refleja cuántas unidades siguen abiertas AHORA
+    MISMO. Pensado para instrumentar un `LLMProvider` de prueba que
+    registre `open_count[0]` en el momento exacto de `run_agent()`: el
+    aserto directo de que ninguna unidad de trabajo (ninguna conexión de
+    PostgreSQL) sigue abierta mientras se espera al LLM (ADR 0006 § 2).
+    `counting_work_factory` no distingue "dos unidades abiertas y cerradas
+    en secuencia" (0 abiertas durante la llamada) de "dos unidades abiertas
+    a la vez, ambas retenidas durante la llamada" (2 abiertas durante la
+    llamada): las dos formas abren dos veces en total. Este contador sí las
+    distingue.
+    """
+    open_count: list[int] = [0]
+
+    @contextmanager
+    def _net_counting() -> Iterator[AgentWork]:
+        open_count[0] += 1
+        try:
+            with factory() as w:
+                yield w
+        finally:
+            open_count[0] -= 1
+
+    return _net_counting, open_count

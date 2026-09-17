@@ -32,11 +32,22 @@ el ítem no existe o no está en `NEW`, `4` denegación de `BudgetGuard`
 (incluida la ventana de ejecución fuera de horario -- sin ninguna bandera
 para saltarla, `budget-guard-review` § 1; el `Run` que esta invocación haya
 creado se cierra con `terminal_status_for(exc.reason)`, `KILLED` para
-`OUTSIDE_WINDOW` y `PARTIAL` para el resto, nunca un literal a mano). El
-proveedor se construye sin `mcp_servers` ni `allowed_tools`: inyectar MCP
-haría que `query()` emita varios `ResultMessage` y que `AgentSDKProvider` se
-quede solo con el gasto del último (`docs/TECHNICAL_DEBT.md`, "obligatorio
-revisar antes de que T41 pase `mcp_servers` a ningún rol").
+`OUTSIDE_WINDOW` y `PARTIAL` para el resto, nunca un literal a mano; desde
+T42 puede venir tanto del Reader como del Popularizer, `_print_budget_denial`
+nombra el rol), `5` lectura correcta pero divulgación fallida (T42: el mismo
+abanico de `PopularizeOutcome` que el `1`, pero después de una lectura que sí
+tuvo éxito -- distingue "no se pudo leer" de "se leyó pero no se pudo
+divulgar" sin releer la base). El proveedor se construye sin `mcp_servers` ni
+`allowed_tools`: inyectar MCP haría que `query()` emita varios
+`ResultMessage` y que `AgentSDKProvider` se quede solo con el gasto del
+último (`docs/TECHNICAL_DEBT.md`, "obligatorio revisar antes de que T41 pase
+`mcp_servers` a ningún rol").
+
+**T42, paso 8: se encadena el Popularizer tras una lectura con éxito.** La
+`Reading` se persiste y se confirma en su propia unidad de trabajo, dentro
+de `ReadItem.__call__`, antes de que `_read_one_item` invoque siquiera
+`PopularizeReading`: ningún fallo del Popularizer (`BudgetDenied` incluido)
+puede perder una `Reading` ya escrita.
 
 **Presupuesto de noche entre invocaciones sueltas de `run-item`.** Cada
 invocación sin un `Run` `RUNNING` vivo crea el suyo propio con
@@ -71,7 +82,11 @@ from zoneinfo import ZoneInfo
 import httpx
 from sqlalchemy.orm import Session, sessionmaker
 
-from nocturna.application.agents.prompt_loader import READER_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    POPULARIZER_PROMPT_VERSION,
+    READER_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import (
     BudgetDenied,
     BudgetGuard,
@@ -84,8 +99,13 @@ from nocturna.application.budget import (
 )
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
-from nocturna.application.use_cases.read_item import ReadItem, ReadItemResult, ReadOutcome
-from nocturna.domain.entities import Item, Run, RunStatus
+from nocturna.application.use_cases.popularize_reading import (
+    PopularizeOutcome,
+    PopularizeReading,
+    PopularizeResult,
+)
+from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
@@ -99,6 +119,7 @@ from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
+    SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
@@ -430,8 +451,8 @@ def _agent_work_factory(
     Único sitio del proyecto donde `application/` (a través de `AgentWork`)
     toca SQLAlchemy: cada llamada a la función devuelta abre una
     `unit_of_work` nueva y construye el `BudgetGuard` de `run_id` y los
-    cuatro repositorios que necesita un caso de uso de agente (`ReadItem`,
-    T41; `PopularizeReading`/`EditNight`, T42/T43 más adelante).
+    cinco repositorios que necesita un caso de uso de agente (`ReadItem`,
+    T41; `PopularizeReading`, T42; `EditNight`, T43 más adelante).
     """
 
     @contextmanager
@@ -451,6 +472,7 @@ def _agent_work_factory(
                 runs=runs,
                 items=SqlAlchemyItemRepository(session),
                 readings=SqlAlchemyReadingRepository(session),
+                findings=SqlAlchemyFindingRepository(session),
                 agent_calls=agent_calls,
             )
 
@@ -486,9 +508,9 @@ def _finish_run(
         )
 
 
-def _print_budget_denial(exc: BudgetDenied) -> None:
+def _print_budget_denial(exc: BudgetDenied, *, role: str) -> None:
     print(
-        f"BudgetGuard denegó la llamada al Reader: {exc.reason.value} "
+        f"BudgetGuard denegó la llamada al {role}: {exc.reason.value} "
         f"(quedan {exc.remaining_tokens} tokens)",
         file=sys.stderr,
     )
@@ -502,19 +524,141 @@ def _print_budget_denial(exc: BudgetDenied) -> None:
 
 
 def _print_read_item_report(
-    *, item: Item, result: ReadItemResult, work: AgentWorkFactory, run_id: UUID
+    *,
+    item: Item,
+    reading: Reading,
+    attempts: int,
+    tokens_spent: int,
+    work: AgentWorkFactory,
+    run_id: UUID,
 ) -> None:
-    reading = result.reading
-    assert reading is not None, "READ solo se reporta cuando ReadItem produjo una Reading"
-
+    """Recibe `reading` ya estrechada por el llamador (`_read_one_item`), en
+    vez de un `ReadItemResult` con `reading: Reading | None` -- así no hace
+    falta un segundo `assert`/comprobación redundante aquí para lo mismo que
+    ya comprobó `_read_one_item` antes de llamar."""
     with work() as w:
         remaining = w.guard.remaining_for(AgentRole.READER)
 
     print(f"{item.external_id} · {item.title}")
-    print(f"  modelo={reading.model} · prompt={READER_PROMPT_VERSION} · intentos={result.attempts}")
-    print(f"  tokens gastados={result.tokens_spent} · tokens restantes para el Reader={remaining}")
+    print(f"  modelo={reading.model} · prompt={READER_PROMPT_VERSION} · intentos={attempts}")
+    print(f"  tokens gastados={tokens_spent} · tokens restantes para el Reader={remaining}")
     print(f"  interest_score={reading.interest_score} · reading_id={reading.id} · run_id={run_id}")
     print(f"  resumen: {_abstract_preview(reading.summary)}")
+
+
+def _print_popularize_report(
+    *, result: PopularizeResult, work: AgentWorkFactory, config: PipelineConfig
+) -> None:
+    finding = result.finding
+    assert finding is not None, (
+        "POPULARIZED solo se reporta cuando PopularizeReading produjo un Finding"
+    )
+
+    with work() as w:
+        remaining = w.guard.remaining_for(AgentRole.POPULARIZER)
+
+    print(
+        f"  Popularizer: modelo={config.models.popularizer} · "
+        f"prompt={POPULARIZER_PROMPT_VERSION} · intentos={result.attempts}"
+    )
+    print(
+        f"  tokens gastados={result.tokens_spent} · "
+        f"tokens restantes para el Popularizer={remaining}"
+    )
+    print(f"  finding_id={finding.id} · sin publicar (confidence=None, published_at=None)")
+    print(f"  titular: {finding.title}")
+    print(f"  nivel curioso: {_abstract_preview(finding.level_curious)}")
+
+
+def _popularize_one_reading(
+    *,
+    item: Item,
+    reading: Reading,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    config: PipelineConfig,
+) -> tuple[int, RunStatus]:
+    """Ejecuta el Popularizer sobre `reading` y traduce el resultado a
+    `(exit_code, run_status)`.
+
+    `run_status` es, en el mismo `return` que fija `exit_code`, el estado
+    terminal con el que `_run_item` debe cerrar el `Run` que él mismo haya
+    creado -- nunca un valor que el llamador tenga que inferir después a
+    partir de si hubo o no una `Reading` (ver el docstring de
+    `_read_one_item` para el porqué). `0` si se divulgó o si se descartó
+    por `interest_score` bajo (ninguno de los dos es un fallo: ambos cierran
+    `COMPLETED`, la noche hizo lo que tenía que hacer con este ítem), `4` si
+    `BudgetGuard` deniega la llamada al Popularizer
+    (`terminal_status_for(exc.reason)`, igual que en el Reader), `5` para
+    cualquier otro desenlace que no sea `POPULARIZED` (JSON inválido
+    agotados los reintentos, timeout, límite de tasa o error del
+    proveedor) -- ese `5` cierra `PARTIAL`: el Reader tuvo éxito pero el
+    ciclo completo del ítem no, y `Run.status` no debe decir lo contrario
+    (bug de T42 fijado por
+    `test_popularizer_fallido_devuelve_5_deja_la_reading_intacta`). Toda la
+    configuración del Popularizer (modelo, turnos, versión de prompt,
+    estimación de coste, intentos, umbral) sale de `config`, nunca
+    hardcodeada (T42, paso 8).
+    """
+    popularize = PopularizeReading(
+        work=work,
+        provider=provider,
+        system_prompt=load_prompt("popularizer"),
+        prompt_version=POPULARIZER_PROMPT_VERSION,
+        model=config.models.popularizer,
+        max_turns=config.limits.max_turns_per_agent,
+        estimated_tokens=config.budget.popularizer_estimated_tokens,
+        max_attempts=config.limits.max_calls_per_item,
+        min_interest_score=config.limits.popularizer_min_interest_score,
+    )
+    try:
+        result = asyncio.run(popularize(item=item, reading=reading))
+    except BudgetDenied as exc:
+        _print_budget_denial(exc, role="Popularizer")
+        return 4, terminal_status_for(exc.reason)
+
+    if result.outcome is PopularizeOutcome.SKIPPED_LOW_SCORE:
+        print(
+            f"descartado: interest_score={reading.interest_score} < "
+            f"umbral={config.limits.popularizer_min_interest_score} "
+            "(no se llama al Popularizer)"
+        )
+        return 0, RunStatus.COMPLETED
+
+    if result.outcome is not PopularizeOutcome.POPULARIZED:
+        # JSON inválido agotados los reintentos, un timeout, un límite de
+        # tasa o cualquier otro error del proveedor: `PopularizeReading`
+        # (T42) capturó la excepción y la tradujo aquí a un `outcome`
+        # distinto de `POPULARIZED`, sin dejarla escapar. El ítem ya se
+        # descartó dentro de `PopularizeReading` si el motivo fue agotar los
+        # reintentos por JSON inválido; en los demás casos queda `READ` para
+        # reintentarse otra noche.
+        print(
+            f"divulgación fallida para {item.external_id}: {result.outcome.value} "
+            f"(intentos={result.attempts}, tokens gastados={result.tokens_spent})",
+            file=sys.stderr,
+        )
+        return 5, RunStatus.PARTIAL
+
+    _print_popularize_report(result=result, work=work, config=config)
+    return 0, RunStatus.COMPLETED
+
+
+class _ReadItemContractViolated(RuntimeError):
+    """`ReadItem.__call__` devolvió `ReadOutcome.READ` sin una `Reading`.
+
+    `ReadItemResult` (T41) declara `reading: Reading | None`, pero su
+    propio contrato es que `READ` siempre trae una: esto es un bug de
+    `ReadItem`, nunca una entrada de usuario ni un desenlace esperable de
+    `run-item`, así que no se traduce a ningún código de salida. `raise`,
+    no `assert`: `python -O` desactiva `assert` y este contrato debe
+    sobrevivir a esa bandera, igual que las excepciones de dominio
+    (`domain/errors.py`, "nunca con `assert`"). No es una excepción de
+    dominio -- no hay ninguna regla de negocio que viole, es un contrato
+    entre dos módulos de `application`/`cli` -- así que no vive en
+    `domain/errors.py`; mismo patrón que `ApiKeyInEnvironment` en
+    `infrastructure/llm/agent_sdk_provider.py`.
+    """
 
 
 def _read_one_item(
@@ -524,22 +668,38 @@ def _read_one_item(
     provider: LLMProvider,
     config: PipelineConfig,
     run_id: UUID,
-) -> tuple[int, bool, RunStatus | None]:
-    """Ejecuta el Reader sobre `item` y traduce el resultado a
-    `(exit_code, had_reading, run_status_override)`.
+) -> tuple[int, RunStatus]:
+    """Ejecuta el Reader sobre `item` y, si produce una `Reading`, encadena el
+    Popularizer sobre ella. Traduce el resultado a `(exit_code, run_status)`.
 
     Toda la configuración del Reader (modelo, turnos, versión de prompt,
     estimación de coste, intentos) sale de `config`, nunca hardcodeada
     (T41, paso 8).
 
-    `run_status_override` solo se rellena para una denegación de
-    `BudgetGuard`: es `terminal_status_for(exc.reason)`, el estado terminal
-    que le corresponde al motivo de la denegación -- `KILLED` para
-    `OUTSIDE_WINDOW`, `PARTIAL` para el resto (`application/budget.py`).
-    `_run_item` lo usa en vez del literal `PARTIAL` a mano para cerrar el
-    `Run` que él mismo creó; `None` en cualquier otro camino, para que
-    `_run_item` siga decidiendo `COMPLETED`/`PARTIAL` por `had_reading` como
-    hasta ahora.
+    `run_status` es, en el mismo `return` que fija `exit_code`, el estado
+    terminal con el que `_run_item` debe cerrar el `Run` que él mismo haya
+    creado. Antes de T42 este valor era un booleano, `had_reading` --
+    "¿produjo una Reading el Reader?" -- y `_run_item` cerraba `COMPLETED`
+    si era `True`, `PARTIAL` si no, con un `status_override` aparte para la
+    única excepción conocida entonces (denegación de `BudgetGuard`). T42
+    añadió una segunda etapa (el Popularizer) sin repensar ese booleano:
+    "hubo Reading" pasó a ser cierto incluso cuando la divulgación fallaba,
+    y `_run_item` cerraba `COMPLETED` una noche que solo hizo la mitad del
+    trabajo -- el bug que fija
+    `test_popularizer_fallido_devuelve_5_deja_la_reading_intacta`. Aquí ya
+    no hay booleano que reinterpretar ni `override` opcional que se pueda
+    olvidar: cuando el Reader tiene éxito, este método delega el
+    `(exit_code, run_status)` entero en `_popularize_one_reading`, tal
+    cual, sin mezclarlo con nada decidido aquí. Cuando T43 añada el Editor
+    como tercera etapa, el mismo patrón aplica -- la función que decide el
+    desenlace de esa etapa decide también, en el mismo `return`, el
+    `run_status` que le corresponde; no hay un valor por defecto que
+    "olvidarse de sobrescribir".
+
+    La `Reading` se persiste y se confirma en su propia unidad de trabajo
+    dentro de `ReadItem.__call__`, antes de que este método siquiera
+    construya `PopularizeReading`: ningún fallo del Popularizer puede
+    perder la lectura ya escrita (T42, paso 8).
     """
     read_item = ReadItem(
         work=work,
@@ -562,10 +722,10 @@ def _read_one_item(
             "no se puede releer",
             file=sys.stderr,
         )
-        return 3, False, None
+        return 3, RunStatus.PARTIAL
     except BudgetDenied as exc:
-        _print_budget_denial(exc)
-        return 4, False, terminal_status_for(exc.reason)
+        _print_budget_denial(exc, role="Reader")
+        return 4, terminal_status_for(exc.reason)
 
     if result.outcome is not ReadOutcome.READ:
         # JSON inválido agotados los reintentos (`max_calls_per_item`), un
@@ -580,10 +740,22 @@ def _read_one_item(
             f"(intentos={result.attempts}, tokens gastados={result.tokens_spent})",
             file=sys.stderr,
         )
-        return 1, False, None
+        return 1, RunStatus.PARTIAL
 
-    _print_read_item_report(item=item, result=result, work=work, run_id=run_id)
-    return 0, True, None
+    reading = result.reading
+    if reading is None:
+        raise _ReadItemContractViolated("ReadItem devolvió ReadOutcome.READ sin Reading")
+    _print_read_item_report(
+        item=item,
+        reading=reading,
+        attempts=result.attempts,
+        tokens_spent=result.tokens_spent,
+        work=work,
+        run_id=run_id,
+    )
+    return _popularize_one_reading(
+        item=item, reading=reading, work=work, provider=provider, config=config
+    )
 
 
 def _run_item(args: argparse.Namespace) -> int:
@@ -618,9 +790,14 @@ def _run_item(args: argparse.Namespace) -> int:
         )
     work = _agent_work_factory(session_factory, run_id, policy, clock)
 
+    # `status` es el estado terminal con el que se cierra el Run que este
+    # proceso haya creado (si `run_reused`, nadie lo cierra aquí, ver
+    # `_current_or_new_run`). El valor inicial es el que corresponde al
+    # camino "item is None" más abajo, el único que se decide en este
+    # método en vez de en `_read_one_item`/`_popularize_one_reading`;
+    # cualquier otro camino lo sobrescribe explícitamente.
     exit_code = 1
-    had_reading = False
-    status_override: RunStatus | None = None
+    status = RunStatus.PARTIAL
     try:
         with work() as w:
             item = w.items.get(args.item_id)
@@ -629,7 +806,7 @@ def _run_item(args: argparse.Namespace) -> int:
             print(f"no existe ningún Item con id={args.item_id}", file=sys.stderr)
             exit_code = 3
         else:
-            exit_code, had_reading, status_override = _read_one_item(
+            exit_code, status = _read_one_item(
                 item=item,
                 work=work,
                 provider=AgentSDKProvider(),
@@ -646,11 +823,6 @@ def _run_item(args: argparse.Namespace) -> int:
         raise
     else:
         if not run_reused:
-            status = (
-                status_override
-                if status_override is not None
-                else (RunStatus.COMPLETED if had_reading else RunStatus.PARTIAL)
-            )
             _finish_run(session_factory, run_id, status, clock.now())
 
     return exit_code

@@ -48,16 +48,19 @@ siga bloqueando la llamada real -- el objetivo es que ese import quede
 señalado como una decisión consciente (ampliar la lista de sitios legítimos
 aquí) y no un descuido silencioso.
 
-También congela, para T41-T43, QUIÉN llama a `run_agent(` fuera de
-`infrastructure/llm/`: hasta T41 el valor era "cero llamantes"; desde T41
-es "exactamente los de `ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM"
-(`application/use_cases/read_item.py`, el primero). El valor no es la cifra
-en sí -- iba a crecer, el orquestador tenía que llamarlo --, sino que
-cualquier llamante nuevo (T42, T43) que no esté ya en esa lista rompa este
-test y obligue a una actualización explícita, no a un descuido. Un segundo
-test, `test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize`,
-añade una regla AST débil (presencia en el fichero, no orden ni flujo) para
-que ningún llamante nuevo se salte `BudgetGuard.authorize()` en silencio.
+También congela QUIÉN llama a `run_agent(` fuera de `infrastructure/llm/`:
+hasta T41 el valor era "cero llamantes"; T41 (`ReadItem`) fue el primero,
+llamando directamente. T42 extrae esa maquinaria a
+`application/agents/runner.py` (`AgentRunner`) y migra `ReadItem` para que
+pase por él, así que la lista vuelve a un único sitio --
+`ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM` es ahora exactamente
+`{runner.py}`, no porque nadie más llame al agente, sino porque Reader,
+Popularizer (T42) y Editor (T43) comparten el mismo punto de entrada: ya no
+tienen que añadir su propio fichero a esta lista, que es justo el beneficio
+que justificaba el refactor. Un segundo test,
+`test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize`, añade
+una regla AST débil (presencia en el fichero, no orden ni flujo) para que
+ningún llamante nuevo se salte `BudgetGuard.authorize()` en silencio.
 """
 
 import ast
@@ -70,16 +73,19 @@ AGENT_SDK_PROVIDER_PATH = SRC_DIR / "infrastructure" / "llm" / "agent_sdk_provid
 
 #: Sitios permitidos para llamar a `run_agent()` fuera de `infrastructure/llm/`
 #: (T41 en adelante, ver `test_run_agent_no_se_llama_fuera_de_infrastructure_llm`
-#: más abajo). `ReadItem` (T41, `application/use_cases/read_item.py`) es el
-#: primero: pasa por `BudgetGuard.authorize` antes de construir el
-#: `AgentRequest`, tal y como exige ADR 0006 § 2. `PopularizeReading` (T42) y
-#: `EditNight` (T43) añadirán el suyo cuando les toque -- cada adición a este
-#: conjunto es la "decisión consciente" que este test exige: no basta con que
-#: el test deje de fallar, hay que entender y anotar por qué el nuevo sitio es
-#: seguro antes de ampliarlo.
+#: más abajo). `ReadItem` (T41, `application/use_cases/read_item.py`) fue el
+#: primero, llamando directamente. T42 extrae esa maquinaria a
+#: `application/agents/runner.py` (`AgentRunner`) y migra `ReadItem` para que
+#: pase por él -- el runner sigue llamando a `BudgetGuard.authorize` antes de
+#: construir el `AgentRequest`, tal y como exige ADR 0006 § 2, ahora en un
+#: único sitio compartido. `PopularizeReading` (T42) y `EditNight` (T43) usan
+#: el mismo runner, así que no añaden su propio fichero a este conjunto:
+#: cualquier adición futura sigue siendo la "decisión consciente" que este
+#: test exige -- no basta con que el test deje de fallar, hay que entender y
+#: anotar por qué el nuevo sitio es seguro antes de ampliarlo.
 ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM = frozenset(
     {
-        SRC_DIR / "application" / "use_cases" / "read_item.py",
+        SRC_DIR / "application" / "agents" / "runner.py",
     }
 )
 
@@ -197,19 +203,23 @@ def test_run_agent_no_se_llama_fuera_de_infrastructure_llm_salvo_los_sitios_perm
     """Congela QUIÉN llama a `run_agent()` fuera de `infrastructure/llm/`, no
     solo que la cifra sea cero.
 
-    Hasta T41 esta prueba exigía "cero llamantes"; T41 (`ReadItem`) es el
-    primero en llamar a `run_agent()` desde `application/`, exactamente
-    donde ADR 0006 § 2 exige que viva esa llamada -- una decisión
-    consciente, no un descuido, así que el test se actualiza para reflejarla
-    en vez de desactivarse. A partir de ahora comprueba dos cosas
-    simétricas:
+    Hasta T41 esta prueba exigía "cero llamantes"; T41 (`ReadItem`) fue el
+    primero en llamar a `run_agent()` desde `application/`, directamente,
+    exactamente donde ADR 0006 § 2 exige que viva esa llamada. T42 extrae esa
+    llamada -- y toda la maquinaria de reintento/contabilización alrededor --
+    a `application/agents/runner.py::AgentRunner`, y migra `ReadItem` para
+    que pase por él en vez de llamar al proveedor por su cuenta: la lista
+    vuelve a un único sitio, que es justo el beneficio que justificaba el
+    refactor -- sin él, esta lista iba a crecer a tres entradas (una por
+    `ReadItem`, `PopularizeReading` y `EditNight`) en vez de compartir una.
+    A partir de ahora comprueba dos cosas simétricas:
 
     1. Ningún sitio fuera de `infrastructure/llm/` que NO esté en
        `ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM` puede llamar a
-       `run_agent()`: un segundo llamante nuevo (T42, T43) pone esto en
-       rojo hasta que se añada a la lista a propósito.
+       `run_agent()`: un llamante nuevo que no pase por `AgentRunner` pone
+       esto en rojo hasta que se añada a la lista a propósito.
     2. Todo fichero de esa lista debe llamar a `run_agent()` de verdad: si
-       `read_item.py` dejara de hacerlo, la entrada quedaría obsoleta y
+       `runner.py` dejara de hacerlo, la entrada quedaría obsoleta y
        debería quitarse explícitamente, no arrastrarse sin uso.
     """
     infrastructure_llm_dir = SRC_DIR / "infrastructure" / "llm"
@@ -223,10 +233,11 @@ def test_run_agent_no_se_llama_fuera_de_infrastructure_llm_salvo_los_sitios_perm
 
     assert not unexpected_sites, (
         "run_agent() llamado fuera de infrastructure/llm/ desde un fichero no "
-        "incluido en ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM: esto es "
-        "esperado según vayan llegando T42/T43, pero es una decisión "
-        "consciente -- añade el fichero a esa lista a la vez que revisas por "
-        f"qué es seguro. Sitios encontrados: {unexpected_sites}"
+        "incluido en ALLOWED_RUN_AGENT_CALL_SITES_OUTSIDE_INFRA_LLM: tras T42, "
+        "Reader/Popularizer/Editor comparten AgentRunner como único punto de "
+        "entrada, así que un llamante nuevo aquí es señal de que algo se saltó "
+        "el runner, no un crecimiento esperado de la lista -- revisa por qué "
+        f"antes de añadirlo. Sitios encontrados: {unexpected_sites}"
     )
 
     stale_allowlist_entries = [
@@ -269,20 +280,24 @@ def test_todo_fichero_que_llama_a_run_agent_tambien_llama_a_authorize():
     `test_run_agent_no_se_llama_fuera_de_infrastructure_llm`, y esta prueba
     tampoco lo exige llamar a `authorize()` -- se demostró con un caso de uso
     real, sin `authorize()` en ningún punto del fichero: la suite entera
-    (28 tests de este módulo) sigue en verde. **T42/T43 no deben leer que
-    esta prueba pasó como garantía de que su caso de uso respeta
-    `BudgetGuard`**: solo lo es si el llamante escribe `self._provider.run_agent(...)`
-    o `provider.run_agent(...)` de forma literal, como hace `read_item.py` hoy.
+    (28 tests de este módulo) sigue en verde. **Quien mantenga
+    `AgentRunner` no debe leer que esta prueba pasó como garantía de que
+    respeta `BudgetGuard`**: solo lo es porque `runner.py` escribe
+    `self._provider.run_agent(...)` de forma literal hoy; si eso cambiara a
+    un alias, esta regla dejaría de detectarlo.
 
     Hoy el único llamante de `run_agent()` en `backend/src` es
-    `application/use_cases/read_item.py` (T41), que sí llama a
+    `application/agents/runner.py::AgentRunner` (T42, sustituyendo a
+    `ReadItem`, que lo hacía directamente hasta T41), que sí llama a
     `w.guard.authorize(...)` antes de construir el `AgentRequest` -- sin
     falsos positivos conocidos: `infrastructure/llm/agent_sdk_provider.py`
     solo DEFINE `run_agent` (no lo invoca), así que no lo alcanza esta
-    regla. T42 (`PopularizeReading`) y T43 (`EditNight`) tendrán que hacer lo
-    mismo en su propio fichero para no poner esto en rojo -- y, dado el
-    hueco de arriba, revisar a mano (no solo confiar en este test) que su
-    llamada a `run_agent` no pasa por un alias que la esconda.
+    regla. `PopularizeReading` (T42) y `EditNight` (T43) llaman a
+    `AgentRunner.run()`, no a `run_agent()` directamente, así que no tienen
+    que repetir esta comprobación en su propio fichero -- y, dado el hueco
+    de arriba, sigue mereciendo la pena revisar a mano (no solo confiar en
+    este test) que ningún llamante nuevo de `run_agent` pasa por un alias
+    que lo esconda.
     """
     offenders = [
         str(path)

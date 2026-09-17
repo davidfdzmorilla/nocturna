@@ -32,7 +32,21 @@ Códigos de salida cubiertos aquí (`cli.py`, docstring de `_run_item`):
 `0` éxito · `1` lectura fallida (no ejercitado aquí: ver `test_read_item.py`
 para los escenarios de `LLMError`/JSON inválido, que no dependen del CLI) ·
 `2` UUID mal formado · `3` ítem inexistente o ya leído · `4` denegación de
-`BudgetGuard` (aquí, fuera de ventana).
+`BudgetGuard` (fuera de ventana para el Reader, o presupuesto agotado antes
+del Popularizer, T42) · `5` lectura correcta pero divulgación fallida (T42:
+el Popularizer no produjo un `Finding` -- JSON inválido agotados los
+reintentos, timeout, límite de tasa o error del proveedor).
+
+**T42: interest_score y el umbral del Popularizer.** `_valid_reading_json()`
+usa `interest_score=4`, igual al umbral por defecto de
+`config/pipeline.toml` (`limits.popularizer_min_interest_score = 4`): un
+`Item` leído con esa puntuación por defecto SÍ dispara el Popularizer. Los
+tests que no quieren ejercitar el Popularizer (porque no les interesa su
+resultado) fijan `interest_score` explícitamente POR DEBAJO del umbral, para
+que `PopularizeReading` descarte el ítem sin llamar al proveedor -- ni una
+respuesta más que programar en `fake_provider`, ni una llamada de más que
+contar. Los que sí quieren la cadena completa programan también una
+respuesta para `AgentRole.POPULARIZER`.
 """
 
 from __future__ import annotations
@@ -52,8 +66,9 @@ from sqlalchemy import select
 from nocturna import cli
 from nocturna.cli import main
 from nocturna.domain.entities import AgentCallStatus, ItemStatus, Run, RunStatus
+from nocturna.domain.errors import LLMError
 from nocturna.domain.llm import AgentRole
-from nocturna.infrastructure.db.models import AgentCallRow, ItemRow, ReadingRow, RunRow
+from nocturna.infrastructure.db.models import AgentCallRow, FindingRow, ItemRow, ReadingRow, RunRow
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyRunRepository,
@@ -94,6 +109,17 @@ def _valid_reading_json(**overrides: object) -> dict:
         "objects": ["NGC 1234"],
         "claims": ["Una afirmación de prueba."],
         "interest_score": 4,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def _valid_popularizer_json(**overrides: object) -> dict:
+    defaults: dict[str, object] = {
+        "title": "Un titular generado por el FakeLLMProvider",
+        "level_curious": "Nivel curioso de prueba.",
+        "level_amateur": "Nivel aficionado de prueba.",
+        "level_technical": "Nivel técnico de prueba.",
     }
     defaults.update(overrides)
     return defaults
@@ -167,6 +193,11 @@ def _all_readings(db_session_factory) -> list[ReadingRow]:
         return list(session.execute(select(ReadingRow)).scalars().all())
 
 
+def _all_findings(db_session_factory) -> list[FindingRow]:
+    with _read_session(db_session_factory) as session:
+        return list(session.execute(select(FindingRow)).scalars().all())
+
+
 def _item_status(db_session_factory, item_id: UUID) -> ItemStatus:
     with _read_session(db_session_factory) as session:
         row = session.get(ItemRow, item_id)
@@ -231,16 +262,26 @@ def test_item_ya_leido_en_segunda_ejecucion_devuelve_3_sin_integrity_error_ni_ll
     chocaría con `uq_readings_item_id` (`IntegrityError`). La guarda dispara
     antes de tocar el presupuesto o el proveedor, así que ese índice nunca
     llega a alcanzarse -- exactamente lo que `OPEN_DECISIONS.md` fija como
-    motivo para no resolver la unicidad de otra forma."""
+    motivo para no resolver la unicidad de otra forma. Esa guarda es de
+    `ReadItem`, dispara con `item.status is not ItemStatus.NEW` sin
+    importar cuál sea ese estado -- así que a este test no le interesa el
+    Popularizer (T42): `interest_score` se fija a propósito POR DEBAJO del
+    umbral (`SKIPPED_LOW_SCORE`, `Item` -> `DISCARDED`) para no tener que
+    programarle ninguna respuesta a `AgentRole.POPULARIZER`; el segundo
+    `run-item` dispara la misma `InvalidTransition` (código 3) desde
+    `DISCARDED` que dispararía desde `READ`."""
     fake_provider.respond(
-        AgentRole.READER, json=_valid_reading_json(), tokens_in=1200, tokens_out=300
+        AgentRole.READER, json=_valid_reading_json(interest_score=2), tokens_in=1200, tokens_out=300
     )
     item_id = _seed_item(db_session_factory)
 
     first_code = main(["run-item", str(item_id)])
     assert first_code == 0
-    assert len(fake_provider.calls) == 1
+    assert len(fake_provider.calls) == 1, (
+        "interest_score por debajo del umbral: el Popularizer no se llama"
+    )
     assert len(_all_readings(db_session_factory)) == 1
+    assert _item_status(db_session_factory, item_id) is ItemStatus.DISCARDED
 
     second_code = main(["run-item", str(item_id)])  # no debe lanzar IntegrityError
 
@@ -248,7 +289,11 @@ def test_item_ya_leido_en_segunda_ejecucion_devuelve_3_sin_integrity_error_ni_ll
     assert len(fake_provider.calls) == 1, "la segunda ejecución no debe llamar al proveedor"
     assert len(_all_readings(db_session_factory)) == 1, "ninguna Reading duplicada"
     assert len(_all_agent_calls(db_session_factory)) == 1, "ningún AgentCall nuevo"
-    assert _item_status(db_session_factory, item_id) is ItemStatus.READ
+    assert _item_status(db_session_factory, item_id) is ItemStatus.DISCARDED, (
+        "el primer run-item ya dejó el Item DISCARDED (interest_score bajo); la guarda de "
+        "ReadItem no lo cambia -- InvalidTransition dispara igual desde DISCARDED que desde "
+        "READ, y es justo eso lo que este test verifica"
+    )
 
     runs = _all_runs(db_session_factory)
     assert len(runs) == 2, "cada invocación sin un Run RUNNING previo crea uno nuevo"
@@ -289,28 +334,41 @@ def test_fuera_de_la_ventana_horaria_devuelve_4(
     assert run.finished_at is not None
 
 
-# --- Éxito: código 0, Reading persistida, Run completed --------------------
+# --- Éxito: código 0, Reading+Finding persistidos, Run completed -----------
 
 
-def test_exito_persiste_reading_marca_item_read_y_cierra_el_run_como_completed(
+def test_exito_persiste_reading_y_finding_sin_publicar_y_cierra_el_run_como_completed(
     db_session_factory: object,
     fake_provider: FakeLLMProvider,
 ) -> None:
+    """El "Hecho cuando" de T42 (`docs/PLAN_TAREAS.md`): "un `Finding` sin
+    publicar en base de datos tras `run-item` sobre un ítem con puntuación
+    alta". `interest_score=5` (por encima del umbral) encadena el
+    Popularizer tras el Reader; se programa respuesta para los dos roles."""
     fake_provider.respond(
         AgentRole.READER,
         json=_valid_reading_json(interest_score=5),
         tokens_in=1500,
         tokens_out=400,
     )
+    fake_provider.respond(
+        AgentRole.POPULARIZER,
+        json=_valid_popularizer_json(),
+        tokens_in=1000,
+        tokens_out=350,
+    )
     item_id = _seed_item(db_session_factory)
 
     code = main(["run-item", str(item_id)])
 
     assert code == 0
-    assert len(fake_provider.calls) == 1
+    assert len(fake_provider.calls) == 2
     assert fake_provider.calls[0].role is AgentRole.READER
+    assert fake_provider.calls[1].role is AgentRole.POPULARIZER
 
-    assert _item_status(db_session_factory, item_id) is ItemStatus.READ
+    assert _item_status(db_session_factory, item_id) is ItemStatus.READ, (
+        "publicar es del Editor (T43); un Item con Finding sin publicar se queda READ"
+    )
 
     readings = _all_readings(db_session_factory)
     assert len(readings) == 1
@@ -320,21 +378,171 @@ def test_exito_persiste_reading_marca_item_read_y_cierra_el_run_como_completed(
     assert reading.tokens_in == 1500
     assert reading.tokens_out == 400
 
+    findings = _all_findings(db_session_factory)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.item_id == item_id
+    assert finding.confidence is None
+    assert finding.published_at is None
+    assert finding.title == _valid_popularizer_json()["title"]
+
     calls = _all_agent_calls(db_session_factory)
-    assert len(calls) == 1
-    assert calls[0].status is AgentCallStatus.OK
-    assert calls[0].agent is AgentRole.READER
-    assert calls[0].tokens_in == 1500
-    assert calls[0].tokens_out == 400
+    assert len(calls) == 2
+    reader_call, popularizer_call = calls[0], calls[1]
+    assert reader_call.status is AgentCallStatus.OK
+    assert reader_call.agent is AgentRole.READER
+    assert reader_call.tokens_in == 1500
+    assert reader_call.tokens_out == 400
+    assert popularizer_call.status is AgentCallStatus.OK
+    assert popularizer_call.agent is AgentRole.POPULARIZER
+    assert popularizer_call.tokens_in == 1000
+    assert popularizer_call.tokens_out == 350
 
     runs = _all_runs(db_session_factory)
     assert len(runs) == 1, "run-item crea un Run cuando no había ninguno RUNNING"
     run = runs[0]
     assert run.status is RunStatus.COMPLETED, (
-        "con una Reading producida, el Run que este proceso creó se cierra 'completed'"
+        "con una Reading producida y una divulgación con éxito, el Run que este proceso "
+        "creó se cierra 'completed'"
     )
     assert run.finished_at is not None
-    assert calls[0].run_id == run.id
+    assert reader_call.run_id == run.id
+    assert popularizer_call.run_id == run.id
+    assert finding.run_id == run.id
+
+
+# --- Puntuación baja: código 0, Item DISCARDED, cero Finding ---------------
+
+
+def test_puntuacion_baja_no_llama_al_popularizer_descarta_el_item_y_no_deja_finding(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """Bajo el umbral (`config/pipeline.toml`,
+    `limits.popularizer_min_interest_score = 4`), `PopularizeReading`
+    descarta el `Item` sin invocar al proveedor. Solo se programa respuesta
+    para el Reader: si el código llamara al Popularizer por error,
+    `FakeLLMProvider` fallaría con `ResponseQueueExhausted` antes de llegar
+    a ninguna de estas aserciones."""
+    fake_provider.respond(
+        AgentRole.READER,
+        json=_valid_reading_json(interest_score=2),
+        tokens_in=1000,
+        tokens_out=200,
+    )
+    item_id = _seed_item(db_session_factory)
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 0
+    assert len(fake_provider.calls) == 1
+    assert fake_provider.calls[0].role is AgentRole.READER
+    assert _item_status(db_session_factory, item_id) is ItemStatus.DISCARDED
+    assert _all_findings(db_session_factory) == []
+
+    calls = _all_agent_calls(db_session_factory)
+    assert len(calls) == 1, "solo el AgentCall del Reader; el Popularizer nunca se llamó"
+
+    runs = _all_runs(db_session_factory)
+    assert len(runs) == 1
+    assert runs[0].status is RunStatus.COMPLETED, (
+        "SKIPPED_LOW_SCORE no es un fallo (código 0): el Run se cierra 'completed' igual "
+        "que si hubiera divulgado"
+    )
+
+
+# --- Popularizer fallido: código 5, Reading intacta, Run partial -----------
+
+
+def test_popularizer_fallido_devuelve_5_deja_la_reading_intacta(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """Un fallo transitorio del Popularizer (`LLMError`, no reintentable)
+    tras una lectura con éxito: código 5 (distinto del 1 de una lectura
+    fallida), la `Reading` ya persistida no se toca, y no se deja ningún
+    `Finding`."""
+    fake_provider.respond(
+        AgentRole.READER,
+        json=_valid_reading_json(interest_score=5),
+        tokens_in=1200,
+        tokens_out=300,
+    )
+    fake_provider.fail(
+        AgentRole.POPULARIZER, error=LLMError("fallo del Popularizer", tokens_in=200, tokens_out=10)
+    )
+    item_id = _seed_item(db_session_factory)
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 5
+    assert len(fake_provider.calls) == 2
+    assert fake_provider.calls[1].role is AgentRole.POPULARIZER
+
+    readings = _all_readings(db_session_factory)
+    assert len(readings) == 1, "la Reading ya persistida por ReadItem no se pierde"
+    assert readings[0].interest_score == 5
+    assert _all_findings(db_session_factory) == []
+
+    assert _item_status(db_session_factory, item_id) is ItemStatus.READ, (
+        "AGENT_ERROR es un fallo transitorio del Popularizer: el Item se queda READ, "
+        "reintentable otra noche -- no se descarta"
+    )
+
+    calls = _all_agent_calls(db_session_factory)
+    assert len(calls) == 2
+    assert calls[1].status is AgentCallStatus.ERROR
+    assert calls[1].agent is AgentRole.POPULARIZER
+
+    runs = _all_runs(db_session_factory)
+    assert len(runs) == 1
+    assert runs[0].status is RunStatus.PARTIAL, (
+        "lectura correcta pero divulgación fallida: el Run que este proceso creó debe "
+        "cerrarse PARTIAL, no COMPLETED -- un Run marcado COMPLETED aquí mentiría "
+        "precisamente en el sitio donde T60 (resumen de la noche) va a mirar para "
+        "decidir si hubo algo que revisar"
+    )
+
+
+# --- Denegación de presupuesto en el Popularizer: código 4, rol correcto ---
+
+
+def test_denegacion_de_presupuesto_en_el_popularizer_devuelve_4_y_nombra_el_rol_correcto(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Presupuesto suficiente para que el Reader se autorice
+    (`reader_estimated_tokens=6000` de `config/pipeline.toml` cabe en los
+    6500 tokens disponibles tras la reserva del Editor) pero no para el
+    Popularizer (`popularizer_estimated_tokens=7000` no cabe en los 5400
+    tokens que quedan tras el gasto real del Reader). `_print_budget_denial`
+    debe nombrar "Popularizer" en su mensaje, no "Reader" a pelo."""
+    fake_provider.respond(
+        AgentRole.READER,
+        json=_valid_reading_json(interest_score=5),
+        tokens_in=1000,
+        tokens_out=100,
+    )
+    _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=66_500)
+    item_id = _seed_item(db_session_factory)
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 4
+    assert len(fake_provider.calls) == 1, "BudgetGuard deniega al Popularizer antes de llamarlo"
+    assert fake_provider.calls[0].role is AgentRole.READER
+
+    readings = _all_readings(db_session_factory)
+    assert len(readings) == 1, "la Reading ya persistida por ReadItem no se pierde"
+    assert _all_findings(db_session_factory) == []
+    assert _item_status(db_session_factory, item_id) is ItemStatus.READ
+
+    err = capsys.readouterr().err
+    assert "Popularizer" in err, (
+        "_print_budget_denial debe nombrar el rol denegado, no 'Reader' a pelo"
+    )
+    assert "Reader" not in err
 
 
 # --- Run reutilizado: se deja abierto, nunca lo cierra run-item ------------
@@ -347,9 +555,17 @@ def test_run_ya_running_se_reutiliza_y_se_deja_abierto(
     """Simula la noche de T44 en marcha: un `Run` `RUNNING` ya existe antes
     de invocar `run-item`. Cerrarlo sería un bug (cortaría la noche de otro
     proceso); dejarlo abierto y reutilizado es lo único correcto (T41,
-    "Hecho cuando")."""
+    "Hecho cuando"). A este test no le interesa el Popularizer (T42): fija
+    `interest_score` a propósito POR DEBAJO del umbral para que
+    `PopularizeReading` no llegue a invocar al proveedor -- así el único
+    `AgentCall` sigue siendo el del Reader, que es lo único que esta
+    aserción de "gasto contabilizado contra el Run reutilizado" necesita
+    comprobar."""
     fake_provider.respond(
-        AgentRole.READER, json=_valid_reading_json(), tokens_in=900, tokens_out=200
+        AgentRole.READER,
+        json=_valid_reading_json(interest_score=2),
+        tokens_in=900,
+        tokens_out=200,
     )
     existing_run_id = _seed_running_run(
         db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=300_000

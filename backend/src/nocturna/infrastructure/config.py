@@ -49,6 +49,13 @@ class BudgetConfig(BaseModel):
     # rebase. Ver comentario en config/pipeline.toml. Valor a calibrar en
     # T60, como item_timeout_s.
     reader_estimated_tokens: int = Field(gt=0)
+    # popularizer_estimated_tokens: la misma estimación que
+    # reader_estimated_tokens, pero para el Popularizer, que `BudgetGuard.
+    # authorize` compara contra el presupuesto restante antes de llamarlo. Sin
+    # default, por el mismo motivo: que falte ruidosamente si alguien copia un
+    # TOML viejo. No vive en `BudgetPolicy` (esa describe reglas del guard, no
+    # estimaciones por rol). Ver comentario en config/pipeline.toml.
+    popularizer_estimated_tokens: int = Field(gt=0)
 
     @model_validator(mode="after")
     def _reserve_within_nightly_budget(self) -> "BudgetConfig":
@@ -74,6 +81,13 @@ class LimitsConfig(BaseModel):
     # para obtener el tope de llamadas de esos roles en toda la noche. Ver
     # comentario en config/pipeline.toml.
     max_calls_per_item: int = Field(ge=1)
+    # popularizer_min_interest_score: umbral de `Reading.interest_score` a
+    # partir del cual se llama al Popularizer. Es una palanca de gasto (decide
+    # cuántas llamadas al Popularizer hay por noche), no una regla del guard,
+    # así que vive aquí y no en `BudgetPolicy`. PLAN_TAREAS.md fija en T60
+    # «se decide si el interest_score >= 4 es el umbral correcto»: tiene que
+    # ser calibrable sin tocar código. Ver comentario en config/pipeline.toml.
+    popularizer_min_interest_score: int = Field(ge=1, le=5)
 
 
 class WindowConfig(BaseModel):

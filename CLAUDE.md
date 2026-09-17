@@ -157,4 +157,4 @@ cd web && pnpm install && pnpm dev
 
 ## Estado actual
 
-Fase 0: base documental. Sin código. Ver `docs/PLAN_TAREAS.md`.
+Fase 1: Reader, Popularizer e hilos de gasto validados con humos reales. Aritmética nocturna medida: ~26 candidatos/noche sin reintento, ~13 con todos reintentando. Reparador JSON implementado; calibración en T60 sobre `popularizer-v2`. Editor (T43) y orquestador nocturno (T44) pendientes.

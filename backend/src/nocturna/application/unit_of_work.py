@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from nocturna.application.budget import BudgetGuard
 from nocturna.domain.repositories import (
     AgentCallRepository,
+    FindingRepository,
     ItemRepository,
     ReadingRepository,
     RunRepository,
@@ -59,13 +60,22 @@ class AgentWork:
     Cada campo es lo que ya existe en `domain/`: no se inventa ningún
     repositorio ni interfaz nueva aquí. `guard` es el `BudgetGuard` de la
     noche en curso (T30), ya construido contra la sesión de esta unidad de
-    trabajo -- el caso de uso no lo construye, lo recibe.
+    trabajo -- el caso de uso no lo construye, lo recibe. `findings` se
+    añade en T42: `PopularizeReading` es el primer caso de uso que necesita
+    persistir un `Finding` (sin publicar, `confidence`/`published_at` en
+    `None`), y este campo es obligatorio -- no `| None` -- por el mismo
+    motivo que los otros cuatro: ningún caso de uso de agente debería poder
+    olvidarse de pasarlo. Rompe, a propósito, cualquier construcción
+    existente de `AgentWork` que no lo incluya (`cli.py::_agent_work_factory`
+    y `tests/fakes/work.py`), para que el tipo lo señale en vez de un `None`
+    silencioso en tiempo de ejecución.
     """
 
     guard: BudgetGuard
     runs: RunRepository
     items: ItemRepository
     readings: ReadingRepository
+    findings: FindingRepository
     agent_calls: AgentCallRepository
 
 
