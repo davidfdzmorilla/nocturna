@@ -14,7 +14,8 @@ fi
 
 # 2. Commits: sin atribución a IA, sin --no-verify, y solo vía /commit-execute
 if printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+commit'; then
-  if printf '%s' "$cmd" | grep -qiE 'claude|anthropic|co-authored-by|generated with|🤖'; then
+  # Atribución, no mención: el nombre del SDK puede aparecer en el mensaje.
+  if printf '%s' "$cmd" | grep -qiE 'co-authored-by|generated with|🤖|claude code|by (claude|anthropic)'; then
     echo "BLOQUEADO: el mensaje de commit contiene atribución a IA. Regla del proyecto: nunca. Reescribe el mensaje." >&2
     exit 2
   fi
