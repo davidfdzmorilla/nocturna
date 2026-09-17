@@ -174,6 +174,7 @@ def _test_policy(*, max_calls_per_item: int) -> BudgetPolicy:
         # llamada sale de `BudgetGuard.timeout_for_call()`, no de este
         # literal (mismo comentario que test_read_item_smoke.py).
         item_timeout_s=60,
+        editor_timeout_s=300,
         run_timeout_s=120,
         window_start=_WINDOW_START,
         window_hard_stop=_WINDOW_HARD_STOP,

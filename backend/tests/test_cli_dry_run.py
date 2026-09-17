@@ -50,11 +50,14 @@ weekly_reset_hour = 0
 reset_day_multiplier = 1.0
 reader_estimated_tokens = 6000
 popularizer_estimated_tokens = 7000
+editor_base_tokens = 4000
+editor_tokens_per_candidate = 700
 
 [limits]
 max_items_per_night = 40
 max_turns_per_agent = 3
 item_timeout_s = 180
+editor_timeout_s = 300
 run_timeout_s = 16200
 max_editor_calls_per_night = 2
 max_calls_per_item = 2
@@ -277,6 +280,7 @@ def _policy(**overrides: object) -> BudgetPolicy:
         "max_editor_calls_per_night": 2,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
+        "editor_timeout_s": 300,
         "run_timeout_s": 16_200,
         "window_start": time(0, 0),
         "window_hard_stop": time(4, 45),

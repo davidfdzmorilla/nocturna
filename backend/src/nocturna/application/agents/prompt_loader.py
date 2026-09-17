@@ -22,6 +22,13 @@ READER_PROMPT_VERSION: str = "reader-v2"
 #: calibraciones por esta etiqueta.
 POPULARIZER_PROMPT_VERSION: str = "popularizer-v2"
 
+#: Versión a mano del prompt del Editor, mismo criterio que
+#: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al
+#: editar `editor.md`. Primera versión (T43), ya incorpora las lecciones de
+#: T42 (nada de fences, nunca un salto de línea real dentro de una cadena
+#: JSON) desde el primer día.
+EDITOR_PROMPT_VERSION: str = "editor-v1"
+
 
 def load_prompt(name: str) -> str:
     """Lee `prompts/<name>.md` y devuelve su contenido.

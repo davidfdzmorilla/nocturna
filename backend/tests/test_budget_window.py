@@ -47,6 +47,7 @@ def _policy(**overrides: object) -> BudgetPolicy:
         "max_editor_calls_per_night": 2,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
+        "editor_timeout_s": 300,
         "run_timeout_s": 16_200,
         "window_start": time(0, 0),
         "window_hard_stop": time(4, 45),
@@ -262,6 +263,43 @@ def test_timeout_for_call_respeta_item_timeout_s_cuando_sobra_ventana():
     guard = _make_guard(run=run, policy=policy, clock=clock)
 
     assert guard.timeout_for_call() == 180
+
+
+# --- timeout_for_call(role): editor_timeout_s vs item_timeout_s, T43 -------
+
+
+def test_timeout_for_call_editor_devuelve_editor_timeout_s():
+    run = _make_run()
+    policy = _policy(item_timeout_s=180, editor_timeout_s=300)
+    clock = FakeClock(datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC))
+    guard = _make_guard(run=run, policy=policy, clock=clock)
+
+    assert guard.timeout_for_call(AgentRole.EDITOR) == 300
+
+
+def test_timeout_for_call_sin_rol_y_reader_siguen_devolviendo_item_timeout_s():
+    run = _make_run()
+    policy = _policy(item_timeout_s=180, editor_timeout_s=300)
+    clock = FakeClock(datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC))
+    guard = _make_guard(run=run, policy=policy, clock=clock)
+
+    assert guard.timeout_for_call() == 180
+    assert guard.timeout_for_call(AgentRole.READER) == 180
+    assert guard.timeout_for_call(AgentRole.POPULARIZER) == 180
+
+
+def test_timeout_for_call_treinta_segundos_antes_del_hard_stop_es_treinta_para_todos_los_roles():
+    """La invariante de `hard_stop` (regla 6 de `budget.py`) no se relaja por
+    `editor_timeout_s`: a 30 s del corte, tanto el Editor como el resto de
+    roles reciben 30 s, nunca su `timeout_base` completo."""
+    run = _make_run()
+    policy = _policy(item_timeout_s=180, editor_timeout_s=300)
+    clock = FakeClock(datetime(2026, 1, 1, 4, 44, 30, tzinfo=UTC))
+    guard = _make_guard(run=run, policy=policy, clock=clock)
+
+    assert guard.timeout_for_call() == 30
+    assert guard.timeout_for_call(AgentRole.READER) == 30
+    assert guard.timeout_for_call(AgentRole.EDITOR) == 30
 
 
 # --- Corte cerca de hard_stop: no distingue DST (30 s antes es 30 s antes) --

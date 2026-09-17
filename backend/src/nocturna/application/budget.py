@@ -92,6 +92,7 @@ class BudgetPolicy:
     max_editor_calls_per_night: int
     max_calls_per_item: int
     item_timeout_s: int
+    editor_timeout_s: int
     run_timeout_s: int
     window_start: time
     window_hard_stop: time
@@ -542,15 +543,38 @@ class BudgetGuard:
             self._clock.now(), self._policy.window_start, self._policy.window_hard_stop
         )
 
-    def timeout_for_call(self) -> int:
+    def timeout_for_call(self, role: AgentRole | None = None) -> int:
         """Timeout a aplicar a la próxima llamada: nunca sobrevive al `hard_stop`.
 
-        Regla 6: `min(item_timeout_s, seconds_until_hard_stop())`. Treinta
-        segundos antes de `hard_stop` son 30 s aunque `item_timeout_s` sea
-        mayor; en `hard_stop` mismo son 0 s, así que quien reciba este
-        valor debe tratarlo como "no llames, ya no hay tiempo".
+        Regla 6: `min(timeout_base, seconds_until_hard_stop())`, sin
+        excepción -- el `min` con `seconds_until_hard_stop()` se conserva
+        tal cual para los tres roles, el Editor incluido. `timeout_base` es
+        `editor_timeout_s` si `role is AgentRole.EDITOR`, `item_timeout_s`
+        en cualquier otro caso (Reader, Popularizer, o `role=None`):
+        `item_timeout_s` está pensado para una llamada sobre un único
+        abstract, mientras que el Editor recibe, en una sola llamada a
+        Opus, hasta `max_items_per_night` candidatos de la noche entera, y
+        no cabe en esos 180 s por defecto. Un `LLMTimeout` no se reintenta
+        en `AgentRunner.run` (es uno de sus tres desenlaces terminales), así
+        que un timeout corto para el Editor no es "otro intento": es la
+        noche entera sin publicar, con la reserva del Editor ya gastada.
+
+        `role` es opcional (por defecto `None`, tratado igual que Reader o
+        Popularizer) para que ningún llamador existente de este método
+        -- ni de dentro del proyecto ni de la suite de tests
+        (`tests/test_budget_guard.py`, `tests/test_budget_window.py`) --
+        tenga que pasarlo; el comportamiento para esos roles es idéntico al
+        de antes de que existiera `editor_timeout_s`. Treinta segundos antes
+        de `hard_stop` son 30 s aunque `timeout_base` sea mayor; en
+        `hard_stop` mismo son 0 s, así que quien reciba este valor debe
+        tratarlo como "no llames, ya no hay tiempo".
         """
-        return min(self._policy.item_timeout_s, self.seconds_until_hard_stop())
+        timeout_base = (
+            self._policy.editor_timeout_s
+            if role is AgentRole.EDITOR
+            else self._policy.item_timeout_s
+        )
+        return min(timeout_base, self.seconds_until_hard_stop())
 
     def _available_tokens(self, run: Run, role: AgentRole) -> int:
         """Presupuesto disponible para `role` antes de restar lo ya gastado.

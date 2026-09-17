@@ -43,6 +43,24 @@ reader_estimated_tokens = 6000
 # ahí authorize deniega, el Run queda partial y la reserva del Editor sigue
 # intacta -- comportamiento correcto, no un fallo.
 popularizer_estimated_tokens = 7000
+# editor_base_tokens: parte fija de la estimación de coste del Editor, la
+# única llamada de la noche a Opus, sobre la que `PipelineConfig` exige que
+# `editor_base_tokens + max_items_per_night * editor_tokens_per_candidate`
+# quepa en `editor_reserve_tokens` (ver el validador de `PipelineConfig`).
+# Composición aproximada (T43): prompt de rol (~500 tokens) + el gasto
+# lateral que T40 midió por llamada (~1.163 de Haiku) + envoltorio de la
+# salida (`{"publish": [...]}`, ~100) ≈ 1.800, con el mismo margen ~2,2x que
+# ya aplicaron Reader y Popularizer ≈ 4.000. Valor a calibrar en T60 con la
+# latencia y el gasto reales de Opus.
+editor_base_tokens = 4000
+# editor_tokens_per_candidate: coste marginal, por candidato, de la única
+# llamada al Editor. Composición aproximada (T43): `item_id` + `title` +
+# `level_curious` (~200 tokens) ≈ 250 de entrada + ~60 de salida (la
+# decisión de ese candidato dentro de `publish`) ≈ 310, con el mismo margen
+# ≈ 700. Multiplicado por `max_items_per_night` en el validador de
+# `PipelineConfig` para comprobar que la reserva del Editor basta en el
+# peor caso (todos los ítems de la noche llegando como candidatos).
+editor_tokens_per_candidate = 700
 
 [limits]
 # max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").
@@ -51,6 +69,17 @@ max_turns_per_agent = 3
 # item_timeout_s y run_timeout_s: propuestos, se calibran en T60.
 item_timeout_s = 180
 run_timeout_s = 16200
+# editor_timeout_s: timeout propio del Editor, separado de item_timeout_s.
+# item_timeout_s (180 s) está pensado para una llamada del Reader/Popularizer
+# sobre un único abstract; el Editor recibe, en una sola llamada a Opus,
+# hasta max_items_per_night (40) candidatos de la noche entera -- no cabe en
+# esa ventana. Un LLMTimeout no se reintenta en AgentRunner.run (es uno de
+# los tres desenlaces terminales, junto a LLMRateLimited y LLMError), así que
+# un timeout corto para el Editor no es "otro intento": es la noche entera
+# sin publicar nada, con la reserva del Editor ya gastada. 300 s es un valor
+# propuesto, igual que item_timeout_s; se calibra en T60 con la latencia real
+# de Opus sobre 40 candidatos.
+editor_timeout_s = 300
 # max_editor_calls_per_night: acota intentos, no éxitos. Lo que cuesta
 # presupuesto es el intento, no el acierto, así que se cuentan las llamadas
 # de cualquier estado; el 2 preserva "un Editor por noche" en su sentido real
