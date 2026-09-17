@@ -112,10 +112,16 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Cerrada: 2026-09-17**
 
 ### T44 · Orquestador `run-night`
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T43
 - **Alcance**: caso de uso `RunNight`: crea `Run`, ingesta (T20), Reader sobre todos los `new` en orden de llegada hasta `max_items_per_night`, Popularizer sobre candidatos, Editor al final, cierre del `Run` con estado y métricas. Manejo de `hard_stop` cancelando lo que esté en vuelo. Logging estructurado (JSON) por ítem y por agente.
-- **Hecho cuando**: una noche completa en local, contra la suscripción, termina con `Run.status = completed` y hallazgos publicados. Se registra en `docs/` el consumo observado en Settings > Usage a la mañana siguiente (primera calibración).
+- **Implementación completada**: 2026-09-17 · 773 passed / 4 deselected · **Dos revisiones completadas, ambas APROBADAS sin bloqueantes.** Ronda 1: estructura de `RunNight`, degradación de estado, cierre de `Run` huérfano, vigía de `hard_stop`, contabilidad de tokens con máximo componente a componente, línea de métrica de cierre con contadores. Ronda 2: validador de presupuesto inicial, códigos de salida 0/1/7/8, reconocimiento de timeout de ejecución frente a `hard_stop`, cortacircuitos `max_consecutive_failures = 5`, reconciliación de tokens (suma `AgentCall`, nunca lee `Run.tokens_used`).
+- **Hechos saldados**: Política de `Run` huérfano: `run-night` cierra como `KILLED` e invoca siguiente; `run-item` sin cambios. Deuda de T41 sobre `KeyboardInterrupt` bloqueador. Mitigación (a) de T40 sobre fugas sin `ResultMessage`, acotada a ~50.000 tokens por noche con fallos monótonos.
+- **Decisiones abiertas nuevas**: 10 registradas en `OPEN_DECISIONS.md`, líneas 88–100.
+- **Decisiones resueltas en esta sesión**: nº 20 (huérfano, precisada para `run-night`), nº 41 (código 2 ya falso), nº 48 (reconciliación por suma), nº 57 (validador de presupuesto).
+- **Deuda técnica marcada**: saldada la del Run incompleto por `KeyboardInterrupt`, precisado el alcance real del cortacircuitos (fallos monótonos, no intermitentes), añadidas 3 deudas nuevas (docstring de `Run`, camino FAILED sin contadores, cobertura de tests).
+- **Nota importante**: **No incluye ejecución real de noche completa contra la suscripción**. El autor ejecuta `nocturna run-night` una o más veces en local y registra métricas en `docs/CALIBRACION.md` (T60). Después de la primera noche ejecutada y anotada, la tarea está completa.
+- **Cerrada: 2026-09-17** · Suite íntegra: 773 passed. Implementación y revisiones completadas; calibración del autor en T60.
 
 ---
 
@@ -141,7 +147,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Estado**: pending
 - **Depende de**: T44, T51
 - **Alcance**: el autor ejecuta `run-night` a mano (o con `cron` local) durante dos semanas. Cada mañana anota en `docs/CALIBRACION.md`: tokens del `Run`, porcentaje semanal consumido según Settings > Usage, ítems leídos, hallazgos publicados, calidad percibida. Al final se ajusta `nightly_tokens` para acercarse al 30% semanal y se decide si el `interest_score >= 4` es el umbral correcto.
-- **Nota sobre prompt versions**: (1) `READER_PROMPT_VERSION` es `reader-v2` con abstract en `<abstract>`/`</abstract>`; (2) `POPULARIZER_PROMPT_VERSION` es `popularizer-v2` con reparador JSON; (3) `EDITOR_PROMPT_VERSION` es `editor-v1` entrada acotada a `title+level_curious`. Cada uno rompe comparabilidad con datos previos de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.). Humo manual del Editor no ejecutado en T43, será primer dato real de Opus.
+- **Nota sobre prompt versions**: (1) `READER_PROMPT_VERSION` es `reader-v2` con abstract en `<abstract>`/`</abstract>`; (2) `POPULARIZER_PROMPT_VERSION` es `popularizer-v2` con reparador JSON; (3) `EDITOR_PROMPT_VERSION` es `editor-v1` entrada acotada a `title+level_curious`. Cada uno rompe comparabilidad con datos previos de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.). Primer dato real de Opus ejecutado 2026-09-17 con 3 candidatos: 3.381 tokens, 1 intento, 0,85 y 0,80 confidence en aprobados, decisión editorial correcta.
 - **Hecho cuando**: `pipeline.toml` tiene valores calibrados con datos reales y un ADR documenta el criterio.
 
 ### T61 · Retrospectiva y plan de fase 2

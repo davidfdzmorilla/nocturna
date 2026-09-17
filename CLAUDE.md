@@ -157,4 +157,4 @@ cd web && pnpm install && pnpm dev
 
 ## Estado actual
 
-Fase 1: Reader (T41), Popularizer (T42) e hilos de gasto validados con humos reales. Estimaciones lineales por rol, timeout rol-dependiente. Editor (T43) completado: llamada N:1 con Opus, validador de reserva presupuestaria, `_edit_one_night` único cierre de `COMPLETED`. Humo manual de Opus escrito, no ejecutado (primer dato de calibración para T60). Orquestador nocturno (T44) próximo.
+Fase 1: Reader (T41), Popularizer (T42), Editor (T43) y Orquestador nocturno (T44) completados. Humos reales ejecutados: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones, sin control desde `pipeline.toml`. Suite: 773 passed. Próximo: T50 (API de lectura) y T60 (calibración real de dos semanas).

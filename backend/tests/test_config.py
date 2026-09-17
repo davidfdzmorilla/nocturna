@@ -39,6 +39,7 @@ run_timeout_s = 16200
 max_editor_calls_per_night = 2
 max_calls_per_item = 2
 popularizer_min_interest_score = 4
+max_consecutive_failures = 5
 
 [window]
 start = "00:00"
@@ -76,6 +77,7 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
     assert config.limits.max_calls_per_item == 2
+    assert config.limits.max_consecutive_failures == 5
     assert config.window.start == time(0, 0)
     assert config.window.hard_stop == time(4, 45)
     assert config.window.timezone == "Europe/Madrid"
@@ -235,6 +237,26 @@ def test_max_calls_per_item_no_positivo_falla(tmp_path, value):
     content = BASE_TOML.replace(
         "max_calls_per_item = 2",
         f"max_calls_per_item = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_max_consecutive_failures_falla(tmp_path):
+    content = BASE_TOML.replace("max_consecutive_failures = 5\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_max_consecutive_failures_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "max_consecutive_failures = 5",
+        f"max_consecutive_failures = {value}",
     )
     path = _write_toml(tmp_path, content)
 

@@ -98,6 +98,18 @@ max_calls_per_item = 2
 # tocar código, de ahí que sea configuración y no un literal en el
 # orquestador.
 popularizer_min_interest_score = 4
+# max_consecutive_failures: cortacircuitos de fallos consecutivos, cualquier
+# rol. Mitigación (a) que docs/TECHNICAL_DEBT.md asigna a T44 para la fuga
+# de ~600.000-800.000 tokens/noche de llamadas que mueren antes de un
+# ResultMessage (timeout de socket, cancelación previa a cualquier
+# respuesta, kill del proceso): esas llamadas no dejan usage ni
+# model_usage que contabilizar, así que la única defensa posible es dejar
+# de intentarlo. Con 5 fallos seguidos, RunNight cierra el Run como
+# partial en vez de seguir gastando sesiones sin contabilidad sobre el
+# resto de la noche -- acota la fuga a ~5 llamadas fallidas en vez de
+# hasta las 80 que permite CALL_LIMIT_REACHED. Valor propuesto sin datos
+# de campo, a calibrar en T60.
+max_consecutive_failures = 5
 
 [window]
 start = "00:00"
