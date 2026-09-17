@@ -404,13 +404,20 @@ async def test_smoke_edit_night_llamada_real_produce_decision_y_gasto_contabiliz
     if result.unknown_item_ids:
         print(f"  AVISO: item_id desconocidos devueltos por el Editor: {result.unknown_item_ids}")
 
+    # `Finding` es un dataclass sin `eq=False`, así que compara por valor: los de
+    # `result.published` vienen rehidratados del repositorio y ya mutados (confidence,
+    # published_at), mientras que los de `created_findings` siguen sin publicar. Un
+    # `finding in result.published` sería siempre falso y mandaría a los publicados a la
+    # rama del descartado. Se cruza por `id`, que es lo único estable entre ambos lados.
+    published_ids = {finding.id for finding in result.published}
+
     with db_session_factory() as check_session:
         for finding in created_findings:
             row = check_session.get(FindingRow, finding.id)
             assert row is not None
             item_row = check_session.get(ItemRow, finding.item_id)
             assert item_row is not None
-            if finding in result.published:
+            if finding.id in published_ids:
                 assert row.confidence is not None
                 assert row.published_at is not None
                 assert item_row.status is ItemStatus.PUBLISHED
