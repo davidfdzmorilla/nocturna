@@ -22,7 +22,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | done (T43) |
 | Orquestador nocturno | `application/use_cases/run_night.py` | done (T44) |
 | API de lectura | FastAPI | done (T50) |
-| Web | Next.js | pendiente (T51) |
+| Web | Next.js | done (T51) |
 
 ## Flujo de una noche
 
@@ -215,6 +215,26 @@ Implementada en T50. FastAPI con tres endpoints expuestos:
 **Arranque local**: `cd backend && uv run uvicorn nocturna.api.app:create_app --factory --reload --port 8000`. El parámetro `--factory` invoca `create_app()` que devuelve `FastAPI()`. Settings cacheadas con `lru_cache` en `deps.py`.
 
 **Script de siembra**: `backend/scripts/seed_demo.py` (fuera del paquete instalable) siembra tres `Finding` de prueba publicados por el mismo camino de dominio que el Editor (y con la misma guarda: `NOCTURNA_ALLOW_SEED=1`). No es idempotente: segundo lanzamiento falla con `IntegrityError` sin corromper nada (todo dentro de transacción de escritura).
+
+## Web (fase 1)
+
+Implementada en T51. Next.js 15.5.25 con App Router, React 19.1.0, Tailwind 4.3.3. Dos rutas públicas de solo lectura:
+
+- `/` feed paginado (`?page=1&level=curious`) de hallazgos publicados, orden descendente por `published_at`, desempate por `id`. `page` base 1 (default 1), `size` 1–50 (default 20). Respuesta: objeto `{items: [...], page, size, total}`. Página fuera de rango → `200` con lista vacía, aviso visual al usuario.
+- `/hallazgo/[id]` detalle de un hallazgo publicado. Selector de nivel por parámetro URL `?nivel=curious|amateur|technical` (default `curious`), **sin estado de cliente**: cada nivel es una URL compartible, legible sin JavaScript. Enlace a arXiv original del paper. `404` si no existe o no publicado (indistinguible por diseño).
+
+**Decisiones estructurales**:
+- **SSR dinámico con `force-dynamic` + `cache: "no-store"`**, no ISR. Razón: hallazgos se publican en bloque de madrugada y no cambian hasta la siguiente noche, ISR solo aportaría latencia a cambio de razonar sobre el *full route cache* de Next (si la API está caída al revalidar, se cachea la página degradada) y prerenderizar `/` en build ataría el build a tener API y PostgreSQL levantadas. Con SSR dinámico, `pnpm build` toca solo el código (verificado: `grep` de `localhost:8000` y `NOCTURNA_API_URL` no aparecen en `.next/static`). Reversible en una línea (`revalidate = 300`).
+- **Frontera de IO única**: `src/lib/api/client.ts` es el único módulo que hace `fetch`. Mapea `404` → `not_found()` y todo lo demás → `unavailable`, nunca devuelve al llamante el cuerpo del servidor, el código de estado ni la URL. Espeja la política de T50.
+- **Selector de nivel por URL (`?nivel=`)**, no por estado de cliente: cero JavaScript en la ruta de renderización (solo navegación mínima), legible con JS desactivado, cada nivel es una URL compartible.
+- **La web no tiene `domain/`** y no debe tenerlo: ninguna regla de negocio del backend se duplica en TypeScript.
+- **Banner permanente de análisis automatizado** en el layout raíz, así que aparece en todas las rutas por construcción, incluidas `not-found` y `error`. Sin estado ni mecanismo de cierre.
+- **Server Components** salvo `app/error.tsx`, que Next exige como componente de cliente (pero no hace IO, solo renderiza un fallback).
+- **Lighthouse accesibilidad 100/100** (build de producción, preset desktop, sin auditorías fallidas; umbral exigido ≥90).
+
+**Problemas técnicos descubiertos y arreglados en T51**:
+- `generateMetadata` duplicaba peticiones porque `AbortSignal.timeout()` por llamada rompe la Request Memoization de Next. Arreglado envolviendo `fetchFinding` en `React.cache()`, verificado contando peticiones en el log de uvicorn (una sola por visita).
+- Backend no acota `page`, permitiendo `?page=100000000000000000000` → SQL error `NumericValueOutOfRange` → 500. Arreglado en la web con validación `parsePageParam` regex `/^\d{1,6}$/` y tope `MAX_PAGE = 999_999`, congelado con tests. El backend sigue siendo vulnerable (no es bug de T51, sino de T50).
 
 ## Lo que no existe en fase 1 (a propósito)
 

@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/*
+ * Paleta oscura sobria, tokens semánticos (no nombres de color literales)
+ * para poder cambiarla sin tocar componentes. Todas las combinaciones
+ * texto/fondo usadas en la web cumplen contraste >= 4.5:1 (comprobado
+ * manualmente con la fórmula de WCAG 2.1; ver informe de la tarea).
+ */
+@theme {
+  --color-bg: #0b0e14;
+  --color-surface: #131722;
+  --color-border: #2b3040;
+  --color-text: #e8eaf0;
+  --color-text-muted: #b8c0cc;
+  --color-link: #7fb2ff;
+  --color-link-hover: #a8cbff;
+  --color-focus: #ffb454;
+  --color-notice-bg: #2a1c05;
+  --color-notice-text: #ffd28a;
+  --color-notice-border: #4a3410;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  a {
+    color: var(--color-link);
+    text-decoration-line: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  a:hover {
+    color: var(--color-link-hover);
+  }
+
+  /*
+   * Anillo de foco propio en todo lo interactivo. Nunca se retira sin
+   * sustituto: si algún día se quita este bloque, hay que dejar un
+   * `:focus-visible` equivalente en su lugar.
+   */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
