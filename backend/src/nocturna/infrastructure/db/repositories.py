@@ -147,8 +147,26 @@ class SqlAlchemyFindingRepository:
         self._session.add(finding_to_row(finding))
 
     def unpublished_for_run(self, run_id: UUID) -> list[Finding]:
-        stmt = select(FindingRow).where(
-            FindingRow.run_id == run_id, FindingRow.published_at.is_(None)
+        """Candidatos pendientes de decisión del Editor, en orden estable por `id`.
+
+        `ORDER BY id` es deliberado, y deliberadamente *no* es
+        `ORDER BY interest_score DESC` (ni ningún otro campo de negocio):
+        sin este `ORDER BY`, el orden en el que PostgreSQL devuelve las
+        filas es indefinido, así que dos noches con exactamente los mismos
+        candidatos podrían producir dos prompts distintos para el Editor
+        -- que recibe todos los candidatos de la noche en una sola llamada
+        -- y eso vuelve irreproducible la calibración de T60 (ver
+        `docs/TECHNICAL_DEBT.md`, entrada de T43). Ordenar por
+        `interest_score` (o cualquier otro criterio de negocio) sería
+        colar aquí una política de priorización -- qué candidato se
+        divulga primero cuando el presupuesto aprieta -- que es una
+        decisión abierta de T44, no un arreglo de reproducibilidad. `id`
+        solo da determinismo, nada de prioridad editorial.
+        """
+        stmt = (
+            select(FindingRow)
+            .where(FindingRow.run_id == run_id, FindingRow.published_at.is_(None))
+            .order_by(FindingRow.id)
         )
         rows = self._session.execute(stmt).scalars().all()
         return [finding_from_row(row) for row in rows]

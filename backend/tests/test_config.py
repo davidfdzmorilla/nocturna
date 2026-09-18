@@ -71,8 +71,8 @@ def test_carga_el_pipeline_toml_del_repositorio():
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
     assert config.budget.nightly_tokens == 300000
-    assert config.budget.editor_base_tokens == 4000
-    assert config.budget.editor_tokens_per_candidate == 700
+    assert config.budget.editor_base_tokens == 2500
+    assert config.budget.editor_tokens_per_candidate == 850
     assert config.limits.max_items_per_night == 40
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
@@ -85,6 +85,26 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.models.popularizer
     assert config.models.editor
     assert config.llm.provider == "agent_sdk"
+
+
+def test_la_reserva_del_editor_cubre_el_peor_caso_en_el_toml_real():
+    """Invariante que `PipelineConfig._editor_reserve_covers_worst_case`
+    impone en la carga (ver `infrastructure/config.py`): `editor_base_tokens
+    + max_items_per_night * editor_tokens_per_candidate` debe caber en
+    `editor_reserve_tokens`. Expresado sobre las claves, no sobre los
+    literales congelados en `test_carga_el_pipeline_toml_del_repositorio`:
+    ese test fija los valores actuales de calibración y se pondrá en rojo
+    cuando alguien los recalibre (correcto, es su función); este debe seguir
+    en verde después de cualquier recalibración futura que respete el
+    invariante, incluida la definitiva del cierre de T60."""
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+
+    worst_case = (
+        config.budget.editor_base_tokens
+        + config.limits.max_items_per_night * config.budget.editor_tokens_per_candidate
+    )
+
+    assert worst_case <= config.budget.editor_reserve_tokens
 
 
 def test_las_categorias_arxiv_no_estan_vacias():

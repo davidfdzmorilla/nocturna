@@ -647,7 +647,21 @@ def test_editor_denegado_por_presupuesto_devuelve_4_run_partial_y_finding_sin_pu
     ninguno de los dos haya sido denegado en su momento -- exactamente el
     modo de fallo que ese fichero documenta junto a esas dos claves. No se
     siembra ningún Run: `run-item` debe crear el suyo propio
-    (`run_reused=False`) para que se cierre `PARTIAL` al terminar."""
+    (`run_reused=False`) para que se cierre `PARTIAL` al terminar.
+
+    Las cifras sembradas dependen de las constantes de estimación del
+    Editor en `config/pipeline.toml` (T60: `editor_base_tokens=2500`,
+    `editor_tokens_per_candidate=850`; antes de T60 eran 4000/700) y de
+    `nightly_tokens=300000`. Con 1 candidato, el Editor estima
+    2500 + 850*1 = 3350 tokens. Para que `BudgetGuard` lo deniegue, lo
+    gastado de verdad por Reader+Popularizer tiene que dejar menos de 3350
+    tokens disponibles de los 300000: 200_000 + 99_000 = 299_000 gastados,
+    1_000 restantes, por debajo de los 3350 que el Editor necesita. Si
+    `editor_base_tokens`/`editor_tokens_per_candidate` se recalibran otra
+    vez (el propio comentario de `pipeline.toml` los marca PROVISIONAL,
+    a reajustar por regresión sobre ~14 noches al cierre de T60), este test
+    se pone en rojo -- no es un fallo del código, es que el margen volvió a
+    moverse y hay que repetir esta cuenta con las constantes nuevas."""
     fake_provider.respond(
         AgentRole.READER,
         json=_valid_reading_json(interest_score=5),
@@ -657,7 +671,7 @@ def test_editor_denegado_por_presupuesto_devuelve_4_run_partial_y_finding_sin_pu
     fake_provider.respond(
         AgentRole.POPULARIZER,
         json=_valid_popularizer_json(),
-        tokens_in=96_000,
+        tokens_in=99_000,
         tokens_out=0,
     )
     item_id = _seed_item(db_session_factory)

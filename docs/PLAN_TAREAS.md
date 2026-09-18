@@ -156,11 +156,12 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 ## Bloque 6 — Cierre de fase
 
 ### T60 · Dos semanas de calibración
-- **Estado**: pending
+- **Estado**: in_progress
 - **Depende de**: T44, T51
-- **Alcance**: el autor ejecuta `run-night` a mano (o con `cron` local) durante dos semanas. Cada mañana anota en `docs/CALIBRACION.md`: tokens del `Run`, porcentaje semanal consumido según Settings > Usage, ítems leídos, hallazgos publicados, calidad percibida. Al final se ajusta `nightly_tokens` para acercarse al 30% semanal y se decide si el `interest_score >= 4` es el umbral correcto.
-- **Nota sobre prompt versions**: (1) `READER_PROMPT_VERSION` es `reader-v2` con abstract en `<abstract>`/`</abstract>`; (2) `POPULARIZER_PROMPT_VERSION` es `popularizer-v2` con reparador JSON; (3) `EDITOR_PROMPT_VERSION` es `editor-v1` entrada acotada a `title+level_curious`. Cada uno rompe comparabilidad con datos previos de la base — exactamente para lo que existe el campo `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar (gasto, tasas de reintento, etc.). Primer dato real de Opus ejecutado 2026-09-17 con 3 candidatos: 3.381 tokens, 1 intento, 0,85 y 0,80 confidence en aprobados, decisión editorial correcta.
-- **Hecho cuando**: `pipeline.toml` tiene valores calibrados con datos reales y un ADR documenta el criterio.
+- **Alcance**: el autor ejecuta `run-night` a mano (o con `cron` local) durante catorce noches. Cada mañana sigue el procedimiento de cinco pasos documentado en `docs/CALIBRACION.md` y anota una fila en la tabla. Al final se ajusta `pipeline.toml` según las siete reglas de calibración, se decide el umbral de `interest_score`, y se cierra esta tarea con un ADR que documenta los criterios aplicados.
+- **Fase de preparación cerrada 2026-09-18**: `docs/CALIBRACION.md` reescrito como runbook operacional. `backend/scripts/night_report.sql` y `night-report.sh` probados contra la primera noche real. `config/pipeline.toml` reparametrizado con Editor tras dos observaciones reales (N=3, N=14). `docs/OPEN_DECISIONS.md` refinado con tres decisiones nuevas del plan que quedan al autor (ejecución manual vs automática, noche experimental con umbral 3, medición de presupuesto bruto vs neto). `docs/TECHNICAL_DEBT.md` actualizado: deuda de T43 (`unpublished_for_run` sin ORDER BY) saldada, bug de `page` sin tope reetiquetado como inmediato. Primera noche real (2026-09-18 12:34) ejecutada fuera de ventana nominal (validación con `hard_stop` ampliado): 246.608 tokens (82,2%), 39 ítems leídos, 14 candidatos, 10 hallazgos publicados, pool al 97,8%.
+- **Nota sobre prompt versions**: (1) `reader-v2` con abstract en `<abstract>`/`</abstract>`; (2) `popularizer-v2` con reparador JSON; (3) `editor-v1` entrada acotada a `title+level_curious`. Cada uno rompe comparabilidad con datos previos — exactamente para lo que existe `prompt_version` en `AgentCall`. T60 debe anotar este cambio de baselines al comparar.
+- **Hecho cuando**: `pipeline.toml` tiene valores calibrados con mínimo 7 noches limpias, se cierra la tabla con catorce observaciones, y un ADR documenta el criterio de decisión final.
 
 ### T61 · Retrospectiva y plan de fase 2
 - **Estado**: pending
