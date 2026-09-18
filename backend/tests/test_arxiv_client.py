@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from nocturna.infrastructure.arxiv.atom import ArxivFeedError
 from nocturna.infrastructure.arxiv.client import (
     ARXIV_API_URL,
     USER_AGENT,
@@ -274,6 +275,40 @@ async def test_http_500_lanza_arxivunavailable_sin_reintentar():
                 since=_VERY_OLD_SINCE, categories=FAKE_CATEGORIES, max_results=100
             )
 
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.anyio
+async def test_http_406_lanza_arxivunavailable_con_el_codigo_en_el_mensaje_y_no_arxivfeederror():
+    # Caso observado en producción (2026-09-18): un 406 llegaba con el
+    # cuerpo vacío y `parse_feed` lo diagnosticaba como "XML inválido",
+    # ocultando que el problema era el código de estado. `_get` debe cortar
+    # antes de llegar a parsear.
+    recorder = _Recorder([httpx.Response(406, content=b"")])
+    client, http, _ = _build_client(recorder, page_size=3)
+
+    async with http:
+        with pytest.raises(ArxivUnavailable, match="406") as excinfo:
+            await client.fetch_new(
+                since=_VERY_OLD_SINCE, categories=FAKE_CATEGORIES, max_results=100
+            )
+
+    assert not isinstance(excinfo.value, ArxivFeedError)
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.anyio
+async def test_http_429_lanza_arxivunavailable_con_el_codigo_en_el_mensaje_y_no_arxivfeederror():
+    recorder = _Recorder([httpx.Response(429, content=b"")])
+    client, http, _ = _build_client(recorder, page_size=3)
+
+    async with http:
+        with pytest.raises(ArxivUnavailable, match="429") as excinfo:
+            await client.fetch_new(
+                since=_VERY_OLD_SINCE, categories=FAKE_CATEGORIES, max_results=100
+            )
+
+    assert not isinstance(excinfo.value, ArxivFeedError)
     assert len(recorder.requests) == 1
 
 

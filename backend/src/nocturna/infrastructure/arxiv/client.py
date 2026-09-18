@@ -35,8 +35,8 @@ _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
 
 class ArxivUnavailable(Exception):
-    """La API de arXiv no respondió, respondió con error de servidor o la
-    respuesta supera el tope de tamaño admitido."""
+    """La API de arXiv no respondió, respondió con un código de error (4xx o
+    5xx) o la respuesta supera el tope de tamaño admitido."""
 
 
 class ArxivClient:
@@ -143,8 +143,26 @@ class ArxivClient:
         except httpx.HTTPError as exc:
             raise ArxivUnavailable(f"fallo consultando la API de arXiv: {exc}") from exc
 
+        # Cualquier código de error (4xx o 5xx) se trata como
+        # `ArxivUnavailable` *antes* de intentar parsear: un cuerpo de error
+        # no es XML del feed, y dejarlo caer hasta `parse_feed` produce un
+        # diagnóstico engañoso ("XML inválido") que oculta la causa real
+        # (observado en producción: un 406 se registró como "no element
+        # found", cuando el problema era el propio código de estado).
+        # Se distingue 4xx de 5xx en el mensaje porque no significan lo
+        # mismo para quien lea el log a las 3 de la mañana: un 5xx es un
+        # problema del lado de arXiv (nada que ajustar aquí); un 4xx (406,
+        # 429...) sugiere algo sobre *nuestra* petición -- cabecera, límite
+        # de cortesía, cambio de política -- aunque, como el 406 observado,
+        # también puede ser transitorio del lado de arXiv.
         if response.status_code >= 500:
-            raise ArxivUnavailable(f"la API de arXiv respondió {response.status_code}")
+            raise ArxivUnavailable(
+                f"la API de arXiv respondió {response.status_code} (error de servidor)"
+            )
+        if response.status_code >= 400:
+            raise ArxivUnavailable(
+                f"la API de arXiv respondió {response.status_code} (rechazo de la petición)"
+            )
 
         content = response.content
         if len(content) > _MAX_RESPONSE_BYTES:
