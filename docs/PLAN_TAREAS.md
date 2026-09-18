@@ -121,6 +121,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Decisiones resueltas en esta sesión**: nº 20 (huérfano, precisada para `run-night`), nº 41 (código 2 ya falso), nº 48 (reconciliación por suma), nº 57 (validador de presupuesto).
 - **Deuda técnica marcada**: saldada la del Run incompleto por `KeyboardInterrupt`, precisado el alcance real del cortacircuitos (fallos monótonos, no intermitentes), añadidas 3 deudas nuevas (docstring de `Run`, camino FAILED sin contadores, cobertura de tests).
 - **Nota importante**: **No incluye ejecución real de noche completa contra la suscripción**. El autor ejecuta `nocturna run-night` una o más veces en local y registra métricas en `docs/CALIBRACION.md` (T60). Después de la primera noche ejecutada y anotada, la tarea está completa.
+- **Primer intento de ejecución real**: 2026-09-18 11:44 · fuera de ventana (06h 44m después del cierre a 04:45) · `deadline_s = 0`, `stop_reason = outside_window`, Run cerrado como `KILLED`, 0 tokens gastados, 0 ítems procesados · validación del `hard_stop`: funcionó exactamente como se diseñó, ninguna llamada a Claude llegó a autorizarse · no cuenta como noche válida para calibración (T60) porque fue fuera de ventana · registrado en `docs/CALIBRACION.md` como fila 2026-09-18.
 - **Cerrada: 2026-09-17** · Suite íntegra: 773 passed. Implementación y revisiones completadas; calibración del autor en T60.
 
 ---
