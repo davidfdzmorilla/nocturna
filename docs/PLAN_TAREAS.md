@@ -138,10 +138,17 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Cerrada: 2026-09-17** · API de lectura funcional, probada contra el PostgreSQL de compose y con la base de datos caída. Ningún test depende de la noche real: las fixtures siembran por el mismo camino de dominio que el Editor. La noche real sigue siendo el «Hecho cuando» pendiente de T44, no de esta tarea.
 
 ### T51 · Web Next.js
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T50
 - **Alcance**: proyecto con App Router, TypeScript, Tailwind. `/` feed paginado, `/hallazgo/[id]` con selector de nivel (curioso / aficionado / técnico) y enlace a arXiv. Banner permanente de análisis automatizado. Fetch server-side a la API de lectura. Sin llamadas a Claude, sin auth, sin admin.
-- **Hecho cuando**: `pnpm dev` muestra los hallazgos publicados por T44. Lighthouse accesibilidad ≥ 90.
+- **Implementación completada**: 2026-09-18 · **37 tests en verde** · `pnpm lint` y `pnpm build` verdes **con la API parada** · **Lighthouse accesibilidad 100/100** en `/` y 100/100 en `/hallazgo/[id]` (build de producción, preset desktop, sin auditorías fallidas; umbral exigido ≥ 90).
+- **Stack**: Next 15.5.25, React 19.1.0, Tailwind 4.3.3 (v4, tokens en `@theme`), creada con `create-next-app@15` y limpiada de morralla de plantilla.
+- **Qué se implementó**: SSR dinámico (`force-dynamic` + `cache: "no-store"`), no ISR. Frontera de IO única en `src/lib/api/client.ts` (mapea `404` → `not_found`, todo lo demás → `unavailable`). Selector de nivel por URL (`?nivel=`), sin estado de cliente, legible sin JavaScript. Todos Server Components salvo `app/error.tsx`. Banner permanente en layout raíz, aparece en todas las rutas incluidas `not-found` y `error`. Selección de nivel reflejada en URL compartible. Paleta y tipografía placeholder con contraste verificado (peor par 8,28:1). Zona horaria y locale fijos (`Europe/Madrid`, `es-ES`) para no desajustar SSR ≠ cliente.
+- **Una pasada de revisión**: APROBADO sin bloqueantes, con **cinco correcciones ya aplicadas**: (1) Bug de Request Memoization en Next: `generateMetadata` duplicaba peticiones. Arreglado envolviendo `fetchFinding` en `React.cache()`, verificado contando peticiones en log de uvicorn (una sola por visita). (2) Backend vulnerable: `?page=100000000000000000000` tumbaba API con SQL error. Arreglado en web con regex `/^\d{1,6}$/` y tope `MAX_PAGE = 999_999`, congelado con tests; backend sigue sin protección (es de T50/T60). (3) Dos huecos en guard `no-claude-in-web.test.ts`: allowlist demasiado amplia en `client.ts`, escaneo no cubre `next.config.ts` ni invariantes de "no rutas de API en cliente", documentados en TECHNICAL_DEBT.md. (4) Tests de paginación verifican que `?page=` fuera de rango devuelve 200 con aviso (no 404), congelado. (5) `aria-current` borrado del contador (solo para enlaces).
+- **Datos para la web verificados con datos sembrados por `seed_demo.py`**: No con la noche real (eso es «Hecho cuando» pendiente de T44). Las fixtures crean `Finding` por el mismo camino de dominio que Editor; el hallazgo de T51 es estructural: web se renderiza sin toque a la API de Claude, Lighthouse 100/100 accesibilidad.
+- **Decisiones abiertas nuevas**: 10 registradas en `OPEN_DECISIONS.md` (SSR vs ISR, divergencia de `.claude/agents/frontend.md`, ramas de error HTTP 200, paleta, zona horaria, tema claro/oscuro, textos de UX, E2E, versión de Next, página fuera de rango).
+- **Deuda técnica nueva**: 3 registradas en `TECHNICAL_DEBT.md` (backend no acota `page`, huecos en guard, `aria-current`).
+- **Cerrada: 2026-09-18**
 
 ---
 
