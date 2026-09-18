@@ -62,6 +62,18 @@ class FindingRepository(Protocol):
         """Persiste un hallazgo tras la decisión del Editor. Usado por T43."""
         ...
 
+    def published_page(self, limit: int, offset: int) -> list[Finding]:
+        """Página de hallazgos publicados, más recientes primero. Usado por T50."""
+        ...
+
+    def count_published(self) -> int:
+        """Número total de hallazgos publicados, para paginar. Usado por T50."""
+        ...
+
+    def get_published(self, finding_id: UUID) -> Finding | None:
+        """Recupera un hallazgo por id, solo si está publicado. Usado por T50."""
+        ...
+
 
 class RunRepository(Protocol):
     """Persistencia de `Run`."""

@@ -366,6 +366,19 @@ def test_database_url_se_sobrescribe_por_entorno(monkeypatch):
     assert settings.database_url == "postgresql+psycopg://test:test@localhost:5432/nocturna_test"
 
 
+def test_cors_origins_se_sobrescribe_por_entorno_en_formato_json(monkeypatch):
+    # pydantic-settings parsea los tipos complejos (list[str]) desde
+    # variables de entorno como JSON, no como lista separada por comas (ver
+    # comentario de `cors_origins` en infrastructure/config.py). Este test
+    # congela ese formato: si alguien lo cambiara a comas sin actualizar el
+    # comentario, esto se pone en rojo.
+    monkeypatch.setenv("NOCTURNA_CORS_ORIGINS", '["http://a.example", "http://b.example"]')
+
+    settings = Settings()
+
+    assert settings.cors_origins == ["http://a.example", "http://b.example"]
+
+
 def test_categorias_vacias_fallan(tmp_path):
     content = BASE_TOML.replace(
         'categories = ["astro-ph.EP", "astro-ph.GA"]',

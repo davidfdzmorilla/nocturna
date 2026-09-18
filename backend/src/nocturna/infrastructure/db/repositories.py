@@ -160,6 +160,53 @@ class SqlAlchemyFindingRepository:
         row.confidence = finding.confidence
         row.published_at = finding.published_at
 
+    def published_page(self, limit: int, offset: int) -> list[Finding]:
+        """Página de hallazgos publicados para la web de solo lectura.
+
+        `published_at IS NOT NULL` es el único filtro de publicación (T50):
+        `published_at` y `confidence` solo se escriben juntos en
+        `Finding.publish()`, respaldado por el `CHECK
+        confidence_published_at_together` de `models.py`. No se cruza con
+        `items.status`, que sería una segunda fuente de verdad divergente
+        (`docs/OPEN_DECISIONS.md`).
+
+        `ORDER BY published_at DESC, id DESC`: el desempate por `id` no es
+        cosmético. El Editor publica todos los hallazgos de una noche en el
+        mismo instante (`EditNight` usa un único `at` para todo el lote), así
+        que los empates de `published_at` son la norma, no la excepción. Sin
+        desempate estable, dos páginas consecutivas de la misma consulta
+        pueden repetir u omitir filas (la lección de `unpublished_for_run`,
+        ver `docs/TECHNICAL_DEBT.md`).
+        """
+        stmt = (
+            select(FindingRow)
+            .where(FindingRow.published_at.is_not(None))
+            .order_by(FindingRow.published_at.desc(), FindingRow.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = self._session.execute(stmt).scalars().all()
+        return [finding_from_row(row) for row in rows]
+
+    def count_published(self) -> int:
+        """Total de hallazgos publicados, mismo filtro que `published_page`."""
+        stmt = select(func.count()).where(FindingRow.published_at.is_not(None))
+        return self._session.execute(stmt).scalar_one()
+
+    def get_published(self, finding_id: UUID) -> Finding | None:
+        """Recupera un hallazgo por id, solo si está publicado.
+
+        El filtro `published_at IS NOT NULL` viaja en la misma sentencia que
+        el id, no un `get()` genérico que el llamante filtre después: un
+        hallazgo candidato que el Editor todavía no publicó (o que rechazó)
+        no puede salir por la API ni siquiera un instante.
+        """
+        stmt = select(FindingRow).where(
+            FindingRow.id == finding_id, FindingRow.published_at.is_not(None)
+        )
+        row = self._session.execute(stmt).scalar_one_or_none()
+        return finding_from_row(row) if row is not None else None
+
 
 class SqlAlchemyRunRepository:
     """Persistencia de `Run`. Cumple `domain.repositories.RunRepository`."""

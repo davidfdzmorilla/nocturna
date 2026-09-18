@@ -157,4 +157,4 @@ cd web && pnpm install && pnpm dev
 
 ## Estado actual
 
-Fase 1: Reader (T41), Popularizer (T42), Editor (T43) y Orquestador nocturno (T44) completados. Humos reales ejecutados: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones, sin control desde `pipeline.toml`. Suite: 773 passed. Próximo: T50 (API de lectura) y T60 (calibración real de dos semanas).
+Fase 1: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44) y API de lectura (T50) completados. Humos reales ejecutados: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Suite: 815 passed (API 134 de -m db). Próximo: T51 (web Next.js) y T60 (calibración real de dos semanas).

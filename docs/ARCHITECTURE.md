@@ -21,7 +21,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Agente Popularizer | `application/agents/popularizer`, `application/use_cases/popularize_reading.py` | done (T42) |
 | Agente Editor | `application/agents/editor`, `application/use_cases/edit_night.py` | done (T43) |
 | Orquestador nocturno | `application/use_cases/run_night.py` | done (T44) |
-| API de lectura | FastAPI | pendiente (T50) |
+| API de lectura | FastAPI | done (T50) |
 | Web | Next.js | pendiente (T51) |
 
 ## Flujo de una noche
@@ -193,6 +193,28 @@ Cinco entidades inmutables o mutables con guardas:
 Pydantic se usa solo en las fronteras: `infrastructure/config.py` para el TOML tipado, y `application/agents/` para validar y estructurar el JSON que sale de los agentes antes de construir la entidad de dominio.
 
 **Nota sobre hermeticidad de las guardas**: `object.__setattr__`, el descriptor de slot en clase, y `dataclasses.replace()` pueden rodear `__setattr__`. La defensa real contra una asignación manipulada de `tokens_used` en memoria es que T30 lea el acumulado con `AgentCallRepository.tokens_used_for_run()` desde la base de datos, nunca fiándose del valor del objeto en memoria.
+
+## API de lectura (fase 1)
+
+Implementada en T50. FastAPI con tres endpoints expuestos:
+
+- `GET /health`: comprobación de vivacidad. Devuelve `200` si el servicio y PostgreSQL responden. `503` si la base de datos no está disponible. Contrato: `{"status": "ok"}`.
+- `GET /findings?page=<int>&size=<int>`: feed paginado de hallazgos publicados. `page` base 1 (por defecto 1), `size` (1–50, por defecto 20). Respuesta: `{"items": [<finding>, ...], "page": <int>, "size": <int>, "total": <int>}`. Página fuera de rango devuelve `200` con `items` vacía. `total` es `COUNT` exacto, económico a este volumen.
+- `GET /findings/{id}`: detalle de un hallazgo publicado. Devuelve el objeto completo. `404` si no existe o no está publicado (indistinguible por diseño). El mismo `404` para «no existe» y «no publicado» impide enumerar candidatos que el Editor rechazó.
+
+**Contrato de hallazgo (`Finding`)**: `id`, `title`, `level_curious`, `level_amateur`, `level_technical`, `published_at`, `item_id` (enlace a arXiv). **Campos ocultos**: `confidence` (es una nota editorial interna, no una métrica científica; expuesta junto a texto generado por IA se malinterpretaría como "grado de certeza científica", contradictorio con el banner obligatorio), `run_id`, `type`. La privacidad de `confidence` protege la semántica del análisis automático.
+
+**Filtro de publicación**: `findings.published_at IS NOT NULL`, única fuente de verdad. Sin cruce con `items.status`: un hallazgo es «publicado» si tiene timestamp, punto. Refaldado por constraint `CHECK (confidence IS NULL) = (published_at IS NULL)` — ambos campos se asignan juntos o no en absoluto, en el método `Finding.publish()`.
+
+**Implementación técnica**: la sesión de base de datos **nunca hace `commit()`**, solo `rollback()` al cerrar. Es la barrera dura contra escritura: `unit_of_work` es la frontera transaccional del pipeline (Reader, Popularizer, Editor confirman); la API no debe poder confirmar nada, aunque sea por accidente. La guarda AST `test_api_read_only.py` detecta `commit()` y `__setattr__` de entidades, pero es un detector de descuidos evasible; la verdadera defensa es arquitectónica: no abre contexto que pueda cambiar datos.
+
+**CORS**: `Settings.cors_origins`, por defecto `["http://localhost:3000"]`. Solo `GET`, nunca `*`. Configurable desde `NOCTURNA_CORS_ORIGINS` (variable de entorno con formato JSON: `'["http://a","http://b"]'`).
+
+**Errors**: `500` devuelve cuerpo fijo `{"detail": "internal error"}`, la traza va solo a `stderr`. `404` a nivel de endpoint no devuelto; solo los especificados arriba.
+
+**Arranque local**: `cd backend && uv run uvicorn nocturna.api.app:create_app --factory --reload --port 8000`. El parámetro `--factory` invoca `create_app()` que devuelve `FastAPI()`. Settings cacheadas con `lru_cache` en `deps.py`.
+
+**Script de siembra**: `backend/scripts/seed_demo.py` (fuera del paquete instalable) siembra tres `Finding` de prueba publicados por el mismo camino de dominio que el Editor (y con la misma guarda: `NOCTURNA_ALLOW_SEED=1`). No es idempotente: segundo lanzamiento falla con `IntegrityError` sin corromper nada (todo dentro de transacción de escritura).
 
 ## Lo que no existe en fase 1 (a propósito)
 

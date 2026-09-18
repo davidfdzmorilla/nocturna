@@ -85,3 +85,55 @@ def test_save_de_finding_inexistente_lanza_lookup_error(db_session):
         pass
     else:
         raise AssertionError("se esperaba LookupError")
+
+
+def test_finding_sin_published_at_no_aparece_en_published_page_ni_en_get_published(db_session):
+    """El caso que más importa: un candidato que el Editor no ha decidido
+    (o ha rechazado) no puede salir por ninguno de los dos caminos de
+    lectura pública, ni siquiera un instante.
+    """
+    findings = SqlAlchemyFindingRepository(db_session)
+    item, run = _seed_item_and_run(db_session)
+    unpublished = make_finding(item_id=item.id, run_id=run.id, title="candidato sin decidir")
+    published = make_finding(item_id=item.id, run_id=run.id, title="publicado")
+    published.publish(confidence=0.7, at=PUBLISHED_AT)
+    findings.add(unpublished)
+    findings.add(published)
+    db_session.flush()
+
+    page = findings.published_page(limit=10, offset=0)
+
+    assert [f.id for f in page] == [published.id]
+    assert findings.count_published() == 1
+    assert findings.get_published(unpublished.id) is None
+    got = findings.get_published(published.id)
+    assert got is not None
+    assert got.id == published.id
+
+
+def test_published_page_ordena_por_published_at_desc_con_desempate_por_id(db_session):
+    """El Editor publica todo el lote de la noche con el mismo instante:
+    los empates de `published_at` son la norma. Sin desempate por `id`,
+    dos páginas de la misma consulta pueden repetir u omitir filas.
+    """
+    findings = SqlAlchemyFindingRepository(db_session)
+    item, run = _seed_item_and_run(db_session)
+    tied = [make_finding(item_id=item.id, run_id=run.id, title=f"empatado {i}") for i in range(3)]
+    for finding in tied:
+        finding.publish(confidence=0.5, at=PUBLISHED_AT)
+        findings.add(finding)
+    earlier = make_finding(item_id=item.id, run_id=run.id, title="más antiguo")
+    earlier.publish(confidence=0.5, at=PUBLISHED_AT.replace(year=2026, month=1, day=1))
+    findings.add(earlier)
+    db_session.flush()
+
+    expected_tied_order = sorted((f.id for f in tied), reverse=True)
+
+    page_full = findings.published_page(limit=10, offset=0)
+    assert [f.id for f in page_full] == expected_tied_order + [earlier.id]
+
+    page_1 = findings.published_page(limit=2, offset=0)
+    page_2 = findings.published_page(limit=2, offset=2)
+    assert [f.id for f in page_1] + [f.id for f in page_2] == [f.id for f in page_full]
+
+    assert findings.count_published() == 4
