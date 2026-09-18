@@ -47,20 +47,49 @@ popularizer_estimated_tokens = 7000
 # única llamada de la noche a Opus, sobre la que `PipelineConfig` exige que
 # `editor_base_tokens + max_items_per_night * editor_tokens_per_candidate`
 # quepa en `editor_reserve_tokens` (ver el validador de `PipelineConfig`).
-# Composición aproximada (T43): prompt de rol (~500 tokens) + el gasto
-# lateral que T40 midió por llamada (~1.163 de Haiku) + envoltorio de la
-# salida (`{"publish": [...]}`, ~100) ≈ 1.800, con el mismo margen ~2,2x que
-# ya aplicaron Reader y Popularizer ≈ 4.000. Valor a calibrar en T60 con la
-# latencia y el gasto reales de Opus.
-editor_base_tokens = 4000
+# T60: con dos observaciones reales del coste del Editor -- T43 humo,
+# N=3 -> 3.381 tokens; primera noche real (2026-09-18), N=14 -> 11.890
+# tokens -- se ajusta la recta que pasa por ambos puntos: ~774
+# tokens/candidato sobre ~1.060 fijos.
+#
+# Las dos rectas de estimación (la vieja, 4.000 + 700xN, y esta) se cruzan
+# exactamente en N=10 (ambas dan 11.000); por debajo de N=10 la nueva es
+# MENOS conservadora que la vieja: el margen baja de 1,80x a 1,49x en N=3,
+# y de 2,56x a 1,83x en N=1. Lo que motiva el cambio no es una monotonía
+# inexistente sino el peor caso que la guarda existe para cubrir: en N=40
+# (`max_items_per_night`) la vieja estimación (32.000) ya caía por DEBAJO
+# de la recta observada (≈32.002) -- ya era un subestimador justo donde
+# más importa. La nueva queda por ENCIMA de la recta observada en todo el
+# rango 1-40 (nuevo - recta = 1.440 + 76xN, estrictamente positivo y
+# creciente): margen mínimo 1,14x en N=40; N=3 -> 1,49x; N=14 -> 1,21x.
+#
+# Es un ajuste PROVISIONAL: dos observaciones para dos parámetros es un
+# sistema exactamente determinado (residuo cero, cero confianza), no una
+# regresión con la que fiarse. Se reajusta por regresión sobre ~14 noches
+# al cierre de T60. Ver docs/CALIBRACION.md ("Hallazgo 2").
+#
+# El invariante que valida `PipelineConfig` (arriba) cubre UN intento del
+# Editor; `max_editor_calls_per_night = 2` autoriza un segundo intento
+# contra el presupuesto completo si el primero falla por JSON inválido,
+# así que dos intentos a N=40 suman 73.000 tokens (2 x 36.500) frente a
+# los 60.000 de `editor_reserve_tokens`. Es propiedad preexistente -- el
+# segundo intento se autoriza contra el presupuesto completo y se deniega
+# si no cabe, cerrando la noche `partial` --, pero este ajuste sube ese
+# peor caso de 64.000 (con los valores viejos: 2 x 32.000) a 73.000, y
+# merece constar.
+editor_base_tokens = 2500
 # editor_tokens_per_candidate: coste marginal, por candidato, de la única
-# llamada al Editor. Composición aproximada (T43): `item_id` + `title` +
-# `level_curious` (~200 tokens) ≈ 250 de entrada + ~60 de salida (la
-# decisión de ese candidato dentro de `publish`) ≈ 310, con el mismo margen
-# ≈ 700. Multiplicado por `max_items_per_night` en el validador de
-# `PipelineConfig` para comprobar que la reserva del Editor basta en el
-# peor caso (todos los ítems de la noche llegando como candidatos).
-editor_tokens_per_candidate = 700
+# llamada al Editor. Multiplicado por `max_items_per_night` en el
+# validador de `PipelineConfig` para comprobar que la reserva del Editor
+# basta en el peor caso (todos los ítems de la noche llegando como
+# candidatos). Ajustado junto con editor_base_tokens (ver comentario ahí)
+# a partir de las mismas dos observaciones reales (N=3 -> 3.381; N=14 ->
+# 11.890): recta ~774 tokens/candidato sobre ~1.060 fijos, redondeada a
+# 850 sobre 2.500 fijos para quedar por encima de lo observado en todo el
+# rango, no solo en los dos puntos medidos. Mismo carácter PROVISIONAL que
+# editor_base_tokens: a reajustar por regresión sobre ~14 noches al cierre
+# de T60.
+editor_tokens_per_candidate = 850
 
 [limits]
 # max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").

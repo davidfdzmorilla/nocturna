@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 import sqlalchemy as sa
 from factories import make_finding, make_item, make_run
@@ -50,6 +51,43 @@ def test_unpublished_for_run_devuelve_solo_los_del_run_indicado_y_no_publicados(
     result = findings.unpublished_for_run(run_a.id)
 
     assert [f.id for f in result] == [unpublished_a.id]
+
+
+def test_unpublished_for_run_ordena_por_id_de_forma_estable(db_session):
+    """`unpublished_for_run` no depende del orden de inserción ni de
+    PostgreSQL: siempre devuelve los candidatos en orden ascendente de
+    `id` (ver el comentario de la consulta en `repositories.py` y la
+    entrada de T43 en `docs/TECHNICAL_DEBT.md`). Se insertan
+    deliberadamente en un orden que no coincide con el orden de `id`
+    (ni con el orden alfabético de `title`) para que el test falle si
+    algún día alguien quita el `ORDER BY` o lo cambia por un criterio de
+    negocio como `interest_score`.
+    """
+    findings = SqlAlchemyFindingRepository(db_session)
+    item, run = _seed_item_and_run(db_session)
+
+    lowest_id = UUID("00000000-0000-0000-0000-000000000001")
+    middle_id = UUID("00000000-0000-0000-0000-000000000002")
+    highest_id = UUID("00000000-0000-0000-0000-000000000003")
+
+    finding_highest = make_finding(
+        item_id=item.id, run_id=run.id, id=highest_id, title="se inserta primero, id más alto"
+    )
+    finding_lowest = make_finding(
+        item_id=item.id, run_id=run.id, id=lowest_id, title="se inserta segundo, id más bajo"
+    )
+    finding_middle = make_finding(
+        item_id=item.id, run_id=run.id, id=middle_id, title="se inserta tercero, id intermedio"
+    )
+
+    findings.add(finding_highest)
+    findings.add(finding_lowest)
+    findings.add(finding_middle)
+    db_session.flush()
+
+    result = findings.unpublished_for_run(run.id)
+
+    assert [f.id for f in result] == [lowest_id, middle_id, highest_id]
 
 
 def test_save_de_finding_tras_publish_persiste_confidence_y_published_at(db_session):

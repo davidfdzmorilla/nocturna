@@ -36,7 +36,8 @@ escritos a mano, sin un solo dato real detrás -- este humo es el primero
 que produce alguno. Se ofrecen **2-3 candidatos sintéticos** (no un `Run`
 de una noche completa, fuera del alcance de T43/T44) para que el volcado
 de tokens por candidato tenga algo de variación real que comparar contra
-`editor_tokens_per_candidate = 700`.
+`editor_tokens_per_candidate`, calibrado en T60 a partir de este mismo
+humo (`config/pipeline.toml`, `[budget]`).
 
 Hereda el patrón de gasto de `test_read_item_smoke.py`/`test_popularize_smoke.py`
 al pie de la letra: `authorize` en su propia unidad de trabajo, la llamada
