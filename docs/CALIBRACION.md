@@ -39,7 +39,7 @@ Observaciones de pruebas manuales en desarrollo, antes de calibración real:
 
 | Fecha | Hora inicio | CLI | SDK | Run.status | items_fetched | items_read | items_failed | candidates | findings_published | sum(agent_calls) tokens | % semanal (Settings) | Notas |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |  |  |  |  |  |  |
+| 2026-09-18 | 11:44 | 2.1.274 | 0.2.153 | killed | 0 | 0 | 0 | 0 | 0 | 0 | — | Intento fuera de ventana (6h 59m después del cierre de las 04:45). `deadline_s = 0`, `stop_reason = outside_window`. **La ingesta sí se ejecutó** —hizo su petición HTTP a arXiv, de ahí el 406— y lo que `hard_stop` impidió fue autorizar cualquier llamada a Claude: cero tokens gastados. Validación de control de gasto: funcionó exactamente como se diseñó. `elapsed_s = 0.307`. Nota: arXiv devolvió 406 en esa ejecución (transitorio, después reproducible con 200). |
 
 ## Observaciones de calibración
 

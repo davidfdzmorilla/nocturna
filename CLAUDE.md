@@ -152,7 +152,18 @@ uv run nocturna run-night --dry-run       # ingesta + plan de gasto, sin llamar 
 uv run nocturna run-night                 # ejecución real
 uv run nocturna run-item <item_id>        # un solo ítem, para depurar
 uv run pytest
-cd web && pnpm install && pnpm dev
+uv run pytest -m db                       # contra el PostgreSQL de compose
+uv run pytest -m manual                   # humos que SÍ llaman a Claude; requiere NOCTURNA_ALLOW_REAL_CLAUDE=1
+
+# API de lectura (terminal aparte, desde backend/)
+uv run uvicorn nocturna.api.app:create_app --factory --reload --port 8000
+
+# datos de demostración, mientras no haya corrido una noche real
+NOCTURNA_ALLOW_SEED=1 uv run python scripts/seed_demo.py
+
+# web (terminal aparte)
+cd web && pnpm install && pnpm dev        # necesita NOCTURNA_API_URL=http://localhost:8000
+cd web && pnpm test && pnpm lint && pnpm build
 ```
 
 ## Estado actual
