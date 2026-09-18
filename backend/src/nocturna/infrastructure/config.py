@@ -260,13 +260,28 @@ def load_pipeline_config(path: Path | None = None) -> PipelineConfig:
 
 
 class Settings(BaseSettings):
-    """Ajustes de proceso: solo conexión a datos y ruta de configuración.
+    """Ajustes de proceso: conexión a datos, ruta de configuración y CORS de la API.
 
     Ninguna clave de gasto vive aquí: esas se leen exclusivamente de
-    `pipeline.toml` a través de `load_pipeline_config`.
+    `pipeline.toml` a través de `load_pipeline_config`. `cors_origins` es un
+    ajuste de proceso de la API de lectura (T50), no del pipeline: por eso
+    vive aquí y no en `PipelineConfig`.
     """
 
     model_config = SettingsConfigDict(env_prefix="NOCTURNA_", env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://nocturna:nocturna@localhost:5433/nocturna"
     config_path: Path = Field(default_factory=_default_config_path)
+    # Orígenes permitidos por CORS en la API de lectura (T50). Nunca "*": la
+    # API sirve datos de solo lectura pero identificar qué candidatos NO se
+    # publicaron ya es información sensible (ver api/routes/findings.py), y
+    # un origen abierto facilita justo ese tipo de scraping cruzado.
+    # Sobreescribible con NOCTURNA_CORS_ORIGINS, en formato JSON -- pydantic-
+    # settings parsea los tipos complejos (aquí, list[str]) como JSON, no
+    # como lista separada por comas: NOCTURNA_CORS_ORIGINS='["http://a",
+    # "http://b"]' funciona, NOCTURNA_CORS_ORIGINS='http://a,http://b' falla
+    # con SettingsError al construir Settings(). Esto importa más allá de la
+    # API: `cli.py` también construye `Settings()` para el pipeline nocturno
+    # (`run-night`, `run-item`), así que un .env mal escrito con comas rompe
+    # también el arranque de esos comandos, no solo la API.
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])

@@ -20,7 +20,11 @@ dependencies = [
 nocturna = "nocturna.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+# uvicorn es servidor de desarrollo local (`uvicorn --reload`), no de
+# producción: el servidor de producción es decisión de la fase de
+# despliegue, que CLAUDE.md prohíbe anticipar. Por eso vive en `dev`, no en
+# `[project.dependencies]`.
+dev = ["pytest>=8", "ruff>=0.6", "uvicorn>=0.30"]
 
 [build-system]
 requires = ["hatchling"]
@@ -43,3 +47,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+# `Depends(...)`/`Query(...)` viven en los metadatos de `Annotated[...]` en
+# todo `api/` (T50, corrección de revisión), no como valor por defecto de un
+# argumento: B008 (flake8-bugbear) no los trata como llamada mutable
+# arriesgada en ese estilo, así que `extend-immutable-calls` ya no hace
+# falta. Si un futuro endpoint volviera al estilo `= Depends(...)`, ruff
+# debe volver a marcarlo -- no se restaura esta excepción sin repensarlo.
