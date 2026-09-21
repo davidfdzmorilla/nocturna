@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    com.nocturna.run-night.plist.template — Plantilla del agente launchd
+    de T60.a. Se materializa con `sed` sustituyendo __REPO_ROOT__ y __HOME__
+    por rutas absolutas, y se instala fuera del repositorio, en
+    ~/Library/LaunchAgents/com.nocturna.run-night.plist.
+
+    Deliberadamente sin KeepAlive, sin ninguna clave de reintento
+    automático y con RunAtLoad=false: un reintento automático tras un fallo
+    es exactamente el camino a autorizar 2 x nightly_tokens en la misma
+    ventana de ejecución (00:00-04:45), y la "Regla de noches fallidas" de
+    docs/CALIBRACION.md exige lo contrario: una noche fallida se anota y
+    se espera a mañana, no se relanza. El propio envoltorio
+    (run-night-scheduled.sh) ya impone un único lanzamiento por ventana con
+    su fichero centinela; StartCalendarInterval dispara una vez al día, no
+    en bucle.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nocturna.run-night</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO_ROOT__/backend/scripts/run-night-scheduled.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <!--
+        Solo para fallos de arranque del propio agente launchd (p.ej. el
+        envoltorio no es ejecutable, o launchd no puede invocarlo). Los
+        logs de la noche en sí (stdout/stderr de `nocturna run-night`)
+        los escribe run-night-scheduled.sh en ficheros separados dentro de
+        NOCTURNA_LOG_DIR (por defecto __HOME__/nocturna-logs), no aquí.
+    -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/nocturna-logs/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/nocturna-logs/launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
