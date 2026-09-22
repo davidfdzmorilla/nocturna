@@ -164,6 +164,39 @@ page_size = 100
 # max_results_per_fetch: tope de resultados acumulados en una ingesta; límite de
 # cortesía hacia arXiv y de memoria, no de gasto.
 max_results_per_fetch = 400
+# retry_max_attempts / retry_base_delay_s / retry_max_elapsed_s: reintento
+# ante fallos transitorios de arXiv. Motivado por el 406 observado el
+# 2026-09-21: cuerpo vacío, sin Retry-After, cabeceras de Fastly/Varnish (vía
+# CDN delante de arXiv, no la aplicación), y transitorio -- la misma
+# consulta devolvió 200 minutos después. Backoff exponencial con jitter
+# (infrastructure/arxiv/retry.py): 4 intentos, 5 s de base, doblando cada
+# vez (5, 10, 20 s nominales antes de jitter).
+#
+# retry_max_attempts es un TOPE, no una garantía: con fallos lentos (p. ej.
+# un TransportError que agota el timeout HTTP antes de que la espera de
+# cortesía se cumpla) se sirven menos de 4 intentos, porque
+# retry_max_elapsed_s puede cortar antes -- deliberado, el tiempo manda
+# sobre el número de intentos en una noche con corte duro.
+#
+# retry_max_elapsed_s tampoco es un tope duro del tiempo total: acota
+# cuándo puede INICIARSE un nuevo intento (la comprobación es anterior a
+# dormir, ver Retrier.attempts), no cuánto tarda en resolverse el intento
+# ya iniciado. El techo real por página está por encima de estos 60 s: hay
+# que sumar, en el peor caso, el timeout HTTP del último intento en curso
+# (_HTTP_TIMEOUT_S = 30 s, cli.py) y el espaciado de cortesía si tocara
+# esperarlo (MIN_REQUEST_INTERVAL_S = 3 s, client.py) -- del orden de 93 s,
+# no 60 s.
+#
+# Validado al cargar (ArxivConfig): el PEOR CASO con jitter, no el backoff
+# nominal, debe caber en retry_max_elapsed_s -- _default_jitter multiplica
+# cada espera hasta por MAX_JITTER_FACTOR (1,5): 5 * 1,5 * (2**(4-1) - 1)
+# = 52,5 s <= 60 s.
+#
+# PROVISIONAL: sin datos de campo sobre cuánto dura el 406 del CDN más allá
+# del caso único observado; a calibrar en T60 si vuelve a aparecer.
+retry_max_attempts = 4
+retry_base_delay_s = 5.0
+retry_max_elapsed_s = 60.0
 
 [llm]
 provider = "agent_sdk"

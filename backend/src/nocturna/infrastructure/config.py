@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nocturna.infrastructure.arxiv.retry import MAX_JITTER_FACTOR
+
 _WeeklyResetWeekday = Literal[
     "monday",
     "tuesday",
@@ -170,11 +172,48 @@ class ArxivConfig(BaseModel):
     categories: list[str] = Field(min_length=1)
     page_size: int = Field(gt=0)
     max_results_per_fetch: int = Field(gt=0)
+    # retry_max_attempts / retry_base_delay_s / retry_max_elapsed_s: política
+    # de reintento de `infrastructure/arxiv/retry.py::RetryPolicy` ante
+    # fallos transitorios de la API de arXiv (406, 429, 5xx, errores de
+    # transporte -- ver el docstring de `client.py`, motivado por el 406 del
+    # 2026-09-21). Sin default en código, mismo motivo que las claves
+    # vecinas: que falte ruidosamente si alguien copia un TOML viejo. Ver
+    # comentario en config/pipeline.toml.
+    retry_max_attempts: int = Field(ge=1)
+    retry_base_delay_s: float = Field(gt=0)
+    retry_max_elapsed_s: float = Field(gt=0)
 
     @model_validator(mode="after")
     def _page_size_within_max_results(self) -> "ArxivConfig":
         if self.page_size > self.max_results_per_fetch:
             raise ValueError("page_size no puede ser mayor que max_results_per_fetch")
+        return self
+
+    @model_validator(mode="after")
+    def _retry_max_elapsed_covers_worst_case(self) -> "ArxivConfig":
+        """`retry_max_elapsed_s` debe cubrir el PEOR CASO (con jitter) de
+        las esperas entre los `retry_max_attempts` intentos, no el backoff
+        nominal sin jitter: `_default_jitter`
+        (`infrastructure/arxiv/retry.py`) multiplica cada espera hasta por
+        `MAX_JITTER_FACTOR` (1,5), así que el peor caso real es
+        `base_delay_s * MAX_JITTER_FACTOR * (2**(max_attempts-1) - 1)`, no
+        `base_delay_s * (2**(max_attempts-1) - 1)` -- una config con
+        `retry_max_elapsed_s` entre ambos valores pasaría una validación
+        contra el backoff nominal pero podría cortarse por `max_elapsed_s`
+        en una secuencia real con jitter desfavorable. Mismo espíritu que
+        `PipelineConfig._editor_reserve_covers_worst_case`: debe fallar al
+        cargar, de día, no descubrirse a las 00:05.
+        """
+        worst_case = (
+            self.retry_base_delay_s * MAX_JITTER_FACTOR * (2 ** (self.retry_max_attempts - 1) - 1)
+        )
+        if self.retry_max_elapsed_s < worst_case:
+            raise ValueError(
+                "retry_max_elapsed_s "
+                f"({self.retry_max_elapsed_s}) no cubre el peor caso, con jitter, de las "
+                f"esperas entre retry_max_attempts intentos (retry_base_delay_s * "
+                f"MAX_JITTER_FACTOR * (2**(retry_max_attempts-1) - 1) = {worst_case})"
+            )
         return self
 
 

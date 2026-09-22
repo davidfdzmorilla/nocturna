@@ -12,6 +12,31 @@ bash backend/scripts/night-report.sh
 ```
 Genera siete consultas de solo lectura desde PostgreSQL sobre la última noche ejecutada. Toma dos minutos. Salida esperada: cabecera, desglose por agente, pool compartido vs reserva, `interest_score` por tramo, descartes desambiguados, cola de items, candidatos huérfanos. Apunta títulos y tasa de cambio respecto a ayer.
 
+### Paso 1.5: Contar eventos de reintentos de arXiv (si aplican)
+
+La ingesta usa `Retrier` con política configurable en `pipeline.toml`. Si la ingesta tuvo éxito con arXiv disponible, no habrá eventos de reintento. Si hubo 406, 429, 5xx o error de transporte transitorio:
+
+Los eventos van al log de **errores** de la noche, no al de salida: la telemetría JSON del pipeline se escribe en `stderr`.
+
+```bash
+LOG=~/nocturna-logs/night-$(date +%Y%m%d).err.log
+
+# Recuperaciones: fallos transitorios que se recuperaron tras reintentar
+grep -c '"event": "arxiv.retry_recovered"' "$LOG" || true
+
+# Agotamientos: reintentos que no bastaron
+grep -c '"event": "arxiv.retry_exhausted"' "$LOG" || true
+
+# (Opcional) Inspeccionar el primero, con sus campos
+grep '"event": "arxiv.retry_recovered"' "$LOG" | head -1 | jq .
+```
+
+`grep -c` ya imprime `0` cuando no hay coincidencias y sale con código 1; el `|| true` solo evita que ese código corte un script con `set -e`.
+
+**Anotar en la tabla**: en la columna `notas`, con el formato `ingesta: N recuperados, M agotados`, y solo cuando alguno sea distinto de cero. **No se añaden columnas nuevas**: catorce noches con dos columnas casi siempre a cero no compensan ensanchar una tabla que ya tiene veintisiete. Si tras las primeras noches el 406 resulta frecuente, se reconsidera.
+
+**Interpretación**: Un valor > 0 en `retry_exhausted` significa que la ingesta sufrió un fallo que no se pudo recuperar, así que `run.status` podría ser `partial` por motivo `ingest_error`. Ver nota al final de este paso.
+
 ### Paso 2: Abrir la web y emitir juicios de calidad
 
 **Requisitos previos**: asegúrate de que compose, la API y la web están ejecutándose:
@@ -52,6 +77,37 @@ Rellena la plantilla de fila (ver abajo), con la fecha del día, los tokens de `
 
 ### Paso 5: Actualizar los comandos de referencia del final
 Si hoy cambió `config/pipeline.toml` o las versiones de CLI/SDK: aumenta `config_version` en la sección "Marcadores de baseline" y documenta en qué cambió. Los humos siempre registran CLI y SDK; anota si alguno se salió del rango nominal 2.1.274 / 0.2.153.
+
+### Nota importante: cómo interpretar `run.status = partial`
+
+**Un `Run.status = partial` no siempre significa "noche mala".** Tres escenarios:
+
+1. **Presupuesto agotado durante fase A o B** (normal, incluso esperado durante calibración):
+   - Reader/Popularizer llegó al tope de `nightly_tokens − editor_reserve_tokens`
+   - Los ítems leídos se procesaron correctamente; solo hay pocos candidatos porque el pool se agotó
+   - `items_published > 0` es posible si fase B completó antes del agotamiento
+   - **Interpretación**: noche exitosa con margen ajustado, no fracaso. Calibración de T60 la usa para validar el umbral de `interest_score`
+
+2. **Ingesta falló** (transitorio de arXiv, red, etc.):
+   - `items_fetched = 0` o muy bajo; evento `ingest_error` en logs
+   - BUT: cola de `new` de noches anteriores se procesó normalmente (fase A saca de `next_unread`, no solo ítems nuevos)
+   - Reader/Popularizer/Editor corrieron con la cola vieja, publicaron hallazgos
+   - `run.status = partial` **por código de salida 7 (`ingest_error`)**, pero noche funcionó correctamente
+   - **Interpretación**: parcial "virtuoso" — no es una noche perdida, solo la ingesta no trajo nuevas fuentes
+
+3. **Presupuesto agotado en fase C** (Editor):
+   - Reader y Popularizer completaron; Editor rechazó porque no hay presupuesto en la reserva
+   - `items_published = 0` pero `candidatos > 0`
+   - **Interpretación**: noche estrecha, el Editor no pudo ejecutar. Revisar `%reserva` en la tabla
+
+**Cómo distinguirlos en la tabla**:
+- Columna `status`: anota `partial` en todos los casos
+- Columna `notas`: **escribe el motivo explícitamente**:
+  - "pool agotado en fase B" (caso 1)
+  - "ingesta falló pero cola procesada" (caso 2) — también busca `ingest_error` en logs
+  - "presupuesto Editor insuficiente" (caso 3) — revisa Q3 de paso 1
+
+Sin esa claridad, una serie de catorce noches que incluya varios "partial" se malinterpretará como «funciona mal». Necesitamos distinguir "el sistema está calibrado" (casos 1 y 2) de "el sistema está roto" (caso 3 sin explicación).
 
 ---
 
@@ -134,6 +190,12 @@ Cada vez que se toque `config/pipeline.toml`, se incrementa el `config_version` 
   - Motivo: Primera observación real del Editor. Dos puntos (N=3 → 3.381 tokens; N=14 → 11.890 tokens) permiten ajuste lineal. Estimación anterior (4.000 + 700N) subestimaba en el peor caso (N=40: estimaba 32.000, real ~32.002). La recta **observada** es `1.060 + 774×N`; la **estimación nueva** (`2.500 + 850×N`) queda por encima de ella en todo el rango 1–40 (`estimación − observada = 1.440 + 76·N`, siempre positiva), con margen mínimo 1,14× en N=40. Ojo: por debajo de N=10 la estimación nueva es *menos* conservadora que la vieja (en N=3, 1,49× frente a 1,80×); las dos se cruzan exactamente en N=10. **Provisional**: dos observaciones para dos parámetros es un sistema exactamente determinado (residuo cero); se reajusta por regresión sobre ~14 noches al cierre de T60.
   - Prompt versions en uso: `reader-v2`, `popularizer-v2`, `editor-v1`. Estos cambios rompen comparabilidad con datos previos.
   - CLI 2.1.274 + SDK 0.2.153 (valores en el momento de T44, antes de T60).
+
+- **cfg-2026-09-22** (T60.b, robustez de la ingesta frente a 406):
+  - Añadidas `[sources.arxiv].retry_max_attempts = 4`, `retry_base_delay_s = 5.0`, `retry_max_elapsed_s = 60.0` (antes: sin reintentos, ver `infrastructure/arxiv/client.py`). Resto de la sección `[sources.arxiv]` y del resto del fichero sin cambios.
+  - Motivo: 406 transitorio de Fastly/Varnish observado el 2026-09-21 (cuerpo vacío, sin `Retry-After`, la misma consulta devolvió 200 minutos después). Backoff exponencial con jitter (`infrastructure/arxiv/retry.py::Retrier`), reintentable también en 429, 5xx y `httpx.TransportError`. `retry_max_attempts` es un tope, no una garantía (`retry_max_elapsed_s` puede cortar antes con fallos lentos); `retry_max_elapsed_s` acota cuándo puede iniciarse un nuevo intento, no la duración total de la secuencia -- el techo real por página incluye el timeout HTTP del intento en curso (del orden de 93 s, no 60 s). Ver el comentario de `config/pipeline.toml` para la aritmética completa.
+  - PROVISIONAL: sin datos de campo sobre cuánto dura el 406 del CDN más allá del caso único observado; se recalibra en T60 si vuelve a aparecer.
+  - No afecta a `reader-v2`/`popularizer-v2`/`editor-v1` ni a las constantes de gasto (`nightly_tokens`, reservas del Editor, etc.): la serie de calibración de esas magnitudes sigue comparable.
 
 **Nota importante**: las versiones de `reader-v2`, `popularizer-v2` y `editor-v1` rompen comparabilidad con cualquier dato anterior a ellas. El campo `prompt_version` en `AgentCall` permite segregar los datos históricos si es necesario.
 

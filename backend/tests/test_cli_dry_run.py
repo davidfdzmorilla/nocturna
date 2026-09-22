@@ -80,6 +80,9 @@ editor = "opus"
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+retry_max_attempts = 4
+retry_base_delay_s = 5.0
+retry_max_elapsed_s = 60.0
 
 [llm]
 provider = "agent_sdk"
@@ -231,6 +234,19 @@ def test_budget_policy_from_config_traduce_weekly_reset_weekday_a_convencion_de_
     policy = cli.budget_policy_from_config(config)
 
     assert policy.weekly_reset_weekday == expected_int
+
+
+# --- arxiv_retry_policy_from_config: traducción campo a campo ---------------
+
+
+def test_arxiv_retry_policy_from_config_traduce_todos_los_campos() -> None:
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+
+    policy = cli.arxiv_retry_policy_from_config(config)
+
+    assert policy.max_attempts == config.sources.arxiv.retry_max_attempts
+    assert policy.base_delay_s == config.sources.arxiv.retry_base_delay_s
+    assert policy.max_elapsed_s == config.sources.arxiv.retry_max_elapsed_s
 
 
 # --- system_clock_from_config: zona de window.timezone -----------------------

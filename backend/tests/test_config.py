@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from nocturna.infrastructure.arxiv.retry import MAX_JITTER_FACTOR
 from nocturna.infrastructure.config import Settings, load_pipeline_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +56,9 @@ editor = "opus"
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+retry_max_attempts = 4
+retry_base_delay_s = 5.0
+retry_max_elapsed_s = 60.0
 
 [llm]
 provider = "agent_sdk"
@@ -85,6 +89,9 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.models.popularizer
     assert config.models.editor
     assert config.llm.provider == "agent_sdk"
+    assert config.sources.arxiv.retry_max_attempts == 4
+    assert config.sources.arxiv.retry_base_delay_s == 5.0
+    assert config.sources.arxiv.retry_max_elapsed_s == 60.0
 
 
 def test_la_reserva_del_editor_cubre_el_peor_caso_en_el_toml_real():
@@ -436,6 +443,87 @@ def test_arxiv_page_size_mayor_que_max_results_per_fetch_falla(tmp_path):
 
     with pytest.raises(ValidationError, match="page_size"):
         load_pipeline_config(path)
+
+
+def test_falta_retry_max_attempts_falla(tmp_path):
+    content = BASE_TOML.replace("retry_max_attempts = 4\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_retry_base_delay_s_falla(tmp_path):
+    content = BASE_TOML.replace("retry_base_delay_s = 5.0\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_retry_max_elapsed_s_falla(tmp_path):
+    content = BASE_TOML.replace("retry_max_elapsed_s = 60.0\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_retry_max_attempts_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "retry_max_attempts = 4",
+        f"retry_max_attempts = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1.0])
+def test_retry_base_delay_s_no_positivo_falla(tmp_path, value):
+    content = BASE_TOML.replace(
+        "retry_base_delay_s = 5.0",
+        f"retry_base_delay_s = {value}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_retry_max_elapsed_s_menor_que_el_peor_caso_con_jitter_falla(tmp_path):
+    """`ArxivConfig._retry_max_elapsed_covers_nominal_backoff`: con
+    `retry_max_attempts = 4` y `retry_base_delay_s = 5.0`, el peor caso de
+    esperas CON jitter (`_default_jitter` multiplica hasta `MAX_JITTER_FACTOR`,
+    ver `retry.py`) es `5.0 * MAX_JITTER_FACTOR * (2**3 - 1) = 52.5`. Un
+    `retry_max_elapsed_s` por debajo de eso no deja tiempo ni para ese peor
+    caso, y debe fallar al cargar, no descubrirse a las 00:05 con la
+    secuencia de reintentos cortándose antes de tiempo porque el jitter dio
+    la peor tirada posible."""
+    worst_case = 5.0 * MAX_JITTER_FACTOR * (2**3 - 1)
+    content = BASE_TOML.replace(
+        "retry_max_elapsed_s = 60.0",
+        f"retry_max_elapsed_s = {worst_case - 0.1}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="retry_max_elapsed_s"):
+        load_pipeline_config(path)
+
+
+def test_retry_max_elapsed_s_igual_al_peor_caso_con_jitter_es_valida(tmp_path):
+    worst_case = 5.0 * MAX_JITTER_FACTOR * (2**3 - 1)
+    content = BASE_TOML.replace(
+        "retry_max_elapsed_s = 60.0",
+        f"retry_max_elapsed_s = {worst_case}",
+    )
+    path = _write_toml(tmp_path, content)
+
+    config = load_pipeline_config(path)
+
+    assert config.sources.arxiv.retry_max_elapsed_s == worst_case
 
 
 def test_ruta_inexistente_propaga_file_not_found_error(tmp_path):

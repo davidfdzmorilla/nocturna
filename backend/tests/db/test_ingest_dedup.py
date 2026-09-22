@@ -20,6 +20,7 @@ from nocturna.application.use_cases.ingest_arxiv import IngestArxiv
 from nocturna.domain.entities import ItemStatus
 from nocturna.infrastructure.arxiv.client import ArxivClient
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
+from nocturna.infrastructure.arxiv.retry import RetryPolicy
 from nocturna.infrastructure.db.repositories import SqlAlchemyItemRepository
 from nocturna.infrastructure.db.session import unit_of_work
 
@@ -54,7 +55,12 @@ def _build_client() -> tuple[ArxivClient, httpx.AsyncClient]:
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(handle), timeout=10.0)
     limiter = RateLimiter(3.0, sleep=_no_sleep, monotonic=_IncreasingClock())
-    client = ArxivClient(http, limiter=limiter, page_size=10, now=lambda: _FETCHED_AT)
+    # Un solo intento: este fichero prueba deduplicación, no reintentos
+    # (ver `tests/test_arxiv_client.py` para esos).
+    retry_policy = RetryPolicy(max_attempts=1, base_delay_s=1.0, max_elapsed_s=1.0)
+    client = ArxivClient(
+        http, limiter=limiter, page_size=10, now=lambda: _FETCHED_AT, retry_policy=retry_policy
+    )
     return client, http
 
 
