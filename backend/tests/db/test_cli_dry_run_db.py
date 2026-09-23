@@ -32,6 +32,7 @@ import pytest
 
 from nocturna import cli
 from nocturna.cli import main
+from nocturna.infrastructure.arxiv.retry import RetryPolicy
 from nocturna.infrastructure.config import load_pipeline_config
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "arxiv"
@@ -72,6 +73,68 @@ def _use_test_database(monkeypatch: pytest.MonkeyPatch, test_database_url: str) 
     """Apunta la `Settings()` que construye `main()` a `nocturna_test`, como
     hace `tests/db/conftest.py::_database_url_env` para Alembic."""
     monkeypatch.setenv("NOCTURNA_DATABASE_URL", test_database_url)
+
+
+async def _instant_sleep(_delay_s: float) -> None:
+    return None
+
+
+@pytest.fixture
+def _fast_arxiv_network_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evita las dos esperas reales que `_run_ingest` produce con más de una
+    petición a arXiv, sin tocar `cli.py`: ambas se arreglan parcheando
+    símbolos propios de `nocturna.cli`, no internos de terceros.
+
+    1. **El backoff de `Retrier`.** `cli.py` no ofrece ninguna costura para
+       inyectar `sleep=...` (`_run_ingest` construye su propio `Retrier` con
+       los valores por defecto, ver su docstring), pero sí es dueño de
+       `arxiv_retry_policy_from_config`: se parchea para que devuelva la
+       misma `max_attempts` (el camino real de "cuatro peticiones,
+       agotamiento, mensaje legible" sigue intacto) con un `base_delay_s`
+       minúsculo. `RetryPolicy` es una dataclass sin validación propia -- a
+       diferencia de `ArxivConfig`, que si exigiera este mismo valor
+       fallaría al cargar -- así que admite un backoff nominal irrelevante
+       sin rodeos. Sin este parche, hasta ~52 s reales de backoff
+       (`retry_base_delay_s = 5.0`, `retry_max_attempts = 4` en
+       `config/pipeline.toml`, con jitter).
+
+    2. **El espaciado de cortesía de `RateLimiter` entre reintentos.**
+       Hallazgo posterior al primer intento de arreglo de este test: antes
+       de T60.b, `ArxivClient._get` solo llamaba `limiter.acquire()` una vez
+       por página, y la primera llamada de un `RateLimiter` nunca espera
+       (`_last_request_at` es `None`), así que este límite nunca se notaba
+       aquí. Desde T60.b, `_get` adquiere el limitador dentro de CADA
+       intento -- para que el reintento también respete el espaciado real
+       de arXiv, ver el docstring de `client.py::_get` -- así que el
+       segundo intento en adelante siempre tiene que esperar
+       `MIN_REQUEST_INTERVAL_S = 3.0 s` reales de verdad, sin relación
+       ninguna con la política de reintento. `cli.py` construye ese
+       `RateLimiter` con su `sleep` por defecto (`RateLimiter(MIN_REQUEST_INTERVAL_S)`,
+       sin costura), igual que con `Retrier`; se parchea `cli.RateLimiter`
+       -- el símbolo importado en `nocturna.cli`, no `infrastructure.arxiv.rate_limit`
+       -- por una fábrica que conserva `min_interval_s` (así que
+       `test_hay_una_espera_de_3s_entre_paginas`, en `test_arxiv_client.py`,
+       sigue siendo la única prueba de que ese espaciado existe de verdad)
+       pero fija `sleep=_instant_sleep`."""
+    real_policy_from_config = cli.arxiv_retry_policy_from_config
+
+    def _fast_policy_from_config(config: object) -> RetryPolicy:
+        policy = real_policy_from_config(config)
+        return RetryPolicy(
+            max_attempts=policy.max_attempts,
+            base_delay_s=0.001,
+            max_elapsed_s=1.0,
+        )
+
+    monkeypatch.setattr(cli, "arxiv_retry_policy_from_config", _fast_policy_from_config)
+
+    real_rate_limiter_cls = cli.RateLimiter
+
+    def _fast_rate_limiter(min_interval_s: float, **kwargs: object) -> object:
+        kwargs.setdefault("sleep", _instant_sleep)
+        return real_rate_limiter_cls(min_interval_s, **kwargs)
+
+    monkeypatch.setattr(cli, "RateLimiter", _fast_rate_limiter)
 
 
 def test_dry_run_con_fuente_falsa_imprime_una_linea_por_item_y_el_resumen_y_devuelve_0(
@@ -180,11 +243,25 @@ def test_sin_since_ni_categories_usa_los_valores_por_defecto(
     assert "fetched=3 new=3 duplicates=0 skipped=0" in captured.out
 
 
-def test_arxiv_unavailable_produce_mensaje_legible_sin_traza_y_sin_reintentos(
+def test_arxiv_unavailable_produce_mensaje_legible_sin_traza_tras_agotar_los_reintentos(
     monkeypatch: pytest.MonkeyPatch,
     db_session_factory: object,
     capsys: pytest.CaptureFixture[str],
+    _fast_arxiv_network_waits: None,
 ) -> None:
+    """Un 500 persistente ya no falla a la primera: T60.b introduce
+    reintentos (`config/pipeline.toml` real: 4 intentos), así que este caso
+    dispara 4 peticiones, todas a la misma página, antes de que `--dry-run`
+    devuelva 1 con un mensaje legible. Antes de T60.b esto era una única
+    petición sin reintento -- ver `tests/test_arxiv_client.py` para el
+    detalle del backoff en sí; aquí solo importa que `cli.py` propaga el
+    fallo final igual que siempre. El número de peticiones esperado se lee
+    de `config/pipeline.toml` en vez de escribirse a mano: `retry_max_attempts`
+    ya está congelado por `test_config.py::test_carga_el_pipeline_toml_del_repositorio`,
+    y duplicar aquí "4" acopla este test al valor del TOML en dos sitios
+    sin necesidad -- si se recalibra, este test debe seguir describiendo
+    "agota los reintentos configurados", no un número concreto."""
+    expected_attempts = load_pipeline_config().sources.arxiv.retry_max_attempts
     recorder = _Recorder(httpx.Response(500, content=b"internal error"))
     _patch_arxiv_transport(monkeypatch, recorder.handle)
 
@@ -200,8 +277,10 @@ def test_arxiv_unavailable_produce_mensaje_legible_sin_traza_y_sin_reintentos(
     )
 
     captured = capsys.readouterr()
-    assert code != 0
-    assert len(recorder.requests) == 1, "no debe reintentar"
+    assert code == 1
+    assert len(recorder.requests) == expected_attempts, (
+        "debe agotar sources.arxiv.retry_max_attempts de config/pipeline.toml"
+    )
     assert "Traceback" not in captured.err
     assert "arXiv" in captured.err
     assert captured.out == ""

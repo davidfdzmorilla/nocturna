@@ -155,6 +155,12 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 
 ## Bloque 6 — Cierre de fase
 
+### T60.b · Robustez de ingesta frente a 406
+- **Estado**: in_progress
+- **Depende de**: T20, T44
+- **Alcance**: reintento con backoff exponencial ante fallos transitorios de arXiv (406, 429, 5xx, errores de transporte). Motivación: 406 observado 2026-09-21 con cuerpo vacío, sin Retry-After, cabeceras Fastly/Varnish (CDN rechaza, no la aplicación), transitorio (misma consulta devolvió 200 minutos después). Política de reintento configurable: `retry_max_attempts`, `retry_base_delay_s`, `retry_max_elapsed_s` en `pipeline.toml` bajo `sources.arxiv`. Eventos de log estructurados: `arxiv.retry`, `arxiv.retry_recovered`, `arxiv.retry_exhausted`. Tests: 848 passed, 4 deselected (baseline 815). Revisión completada: ronda 1 (presupuesto de tiempo) rechazó con correcciones; ronda 2 (general) aprobó. Sin bloqueantes en ninguna pasada.
+- **Hecho cuando**: suite en verde con tests nuevos de revisión, ambas pasadas de revisión resueltas (correcciones aplicadas), autor repite verificaciones V1 (ingesta trae ítems) y V3 (comprueba configuración), documentación completa (ADR 0009, PLAN_TAREAS, OPEN_DECISIONS, ARCHITECTURE, CALIBRACION), y commit preparado (no ejecutado aún).
+
 ### T60 · Dos semanas de calibración
 - **Estado**: in_progress
 - **Depende de**: T44, T51

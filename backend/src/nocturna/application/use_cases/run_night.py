@@ -472,6 +472,15 @@ class RunNight:
                     "truncated": False,
                     "status": "error",
                     "error": self._ingest_error,
+                    # str(exc): hoy el texto de `ArxivUnavailable` (código,
+                    # intentos, motivo de corte -- ver
+                    # `infrastructure/arxiv/client.py::_get`) solo vive en
+                    # el traceback de `_logger.exception`, que no es
+                    # consultable como campo estructurado. No amplía
+                    # `SourceFetch` ni añade contadores de reintento a este
+                    # módulo: es solo el texto de la excepción ya
+                    # capturada.
+                    "error_detail": str(exc),
                 },
             )
             return

@@ -58,7 +58,9 @@ Dependencias: `api → application → domain ← infrastructure`. La capa `doma
 
 Implementada en T20. La lógica vive en `application/use_cases/ingest_arxiv.py` (`IngestArxiv`) y `infrastructure/arxiv/` (cliente HTTP). El servidor MCP (`infrastructure/mcp/arxiv_server.py`) expone dos herramientas sin persistir: adaptador fino para que los agentes (T41+) puedan invocar `fetch_new` y `get_abstract`. Detalle arquitectónico en [ADR 0004](adr/0004-ingesta-de-arxiv-y-mcp-como-adaptador.md).
 
-`cli.py` es el composition root: único sitio que abre `unit_of_work`, instancia `ArxivClient` e invoca `IngestArxiv` dentro de la transacción. T20 introduce el subcomando `nocturna run-night --dry-run` que ingesta sin llamar a agentes.
+**Reintento de fallos transitorios (T60.b)**: `infrastructure/arxiv/retry.py` implementa `Retrier` con backoff exponencial y jitter ante fallos transitorios de arXiv (406, 429, 5xx, errores de transporte). Política configurable desde `pipeline.toml` bajo `sources.arxiv`: `retry_max_attempts` (intentos), `retry_base_delay_s` (base de espera, se dobla cada intento), `retry_max_elapsed_s` (tope duro total). Eventos de log estructurados: `arxiv.retry` (warning al reintentar), `arxiv.retry_recovered` (info al recuperarse), `arxiv.retry_exhausted` (error al agotarse). La ingesta es **cancelable** (usa `anyio.sleep`, no `time.sleep`) y respeta `hard_stop` porque `Retrier` se ejecuta dentro de la tarea que el vigía de T44 cancela.
+
+`cli.py` es el composition root: único sitio que abre `unit_of_work`, instancia `ArxivClient` e invoca `IngestArxiv` dentro de la transacción. T20 introduce el subcomando `nocturna run-night --dry-run` que ingesta sin llamar a agentes. **La ventana y el presupuesto de gasto de tokens siguen siendo exclusivos de `application/budget.py`**: la ingesta no pasa por `BudgetGuard` porque no gasta tokens de suscripción a Claude; el único límite es la política de cortesía de arXiv (3 s entre peticiones, constante de módulo no configurable) y los timeouts configurables de `Retrier`.
 
 ## Agente Reader (fase 1)
 
