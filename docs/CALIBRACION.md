@@ -37,6 +37,27 @@ grep '"event": "arxiv.retry_recovered"' "$LOG" | head -1 | jq .
 
 **Interpretación**: Un valor > 0 en `retry_exhausted` significa que la ingesta sufrió un fallo que no se pudo recuperar, así que `run.status` podría ser `partial` por motivo `ingest_error`. Ver nota al final de este paso.
 
+#### Qué hacer si ves `retry_exhausted` por la mañana
+
+**No es una noche perdida: es la ingesta de esa noche.** El Run queda en `partial`, pero las fases Reader, Popularizer y Editor siguen corriendo sobre los `Item` en estado `NEW` que ya hubiera en base. Si la cola traía pendientes, esa noche publica con normalidad y su dato de gasto sigue siendo válido para la calibración.
+
+Procedimiento:
+
+1. **No relances.** Rige la «Regla de noches fallidas»: se anota y se espera a mañana.
+2. Anota en `notas`: `ingesta: 406 agotado` y el número de ítems leídos, para distinguir «no hubo ingesta pero sí noche» de «no hubo noche».
+3. **Vigila la cola, que es el riesgo real.** Un 406 suelto es inocuo; varias noches seguidas sin ingesta vacían los `NEW` pendientes y entonces sí hay noches en blanco. Si ves dos agotamientos seguidos, comprueba cuántos ítems quedan:
+
+   ```bash
+   docker exec nocturna-postgres psql -U nocturna -d nocturna \
+     -c "select count(*) from items where status = 'new';"
+   ```
+
+**Qué se sabe del 406** (observado el 2026-09-21 y el 2026-09-22): lo devuelve el CDN de arXiv (cabeceras Fastly/Varnish), con cuerpo vacío y sin `Retry-After`, y es **intermitente por episodios**. Uno de los episodios observados duró **más de 40 s**: los cuatro intentos cayeron dentro y se agotaron, mientras que minutos después la misma consulta pasaba a la primera. Es decir, el reintento de T60.b **cubre los episodios cortos, no los largos**, y no hay forma de saber de antemano cuál te toca.
+
+Descartados como causa: `User-Agent`, `Accept`, `Accept-Encoding`, versión HTTP, codificación de `%3A`, `max_results` y el uso de cliente síncrono o asíncrono. La hipótesis de la huella del cliente (`curl` pasaba donde `httpx` fallaba) **no está confirmada** y perseguirla se parecería a evadir una protección del CDN, así que no se persigue. Ver ADR 0009 y `OPEN_DECISIONS.md`.
+
+**Qué hacer con los valores de reintento**: nada todavía. `retry_max_attempts`, `retry_base_delay_s` y `retry_max_elapsed_s` son provisionales y se calibran con estas catorce noches. Subir el tope para cubrir episodios de 40 s largos come tiempo de noche en todas las noches para salvar unas pocas; esa cuenta solo se puede hacer con la frecuencia real medida. Si al cerrar T60 hay varios `retry_exhausted`, entra en la decisión final junto a las siete reglas de cierre.
+
 ### Paso 2: Abrir la web y emitir juicios de calidad
 
 **Requisitos previos**: asegúrate de que compose, la API y la web están ejecutándose:
