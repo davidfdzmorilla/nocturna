@@ -994,6 +994,86 @@ async def test_ingesta_fallida_continua_con_los_new_existentes_y_no_supera_parti
     assert "end=ingest_error" in result.notes
 
 
+async def test_el_log_de_ingesta_fallida_incluye_error_detail(caplog, monkeypatch):
+    """`night.ingest` (nivel ERROR, vía `_logger.exception`) lleva el campo
+    `error_detail` con `str(exc)` -- T60.b: hoy (con `error=type(exc).__name__`
+    solamente) un 406 de arXiv solo deja "ArxivUnavailable" en el log
+    estructurado, sin el mensaje legible con el código, los intentos y el
+    motivo de corte que compone `infrastructure/arxiv/client.py::_get`; ese
+    texto solo vivía en el traceback, no consultable como campo. Mismo
+    parche de logger deshabilitado que
+    `test_excepcion_inesperada_en_un_item_queda_aislada_y_la_noche_continua`."""
+    monkeypatch.setattr(run_night_module._logger, "disabled", False)
+    item = _make_item()
+    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(
+        AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
+    )
+    fake.respond(AgentRole.EDITOR, json={"publish": []}, tokens_in=100, tokens_out=10)
+
+    failure_message = "la API de arXiv respondió 406 (rechazo de la petición), tras 4 intentos"
+
+    async def _failing_ingest() -> IngestResult:
+        raise RuntimeError(failure_message)
+
+    read_item = ReadItem(
+        work=env.work,
+        provider=fake,
+        system_prompt="prompt del Reader",
+        prompt_version="reader-v1",
+        model="claude-sonnet-test",
+        max_turns=3,
+        estimated_tokens=500,
+        max_attempts=2,
+    )
+    popularize = PopularizeReading(
+        work=env.work,
+        provider=fake,
+        system_prompt="prompt del Popularizer",
+        prompt_version="popularizer-v1",
+        model="claude-sonnet-test",
+        max_turns=3,
+        estimated_tokens=500,
+        max_attempts=2,
+        min_interest_score=4,
+    )
+    edit_night = EditNight(
+        work=env.work,
+        provider=fake,
+        clock=env.clock,
+        system_prompt="prompt del Editor",
+        prompt_version="editor-v1",
+        model="claude-opus-test",
+        max_turns=3,
+        max_attempts=2,
+        base_tokens=1_000,
+        tokens_per_candidate=200,
+    )
+    run_night = RunNight(
+        work=env.work,
+        clock=env.clock,
+        ingest=_failing_ingest,
+        read_item=read_item,
+        popularize=popularize,
+        edit_night=edit_night,
+        run_id=env.run.id,
+        max_items=10,
+        max_consecutive_failures=5,
+        deadline_s=16_200,
+    )
+
+    with caplog.at_level("ERROR"):
+        await run_night()
+
+    ingest_records = [
+        record for record in caplog.records if record.__dict__.get("event") == "night.ingest"
+    ]
+    assert len(ingest_records) == 1
+    assert ingest_records[0].__dict__["error_detail"] == failure_message
+
+
 # --- 15. NO_CANDIDATES tras descartar todo: COMPLETED, coste cero del Editor
 
 

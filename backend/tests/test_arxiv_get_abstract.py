@@ -12,6 +12,7 @@ import pytest
 
 from nocturna.infrastructure.arxiv.client import ArxivClient
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
+from nocturna.infrastructure.arxiv.retry import RetryPolicy
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "arxiv"
 _FETCHED_AT = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
@@ -49,11 +50,25 @@ class _FakeSleep:
         self.calls.append(seconds)
 
 
-def _build_client(recorder: _Recorder) -> tuple[ArxivClient, httpx.AsyncClient, _FakeSleep]:
+def _no_retry_policy() -> RetryPolicy:
+    """Un solo intento: reproduce el comportamiento de antes de T60.b para
+    los tests que no están probando la política de reintento en sí."""
+    return RetryPolicy(max_attempts=1, base_delay_s=1.0, max_elapsed_s=1.0)
+
+
+def _build_client(
+    recorder: _Recorder, *, retry_policy: RetryPolicy | None = None
+) -> tuple[ArxivClient, httpx.AsyncClient, _FakeSleep]:
     http = httpx.AsyncClient(transport=httpx.MockTransport(recorder.handle), timeout=10.0)
     sleep = _FakeSleep()
     limiter = RateLimiter(3.0, sleep=sleep, monotonic=_IncreasingClock())
-    client = ArxivClient(http, limiter=limiter, page_size=1, now=lambda: _FETCHED_AT)
+    client = ArxivClient(
+        http,
+        limiter=limiter,
+        page_size=1,
+        now=lambda: _FETCHED_AT,
+        retry_policy=retry_policy or _no_retry_policy(),
+    )
     return client, http, sleep
 
 
@@ -113,9 +128,51 @@ async def test_get_abstract_tambien_pasa_por_el_limitador():
             await super().acquire()
 
     limiter = _CountingLimiter(3.0, sleep=sleep, monotonic=_IncreasingClock())
-    client = ArxivClient(http, limiter=limiter, page_size=1, now=lambda: _FETCHED_AT)
+    client = ArxivClient(
+        http,
+        limiter=limiter,
+        page_size=1,
+        now=lambda: _FETCHED_AT,
+        retry_policy=_no_retry_policy(),
+    )
 
     async with http:
         await client.get_abstract("2301.00001")
 
     assert len(calls) == 1
+
+
+@pytest.mark.anyio
+async def test_get_abstract_tambien_reintenta_un_406():
+    # El reintento vive en `_get`, compartido por `fetch_new` y
+    # `get_abstract`: este test cubre el segundo camino, ya bien probado
+    # para `fetch_new` en `test_arxiv_client.py`.
+    class _FlakyRecorder:
+        def __init__(self) -> None:
+            self._responses = [
+                httpx.Response(406, content=b""),
+                httpx.Response(200, content=_load("feed_single.xml")),
+            ]
+            self.requests: list[httpx.Request] = []
+
+        def handle(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(request)
+            return self._responses.pop(0)
+
+    flaky = _FlakyRecorder()
+    # `base_delay_s` minúsculo: `ArxivClient._get` construye su propio
+    # `Retrier` con `sleep`/`monotonic` reales, sin costura para inyectar
+    # dobles (ver docstring de `_build_client` en `test_arxiv_client.py`).
+    retry_policy = RetryPolicy(max_attempts=3, base_delay_s=0.001, max_elapsed_s=10.0)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(flaky.handle), timeout=10.0)
+    limiter = RateLimiter(3.0, sleep=_FakeSleep(), monotonic=_IncreasingClock())
+    client = ArxivClient(
+        http, limiter=limiter, page_size=1, now=lambda: _FETCHED_AT, retry_policy=retry_policy
+    )
+
+    async with http:
+        entry = await client.get_abstract("2301.00001")
+
+    assert len(flaky.requests) == 2
+    assert entry is not None
+    assert entry.arxiv_id == "2301.00001"

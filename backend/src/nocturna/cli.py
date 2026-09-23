@@ -232,6 +232,7 @@ from nocturna.infrastructure.arxiv.client import (
     ArxivUnavailable,
 )
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
+from nocturna.infrastructure.arxiv.retry import RetryPolicy
 from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
@@ -322,6 +323,22 @@ def budget_policy_from_config(config: PipelineConfig) -> BudgetPolicy:
         weekly_reset_weekday=_WEEKDAY_TO_INT[config.budget.weekly_reset_weekday],
         weekly_reset_hour=config.budget.weekly_reset_hour,
         reset_day_multiplier=config.budget.reset_day_multiplier,
+    )
+
+
+def arxiv_retry_policy_from_config(config: PipelineConfig) -> RetryPolicy:
+    """Traduce `PipelineConfig.sources.arxiv` (Pydantic, infraestructura) a
+    `RetryPolicy` (dataclass, `infrastructure/arxiv/retry.py`), campo a
+    campo y con argumentos nombrados, mismo patrón que
+    `budget_policy_from_config` y por el mismo motivo: sin `**vars()`, para
+    que una clave de reintento nueva en `pipeline.toml` sin mapear aquí
+    falle por argumento obligatorio ausente, no se cuele con un valor
+    inventado.
+    """
+    return RetryPolicy(
+        max_attempts=config.sources.arxiv.retry_max_attempts,
+        base_delay_s=config.sources.arxiv.retry_base_delay_s,
+        max_elapsed_s=config.sources.arxiv.retry_max_elapsed_s,
     )
 
 
@@ -454,11 +471,13 @@ async def _run_ingest(
     """Compone y ejecuta la ingesta de arXiv dentro de una única unidad de trabajo."""
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as http:
         limiter = RateLimiter(MIN_REQUEST_INTERVAL_S)
+        retry_policy = arxiv_retry_policy_from_config(config)
         client = ArxivClient(
             http,
             limiter=limiter,
             page_size=config.sources.arxiv.page_size,
             now=lambda: datetime.now(UTC),
+            retry_policy=retry_policy,
         )
         engine = create_db_engine(settings)
         factory = create_session_factory(engine)
