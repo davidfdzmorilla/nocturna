@@ -27,16 +27,23 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 ## Flujo de una noche
 
 ```
-00:00  cron → nocturna run-night
-       ├─ cierra `Run` huérfano si existe
-       ├─ crea `Run` nuevo
-       ├─ fetch_new(arXiv) → Items(new)               [sin LLM, Fase A]
-       ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet, Fase A]
-       ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding    [Sonnet, Fase B]
-       ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos) → publica  [Opus, Fase C]
-       └─ cierra Run (COMPLETED | PARTIAL | KILLED | FAILED)
+00:00  máquina despierta (pmset)
+00:05  launchd → run-night-scheduled.sh (envoltorio)
+         ├─ fija PATH, valida configuración
+         ├─ comprueba Docker, PostgreSQL salud
+         ├─ centinela ~/.launched-YYYYMMDD (previene dobles)
+         └─ invoca: caffeinate -is uv run --frozen nocturna run-night
+              ├─ cierra `Run` huérfano si existe
+              ├─ crea `Run` nuevo
+              ├─ fetch_new(arXiv) → Items(new)                   [sin LLM, Fase A]
+              ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet, Fase A]
+              ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding  [Sonnet, Fase B]
+              ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos)  [Opus, Fase C]
+              └─ cierra Run (COMPLETED | PARTIAL | KILLED | FAILED)
 04:45  hard_stop incondicional (vigía asyncio + comprobación en cada authorize)
 ```
+
+**Qué aporta el envoltorio**: configuración del PATH (para que `uv` y `claude` sean resolubles), validación de precondiciones (Docker, PostgreSQL), centinela (única invocación por ventana), rotación de logs en ficheros separados. **Sin** lógica de ventana ni presupuesto, que siguen siendo exclusivas de `application/budget.py`.
 
 **Degradación de estado**: `RunNight` propone estados en orden de severidad decreciente (COMPLETED < PARTIAL < KILLED). Un desenlace de fase se transfiere al siguiente: si fase A devuelve PARTIAL (Reader no completó), fase B hereda PARTIAL y solo puede bajar a KILLED por timeout. Si fase C devuelve PARTIAL (no hay presupuesto para Editor), el Run cierra PARTIAL, pero no se pierde lo publicado de las fases anteriores (eso es decisión del Editor).
 

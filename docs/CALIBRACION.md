@@ -232,77 +232,173 @@ Dos ejecuciones de `run-night` en la misma ventana (00:00–04:45) autorizan dos
   - NO relances en la misma ventana.
   - Espera a mañana noche para otro intento, que abrirá un Run nuevo con presupuesto fresco.
 
-### Lanzamiento planificado con `launchd` (fragmento)
+### Lanzamiento planificado con `launchd`
 
-Si decides dejar el portátil despierto catorce noches y confiar en `launchd`:
+Si decides dejar el portátil despierto catorce noches y confiar en `launchd`, el agente se lanza a las **00:05 en la hora local del sistema** cada noche (`StartCalendarInterval` usa la zona horaria del sistema, no una fija; la ventana de gasto, en cambio, usa `window.timezone` de `pipeline.toml`), invocando un envoltorio shell que valida precondiciones, impide dobles lanzamientos y captura logs en ficheros separados. El envoltorio está en `backend/scripts/run-night-scheduled.sh`. **No contiene lógica de control de gasto ni de ventana horaria**: eso es exclusivo de `application/budget.py`, y duplicarlo en bash crearía una segunda fuente de verdad. El envoltorio solo fija el entorno, valida precondiciones, aplica la guarda del centinela y separa los logs. La plantilla del agente está en `backend/scripts/com.nocturna.run-night.plist.template` (se materializa con `sed` para insertar rutas absolutas del repositorio y del home).
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.nocturna.run-night</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/env</string>
-        <string>bash</string>
-        <string>-c</string>
-        <string>cd /Users/davidferanandezmorilla/Desktop/development.nosync/nocturna/backend &amp;&amp; uv run nocturna run-night >> ~/nocturna-logs/night-$(date +\%Y\%m\%d).jsonl 2>&amp;1</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>0</integer>
-        <key>Minute</key>
-        <integer>5</integer>
-    </dict>
-</dict>
-</plist>
+#### Paso 1: Crear el directorio de logs (obligatorio, previo a cualquier lanzamiento)
+
+```bash
+mkdir -p ~/nocturna-logs
 ```
 
-**Advertencias**:
-1. **Sin `KeepAlive` ni reintento**: si la máquina duerme, la tarea no se ejecuta. Necesitas `sudo pmset repeat wakeorpoweron` previamente para despertar automáticamente; además, el portátil debe estar enchufado.
-2. **Logs**: `launchd` redirige `stderr` a `/var/log/system.log` (mezcla de otros procesos, inutilizable). La línea de arriba redirige explícitamente a `~/nocturna-logs/night-YYYYMMDD.jsonl`, un fichero por noche, **fuera del repositorio**. Sin rotación: después de dos semanas tendrás 14 ficheros. Se borran manualmente.
-3. **Máquina dormida**: si duerme, la ejecución no sucede. Anota esa noche como «no ejecutada» en la tabla (status `—` o nota "máquina dormida") y **la serie se extiende** — no es un fallo de calibración, es un dato que no existe.
+**Por qué es previo y obligatorio**: el agente `launchd` invoca el envoltorio que redirige salida a `~/nocturna-logs/night-YYYYMMDD.{out,err}.log`. Si el directorio no existe cuando `launchd` ejecute el trabajo (00:05 de la primera noche), la apertura del fichero falla silenciosamente y el único rastro queda en `/var/log/system.log` (inutilizable, mezcla de otros procesos). Es el escenario «la calibración no ocurrió anoche y nadie se entera hasta el desayuno».
 
-**Instalación**:
+#### Paso 2: Materializar el plist desde la plantilla
+
 ```bash
-# Crear directorio de logs fuera del repo:
-mkdir -p ~/nocturna-logs
+# Sustituciones: __REPO_ROOT__ por ruta absoluta del repositorio, __HOME__ por ruta del home
 
-# Guardar el plist en ~/Library/LaunchAgents/:
-cat > ~/Library/LaunchAgents/com.nocturna.run-night.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.nocturna.run-night</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/env</string>
-        <string>bash</string>
-        <string>-c</string>
-        <string>cd /Users/davidferanandezmorilla/Desktop/development.nosync/nocturna/backend &amp;&amp; uv run nocturna run-night >> ~/nocturna-logs/night-$(date +\%Y\%m\%d).jsonl 2>&amp;1</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>0</integer>
-        <key>Minute</key>
-        <integer>5</integer>
-    </dict>
-</dict>
-</plist>
-EOF
+sed -e "s|__REPO_ROOT__|$(cd ~/Desktop/development.nosync/nocturna && pwd)|g" \
+    -e "s|__HOME__|$HOME|g" \
+    ~/Desktop/development.nosync/nocturna/backend/scripts/com.nocturna.run-night.plist.template \
+    > ~/Library/LaunchAgents/com.nocturna.run-night.plist
+```
 
-# Cargar:
-launchctl load ~/Library/LaunchAgents/com.nocturna.run-night.plist
+El plist resultante contendrá:
+- `Label`: `com.nocturna.run-night`
+- `ProgramArguments`: ruta absoluta del envoltorio
+- `StartCalendarInterval`: 00:05 cada día
+- `StandardOutPath` y `StandardErrorPath`: `~/nocturna-logs/launchd.log` (solo para fallos del propio agente; los logs de la noche van a ficheros distintos)
+- Sin `KeepAlive`, sin claves de reintento
+
+#### Paso 3: Cargar el agente
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nocturna.run-night.plist
+
+# Verificar que está cargado:
+launchctl print gui/$(id -u)/com.nocturna.run-night
+```
+
+**Nota**: `launchctl load` (comando obsoleto desde macOS 10.11) devuelve mensajes de diagnóstico inútiles si falla (no dice qué etiqueta duplicada, ni qué camino mal formado). `launchctl bootstrap` es el equivalente moderno y da mejores errores.
+
+#### Paso 4: Aviso de migración (si había un agente anterior cargado)
+
+Si en una ejecución anterior instalaste manualmente un plist con la misma etiqueta (`com.nocturna.run-night`), puede seguir cargado. Cargar el nuevo sobre una etiqueta ya presente no garantiza que se sustituya, y el riesgo real es quedarte creyendo que corre el envoltorio mientras corre el comando crudo del runbook viejo.
+
+**Comprueba siempre después de instalar**, en vez de fiarte del resultado de `bootstrap`: `launchctl print gui/$(id -u)/com.nocturna.run-night` debe mostrar en `ProgramArguments` la ruta de `run-night-scheduled.sh`. Si muestra un `bash -c` con `uv run nocturna run-night`, estás con el agente viejo.
+
+**Mitigación**: antes de instalar, descarga el viejo si existe:
+
+```bash
+# Comprobar si está cargado:
+launchctl print gui/$(id -u)/com.nocturna.run-night 2>/dev/null && echo "Agente cargado" || echo "No cargado"
+
+# Si está cargado, descargar:
+launchctl bootout gui/$(id -u)/com.nocturna.run-night
+
+# Luego seguir con bootstrap del nuevo plist
+```
+
+**Coexistencia de dos plist**: si instalaras el nuevo plist con otra etiqueta (por error o propósito), ambos se ejecutarían a las 00:05. Resultado: 2 × `nightly_tokens` autorizados en la misma ventana, datos de la noche son inútiles. No hagas eso.
+
+#### Paso 5: Interpretar códigos de salida
+
+El envoltorio propaga los códigos de `nocturna run-night` (0–8) sin modificar, más tres códigos propios de precondiciones:
+
+| Código | Significado | Qué hacer por la mañana |
+|---|---|---|
+| 0 | `RunStatus.COMPLETED` | Proceder con los pasos del runbook. Rellena la fila de la tabla. |
+| 1 | Una excepción escapó de `RunNight`; el `Run` se cierra como `FAILED`, con el traceback completo en el log JSON | Leer el `.err.log`, anotar la causa en `notas`. No relanzar (regla de noches fallidas). |
+| 7 | `RunStatus.PARTIAL`: la noche corrió pero no completó (típicamente el presupuesto se agotó antes del Editor, así que no se publicó nada) | Anotar `status=partial` y los tokens gastados. No relanzar. |
+| 8 | `RunStatus.KILLED` | **No es un error crítico.** Es el desenlace normal de un disparo fuera de ventana: `BudgetGuard` deniega con `outside_window` en el primer `authorize`, cero tokens gastados. Anotar `status=killed` y la causa. No relanzar. |
+| 75 | Precondiciones no listas: Docker no responde, `docker compose up` falló, o `nocturna-postgres` no llegó a `healthy` dentro de `NOCTURNA_WAIT_S` | Verificar Docker y PostgreSQL. **No hay gasto de tokens y el centinela se borra**, así que la noche sigue disponible. Ver el `.err.log`. |
+| 76 | Ya se lanzó una ejecución esta noche (centinela del fichero) | Normal si `launchd` se dispara dos veces por error (rarísimo). Borrar el centinela solo si estás seguro de que no hay un `run-night` en vuelo. Regla de noches fallidas: nunca relanzar en la misma ventana. |
+| 77 | Entorno o configuración inválidos: `uv` o `claude` no resolubles en `PATH`, o `NOCTURNA_WAIT_S`/`NOCTURNA_LOG_DIR` mal formadas | Verificar las variables si las definiste y que `uv` y `claude` se resuelven. Ocurre **antes** de crear el centinela y de tocar Docker: cero gasto, noche aún disponible. Arreglado el problema, esperar a mañana noche. |
+
+#### Paso 6: Comprender los logs
+
+El envoltorio genera dos ficheros por noche (fuera del repo):
+
+| Fichero | Contenido |
+|---|---|
+| `~/nocturna-logs/night-YYYYMMDD.out.log` | Salida estándar de `nocturna run-night` y línea final con timestamps. |
+| `~/nocturna-logs/night-YYYYMMDD.err.log` | Salida de error estándar. **Mezcla telemetría JSON del pipeline con `print` en texto libre de `cli.py` (aviso de doble presupuesto, denegación de `BudgetGuard`) e invocaciones a `docker compose`.** **No es JSON puro**. |
+
+Para extraer solo la telemetría JSON del `.err.log`:
+
+```bash
+grep '^{' ~/nocturna-logs/night-YYYYMMDD.err.log
+```
+
+No confundas esto con `.jsonl`. El `.err.log` contiene líneas soltas de JSON seguidas de líneas de texto plano.
+
+**Desinstalación** (al cerrar T60):
+
+```bash
+# Descargar el agente:
+launchctl bootout gui/$(id -u)/com.nocturna.run-night
+
+# Borrar el plist:
+rm ~/Library/LaunchAgents/com.nocturna.run-night.plist
+
+# Borrar la tarea de despertar (si la instalaste):
+sudo pmset repeat cancel
+
+# Verificar que no hay horarios programados:
+pmset -g sched
+
+# Borrar los logs (tras volcarlos a un fichero seguro):
+rm ~/nocturna-logs/night-*.{out,err}.log
+rm ~/nocturna-logs/.launched-*
+```
+
+#### Paso 7: Despertar automático de la máquina
+
+Para que `launchd` ejecute el trabajo a las 00:05, la máquina debe estar despierta. Sin configuración adicional, si tu portátil entra en suspensión, la tarea no se ejecuta.
+
+```bash
+# Programar despertar todos los días a las 00:00 (antes del lanzamiento a 00:05):
+sudo pmset repeat wakeorpoweron MTWRFSU 00:00:00
 
 # Verificar:
-launchctl list | grep nocturna
+pmset -g sched
 ```
+
+**Requisito crítico**: el portátil **debe estar enchufado**. `caffeinate -s` solo impide la suspensión mientras hay corriente alterna. Sin adaptador de energía, la máquina no se despierta a las 00:00 aunque lo pidas.
+
+---
+
+## El centinela: alcance y límites
+
+El fichero `~/.launched-YYYYMMDD` es una **guarda por convención, no una barrera estructural**. Su único propósito es proteger contra un segundo disparo de `launchd` del **mismo agente** la misma noche, si algo falló al intentar cargar o descargar.
+
+**Sí cubre**:
+- Un segundo disparo accidental de `launchd` (si el proceso de carga falla y lo reintentas).
+- `launchctl kickstart` (incluido con `-k`), que dispara el trabajo fuera de horario.
+- Máquina que despierta a las 00:03 (de baterías) y recupera el trabajo perdido a las 00:07 (enchufada): ambos ven la misma fecha, el segundo sale con código 76.
+
+**No cubre** (y son riesgos reales):
+- `uv run nocturna run-night` a mano en paralelo, o en serie después del lanzamiento automático. El backend solo imprime una advertencia por stderr (a las 00:05 del día siguiente nadie lo lee). 2 × `nightly_tokens` se autorizan.
+- Un segundo plist con otra etiqueta (por error, si alguien instaló dos). Ambas se ejecutan, es desastre.
+- Borrar el centinela por error al limpiar `~/nocturna-logs`. La noche siguiente cree que es un nuevo lanzamiento.
+- `NOCTURNA_LOG_DIR` o `HOME` distinto entre invocaciones (usuario distinto, o el mismo usuario en máquina distinta). Los centinelas no se ven.
+- `run-item` sobre la misma noche, que abre su propio camino de gasto (no es controlado por la guarda del centinela).
+
+La efectividad del centinela depende de una **regla social**: **durante T60 (catorce noches de calibración), el único modo de lanzar una noche es a través del envoltorio**, automático o invocado a mano con `bash backend/scripts/run-night-scheduled.sh`. Esa prescripción es lo que convierte la guarda por convención en efectiva. Ver **Regla de noches fallidas** arriba.
+
+---
+
+## Versión del CLI y ruptura de baseline
+
+Cada noche, el script `backend/scripts/night-report.sh` imprime dos líneas de versión:
+```
+CLI version: 2.1.274
+SDK version: 0.2.153
+```
+
+**Estos números deben anotarse cada día** en la tabla (`CLI` y `SDK`), porque el gasto de tokens **varía entre versiones sin que cambie nada nuestro**. Ejemplo histórico:
+
+- T40 (2026-09-16): CLI 2.1.274, Haiku 929 tokens/sesión
+- T41 (2026-09-17): **mismo CLI 2.1.274**, Haiku **1.163 tokens/sesión** (+234 tokens, +25,2%)
+- T43 (2026-09-17): **mismo CLI y SDK**, Haiku 929, 1.163, 1.240 en tres sesiones idénticas (variabilidad intra-versión)
+
+**Regla**: si **el CLI o el SDK cambian de versión entre dos noches** (incluso dentro de la misma semana), marca esa noche como **ruptura de baseline** en `notas`. Significa que esa noche **no es comparable** a las anteriores: el gasto es ruido de versión, no de comportamiento del pipeline.
+
+La constante `k` de calibración (Regla 1, cierre de T60) solo se calcula sobre noches con **versión de CLI y SDK estables**. Si una noche tiene versión distinta, se excluye del cálculo, igual que se excluye el `uso_interactivo = sí`.
+
+Detalle técnico: `claude-agent-sdk` se congela con `uv.lock` (no cambia entre noche y noche), pero el binario `claude` se actualiza solo (reenlace de `/opt/homebrew/bin/claude`). Entre una noche y la siguiente el autor puede no tocar nada de Nocturna, pero si Apple o Homebrew actualizó el CLI, la versión cambia. **Es información externa fuera de nuestro control**, pero es crítica para la calibración.
 
 ---
 
