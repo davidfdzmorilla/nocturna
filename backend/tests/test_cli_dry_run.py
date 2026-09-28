@@ -27,12 +27,16 @@ from datetime import UTC, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from nocturna import cli
 from nocturna.application.budget import BudgetPolicy
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.domain.entities import Item
+from nocturna.infrastructure.arxiv.client import ArxivClient
+from nocturna.infrastructure.arxiv.oai_client import ArxivOaiClient
+from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
 from nocturna.infrastructure.config import load_pipeline_config
 
 _NOW = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
@@ -80,6 +84,11 @@ editor = "opus"
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+ingest_via = "oai"
+oai_base_url = "https://oaipmh.arxiv.org/oai"
+oai_metadata_prefix = "arXivRaw"
+oai_lookback_days = 2
+max_requests_per_fetch = 6
 retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
@@ -422,3 +431,63 @@ def test_build_run_night_con_run_id_distintos_lanza_valueerror() -> None:
 
     with pytest.raises(ValueError, match="run-y"):
         cli._build_run_night(**kwargs)
+
+
+# --- T60.c: la fábrica elige la vía de ingesta ----------------------------
+
+
+def _config_con_via(tmp_path, via: str):
+    content = _BASE_TOML.format(weekday="monday").replace(
+        'ingest_via = "oai"', f'ingest_via = "{via}"'
+    )
+    path = tmp_path / "pipeline.toml"
+    path.write_text(content)
+    return load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    ("via", "esperado"),
+    [("oai", ArxivOaiClient), ("api", ArxivClient)],
+)
+def test_arxiv_source_from_config_elige_la_via_declarada(tmp_path, via, esperado):
+    """Las dos vías cumplen `ArxivSource` estructuralmente, así que el resto
+    del pipeline no se entera de cuál está activa."""
+    config = _config_con_via(tmp_path, via)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    limiter = RateLimiter(3.0)
+    policy = cli.arxiv_retry_policy_from_config(config)
+
+    source = cli.arxiv_source_from_config(
+        http, config=config, limiter=limiter, retry_policy=policy, now=lambda: datetime.now(UTC)
+    )
+
+    assert isinstance(source, esperado)
+    assert hasattr(source, "fetch_new")
+
+
+def test_arxiv_source_from_config_copia_los_limites_de_oai(tmp_path):
+    """Campo a campo y con argumentos nombrados, igual que
+    `budget_policy_from_config`: si mañana se añade una clave y nadie la
+    mapea, tiene que petar aquí y no descubrirse en producción."""
+    content = (
+        _BASE_TOML.format(weekday="monday")
+        .replace("oai_lookback_days = 2", "oai_lookback_days = 5")
+        .replace("max_requests_per_fetch = 6", "max_requests_per_fetch = 9")
+    )
+    path = tmp_path / "pipeline.toml"
+    path.write_text(content)
+    config = load_pipeline_config(path)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+
+    source = cli.arxiv_source_from_config(
+        http,
+        config=config,
+        limiter=RateLimiter(3.0),
+        retry_policy=cli.arxiv_retry_policy_from_config(config),
+        now=lambda: datetime.now(UTC),
+    )
+
+    assert source._lookback_days == 5
+    assert source._max_requests_per_fetch == 9
+    assert source._base_url == "https://oaipmh.arxiv.org/oai"
+    assert source._metadata_prefix == "arXivRaw"

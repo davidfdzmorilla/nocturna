@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DERIVADA de tres respuestas GetRecord reales (verb=GetRecord,
+     metadataPrefix=arXivRaw, identifiers oai:arXiv.org:2609.17526,
+     2609.17505 y 2609.17383, capturadas el 2026-09-25), envueltas en un
+     ListRecords porque es la forma que usa la ingesta. Los registros están
+     intactos; solo cambia el elemento que los contiene.
+
+     Son los MISMOS tres papers que feed_three_entries.xml (vía Atom), y esa
+     coincidencia es deliberada: tests/test_oai_atom_equivalence.py compara
+     campo a campo los Item que producen las dos vías, lo que congela que
+     T60.c no cambió el dominio ni la forma del external_id. -->
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-09-25T09:00:00Z</responseDate>
+    <request verb="ListRecords" metadataPrefix="arXivRaw">http://oaipmh.arxiv.org/oai</request>
+    <ListRecords>
+<record>
+                <header>
+        <identifier>oai:arXiv.org:2609.17526</identifier>
+        <datestamp>2026-09-16</datestamp>
+            <setSpec>physics:astro-ph:EP</setSpec>
+    </header>
+
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://arxiv.org/OAI/arXivRaw/ https://oaipmh.arxiv.org/OAI/arXivRaw.xsd">
+        <id>2609.17526</id>
+        <submitter>Evgenii Redkin</submitter>
+            <version version="v1">
+                <date>Tue, 15 Sep 2026 17:57:06 GMT</date>
+                <size>14473kb</size>
+            </version>
+        <title>Secular evolution of viscous and self-gravitating protoplanetary discs with magnetic winds</title>
+        <authors>Evgenii R. Redkin (1,2), Eduard I. Vorobyov (3,1), Paola Pinilla (4), Fabiola A. Gerosa (4), Konstanze Zwintz (3) ((1) Research Institute of Physics, Southern Federal University, Rostov-on-Don, Russia, (2) Faculty of Physics, Southern Federal University, Rostov-on-Don, Russia, (3) Institut fuer Astro- und Teilchenphysik, Universitaet Innsbruck, Innsbruck, Austria, (4) Mullard Space Science Laboratory, University College London, UK)</authors>
+        <categories>astro-ph.EP</categories>
+            <comments>Accepted for publication in MNRAS</comments>
+            <license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</license>
+            <abstract>Traditionally, the disc is believed to evolve under the influence of turbulent viscosity, although the importance of this mechanism has recently been questioned. Alternatively, magnetic disc wind or gravitational instability could be considered, but which of these three mechanisms contributes the most at a given evolutionary stage remains an open question. We present global numerical hydrodynamic simulations of protoplanetary disc evolution in the thin-disc limit on disc lifetime timescales, including all three mechanisms of mass and angular momentum transport. We calculate the gravitational, viscous, and magnetic torques to assess the contribution of each mechanism. We found that these transport mechanisms occupy distinct zones of influence in the disc depending on the stage of evolution: the dominance of disc self-gravity during the early phase is replaced by the prevalence of magnetic disc wind and viscosity, with the latter being especially relevant at the disc periphery. We show that a noticeable decrease in disc mass occurs only after the termination of the embedded phase. The suppression of disc viscous spreading is achieved only for the most intense wind; otherwise, the disc continues to grow in size till the end of simulations. The spiral structure contributes to the temporary retention of dust in the disc. However, this is insufficient to prevent the depletion of dust on long timescales. The results emphasize the importance of a comprehensive approach to long-term simulations of protoplanetary discs with no single mechanism of mass and angular momentum transport regarded as exclusive.</abstract>
+    </arXivRaw>
+
+            </metadata>
+        </record>
+<record>
+                <header>
+        <identifier>oai:arXiv.org:2609.17505</identifier>
+        <datestamp>2026-09-16</datestamp>
+            <setSpec>physics:astro-ph:EP</setSpec>
+            <setSpec>physics:astro-ph:SR</setSpec>
+    </header>
+
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://arxiv.org/OAI/arXivRaw/ https://oaipmh.arxiv.org/OAI/arXivRaw.xsd">
+        <id>2609.17505</id>
+        <submitter>Sairam Lalitha</submitter>
+            <version version="v1">
+                <date>Tue, 15 Sep 2026 17:44:39 GMT</date>
+                <size>4102kb</size>
+            </version>
+        <title>Stellar Ages of M Dwarf Hosts of Temperate Sub-Neptunes</title>
+        <authors>Lalitha Sairam and Nikku Madhusudhan</authors>
+        <categories>astro-ph.EP astro-ph.SR</categories>
+            <comments>12 pages, 9 Figures, accepted for publication in MNRAS</comments>
+            <license>http://creativecommons.org/licenses/by/4.0/</license>
+            <abstract>Measuring M dwarf ages is a central challenge in stellar astrophysics. These stars evolve so slowly that isochrone fitting gives little constraint, requiring alternative methods based on rotation, activity, and kinematics. Reliable ages help constrain the formation and evolution of planetary systems around M dwarfs, including the temperate sub-Neptunes now being characterised with the James Webb Space Telescope (JWST). We present an age analysis of six nearby M dwarf planet hosts (TOI-732, TOI-736, TOI-270, TOI-1468, TOI-1231, and K2-18) using lithium absorption at 6708 \AA, rotation periods, and Galactic kinematics. The Li I 6708 \AA feature is absent above 3$\sigma$ in all targets, implying substantial depletion and ages exceeding 200 Myr. Rotation periods of 39-145 days yield ages of 2.8-8.6 Gyr, calibrated against open cluster M dwarfs and including the intrinsic dispersion of the rotation-age relation. Kinematic ages span 0.8-13 Gyr with uncertainties of 4-6 Gyr. These are less precise per star but help identify outliers such as TOI-1231 (~13 Gyr) and K2-18 ( ~1-2 Gyr) and place the stars in Galactic context. Rotation yields age constraints 2-6 times tighter than kinematics where periods are measured, and comparable constraints where periods must be inferred from chromospheric activity. Combining multiple indicators enables more secure classification of these stars&#39; evolutionary states, providing reference points for future comparative studies.</abstract>
+    </arXivRaw>
+
+            </metadata>
+        </record>
+<record>
+                <header>
+        <identifier>oai:arXiv.org:2609.17383</identifier>
+        <datestamp>2026-09-16</datestamp>
+            <setSpec>physics:astro-ph:HE</setSpec>
+            <setSpec>physics:astro-ph:GA</setSpec>
+    </header>
+
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://arxiv.org/OAI/arXivRaw/ https://oaipmh.arxiv.org/OAI/arXivRaw.xsd">
+        <id>2609.17383</id>
+        <submitter>Eda Sonbas</submitter>
+            <version version="v1">
+                <date>Tue, 15 Sep 2026 16:25:10 GMT</date>
+                <size>9771kb</size>
+            </version>
+        <title>X-ray to Mid-IR Spectral Energy Distributions: A Catalog of X-ray Selected AGNs in the XMM-COSMOS Survey</title>
+        <authors>\c{S}eyda \c{S}en, Eda Sonbas, Ece Kilerci, Hasan Avdan, Kalvir S. Dhuga, Ersin G\&#34;{o}\u{g}\&#34;{u}\c{s}, W. N. Brandt</authors>
+        <categories>astro-ph.HE astro-ph.GA</categories>
+            <comments>accepted for publication in ApJS</comments>
+            <license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</license>
+            <abstract>We present a component-resolved analysis of the IR--X-ray connection in a sample of 104 spectroscopically confirmed Type~1 AGN. By combining \xmm, \swift/UVOT, and new high--angular resolution \jwst/NIRCam imaging for a subset of the sources, we constructed detailed SEDs in which the IR emission was explicitly decomposed into accretion-disk, torus, and polar-dust components. This approach enables us to isolate the intrinsic AGN-IR luminosities with minimal host-galaxy contamination, providing a clean assessment of the physical relationship between the accretion flow, circumnuclear dust, and the X-ray corona. By incorporating JWST/NIRCam observations into our SED decomposition, we significantly reduce host-galaxy contamination and isolate the nuclear infrared emission with greater fidelity, particularly at near-infrared (NIR) wavelengths. This improvement is most apparent at 1 $\mu\mathrm{m}$, where sources with JWST coverage exhibit a markedly steeper relation between $\nu$L$_{\nu}$ (2 keV) and the NIR luminosity than those without JWST data. This behavior is naturally explained by starlight dilution, whereby host-galaxy emission dominates lower-resolution measurements.</abstract>
+    </arXivRaw>
+
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>

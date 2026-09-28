@@ -19,7 +19,7 @@ El análisis corre contra la **suscripción Claude Max personal del autor**, no 
 - La autenticación es la del CLI de Claude Code instalado en la máquina (`claude` logueado). **Nunca** se configura `ANTHROPIC_API_KEY` salvo que se cambie explícitamente el proveedor (ver `LLMProvider`).
 - El único tráfico permitido hacia Claude es el que sale del Agent SDK o de `claude -p`. Prohibido llamar al endpoint `/v1/messages` desde código propio con credenciales de suscripción.
 - La web **no** hace peticiones a Claude. Ninguna función "pregúntale a Claude" para visitantes. Si algún día se quiere, va por API key y presupuesto aparte.
-- El pipeline comparte el límite semanal con el uso interactivo del autor. **Presupuesto: 30% de la semana**, configurable, con corte duro. Un bucle descontrolado a las 3 de la mañana deja al autor sin Claude durante días; los límites duros no son opcionales.
+- El pipeline comparte el límite semanal con el uso interactivo del autor. **Presupuesto: 30% de la semana** como intención, no medible (la suscripción es compartida, ADR 0011); el control efectivo es el tope absoluto `budget.nightly_tokens`, con corte duro. Un bucle descontrolado a las 3 de la mañana deja al autor sin Claude durante días; los límites duros no son opcionales.
 - Ventana de ejecución: **00:00–04:45** hora local. Kill incondicional a las 04:45 para no abrir una segunda sesión de cinco horas a las 05:00.
 
 ## Stack
@@ -105,7 +105,7 @@ Implementado en `application/budget.py` y aplicado por el orquestador antes de c
 - El Editor se llama como máximo **una vez por noche**.
 - `budget.weekly_reset_weekday` y `budget.weekly_reset_hour` se leen de configuración; el orquestador puede aplicar `budget.reset_day_multiplier` esa noche.
 
-Valores iniciales conservadores (se calibran con Settings > Usage las dos primeras semanas): `nightly_tokens = 300_000`, `max_items_per_night = 40`, `max_turns_per_agent = 3`.
+Valor fijo (sin calibración automática): `nightly_tokens = 300_000`. Si el autor observa presión en su presupuesto semanal en otros proyectos, baja este tope a mano. Otros valores iniciales conservadores: `max_items_per_night = 40`, `max_turns_per_agent = 3`.
 
 ## Proveedor LLM desacoplado
 
@@ -168,4 +168,4 @@ cd web && pnpm test && pnpm lint && pnpm build
 
 ## Estado actual
 
-**Fase 1 completa en código**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Humos reales ejecutados: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. **Único pendiente**: noche real ejecutada por el autor (T44), calibración de dos semanas (T60). Sin despliegue.
+**Fase 1 completa en código y verificada en producción**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Cuatro noches automáticas ejecutadas sin interrupciones (2026-09-25 a 2026-09-28) con launchd. Gasto: 76–84% del tope nocturno (300.000 tokens). Humos reales: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. T60 cerrada (redefinida como verificación de estabilidad, no calibración por % semanal). T61 desbloqueada con objetivo abierto: definir "descubrimiento" para fase 2. Sin despliegue.

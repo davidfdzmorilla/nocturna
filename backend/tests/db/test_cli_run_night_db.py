@@ -58,7 +58,12 @@ _OUTSIDE_WINDOW = datetime(2026, 1, 15, 12, 0, tzinfo=_MADRID)
 
 
 def _empty_feed_response() -> httpx.Response:
-    return httpx.Response(200, content=(FIXTURES_DIR / "feed_empty.xml").read_bytes())
+    # Respuesta OAI-PMH vacía, no Atom: desde T60.c la vía por defecto de
+    # `config/pipeline.toml` es `ingest_via = "oai"`, y estos tests ejercitan
+    # el flujo de la noche con la vía que corre en producción.
+    return httpx.Response(
+        200, content=(FIXTURES_DIR / "oai" / "list_records_empty.xml").read_bytes()
+    )
 
 
 def _patch_empty_arxiv_feed(monkeypatch: pytest.MonkeyPatch) -> None:

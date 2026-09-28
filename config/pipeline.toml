@@ -164,6 +164,41 @@ page_size = 100
 # max_results_per_fetch: tope de resultados acumulados en una ingesta; límite de
 # cortesía hacia arXiv y de memoria, no de gasto.
 max_results_per_fetch = 400
+# ingest_via: vía de ingesta (T60.c, ADR 0010). "oai" = OAI-PMH de
+# oaipmh.arxiv.org, el endpoint que arXiv documenta para cosecha programada;
+# "api" = /api/query, la vía original, degradada desde el 406 sistemático
+# del 2026-09-21 (cuatro episodios entre el 21 y el 25, todos más largos que
+# la ventana de reintento de T60.b, cero recuperaciones). La vía "api" NO se
+# borra: es el punto de comparación si OAI también fallara, y volver atrás
+# es cambiar este string.
+ingest_via = "oai"
+# URL nueva: export.arxiv.org/oai2 está obsoleta y redirige aquí (arXiv migró
+# el endpoint OAI a host propio en marzo de 2025). Origen distinto al de la
+# API, que es justo lo que hace que esta vía responda cuando la otra no.
+oai_base_url = "https://oaipmh.arxiv.org/oai"
+# arXivRaw y no arXiv ni oai_dc: es el único formato que trae el historial de
+# versiones con hora completa (RFC-2822). `arXiv` da <created> sin hora
+# (perderíamos el orden dentro de la noche) y `oai_dc` da las categorías en
+# prosa ("Astrophysics - Earth and Planetary Astrophysics"), que rompería
+# Item.categories.
+oai_metadata_prefix = "arXivRaw"
+# PROVISIONAL, sin datos de campo. Días de ventana sobre el datestamp de
+# ANUNCIO (el OAI-PMH de arXiv no filtra por fecha de envío). El suelo del
+# filtro fino NO es `since`: baja dos días respecto al inicio de la ventana,
+# porque un lote con datestamp D trae envíos desde D-2 18:00 UTC y usar
+# `since` descartaba la franja de la tarde anterior -- un 44 % de las
+# novedades, medido. Ver oai_client.py::fetch_new y ADR 0010.
+# Subir este valor NO trae más novedades: trae lotes más viejos que el suelo
+# descarta, y esos lotes sí gastan max_requests_per_fetch. De ahí la cota
+# `le=7` en ArxivConfig.
+oai_lookback_days = 2
+# PROVISIONAL. Techo duro de peticiones HTTP por ingesta -- INTENTADAS, no
+# servidas: la cuota se cobra antes de pedir. Peor caso: 6 x ~93 s = 9,3 min,
+# 3,4 % de limits.run_timeout_s, y PipelineConfig lo valida contra ese tope al
+# cargar. Los ~93 s por petición solo son una cota porque transport.py acota
+# la duración total con anyio.fail_after; httpx.Timeout no lo hace. Caso
+# típico medido: 2 peticiones, ~6 s.
+max_requests_per_fetch = 6
 # retry_max_attempts / retry_base_delay_s / retry_max_elapsed_s: reintento
 # ante fallos transitorios de arXiv. Motivado por el 406 observado el
 # 2026-09-21: cuerpo vacío, sin Retry-After, cabeceras de Fastly/Varnish (vía

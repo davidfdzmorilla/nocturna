@@ -5,7 +5,7 @@ cuerpo vacío, sin `Retry-After`, cabeceras de Fastly/Varnish -- lo rechaza el
 CDN delante de arXiv, no la aplicación, y es transitorio (la misma consulta
 devolvió 200 minutos después). `Retrier` no conoce HTTP ni arXiv: solo
 cuenta intentos, tiempo transcurrido y esperas entre intentos. La
-clasificación de qué es reintentable vive en `infrastructure/arxiv/client.py`,
+clasificación de qué es reintentable vive en `infrastructure/arxiv/transport.py`,
 que es quien sabe qué significa un 406 o un `TransportError` de arXiv.
 
 **Lo que `max_elapsed_s` NO acota** (revisión posterior a la primera

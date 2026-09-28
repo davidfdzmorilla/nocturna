@@ -37,67 +37,31 @@ import httpx
 
 from nocturna.domain.entities import Item
 from nocturna.domain.sources import SourceFetch
+from nocturna.infrastructure.arxiv import transport
 from nocturna.infrastructure.arxiv.atom import ArxivEntry, ArxivFeedError, parse_feed
 from nocturna.infrastructure.arxiv.mappers import entry_to_item
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
-from nocturna.infrastructure.arxiv.retry import Retrier, RetryPolicy
+from nocturna.infrastructure.arxiv.retry import RetryPolicy
 
 _logger = logging.getLogger(__name__)
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
-# Política de cortesía de arXiv (https://info.arxiv.org/help/api/tou.html):
-# al menos 3 s entre peticiones. Constante de módulo, no clave de
-# configuración: no es un parámetro que se deba poder relajar por error.
-MIN_REQUEST_INTERVAL_S = 3.0
-# Neutro a propósito: no expone correo ni URL del repositorio.
-USER_AGENT = "nocturna/0.1.0"
+# Nombre del servicio en los mensajes de error, para distinguir esta vía de
+# la de OAI-PMH (T60.c) en el log de la noche.
+_SERVICE = "la API de arXiv"
 
-# Cota de cortesía frente a una respuesta desproporcionada antes de parsear:
-# entrada externa y `xml.etree` es susceptible a expansión de entidades.
-_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-
-# Texto en castellano de `Retrier.stop_reason`, para el mensaje de
-# `ArxivUnavailable` que agota los reintentos: el identificador en
-# snake_case del atributo (usado tal cual en los campos JSON de
-# `arxiv.retry_exhausted`, donde sí es lo correcto) no encaja dentro de una
-# frase en castellano dirigida a quien lea el resumen de la noche.
-_STOP_REASON_TEXT = {
-    "max_attempts": "se agotaron los intentos",
-    "max_elapsed": "se agotó el tiempo límite de reintento",
-}
-
-
-class ArxivUnavailable(Exception):
-    """La API de arXiv no respondió, respondió con un código distinto de 200
-    que agotó los reintentos (si era reintentable) o que se rechazó sin
-    reintentar, o la respuesta supera el tope de tamaño admitido."""
-
-
-def _is_retryable_status(status_code: int) -> bool:
-    """406 (el caso observado el 2026-09-21, ver docstring del módulo), 429
-    y cualquier 5xx son transitorios; el resto de códigos que no son 200
-    (400, 404, 414... y también 1xx, 2xx distinto de 200 y 3xx, ver
-    `_status_error_message`) no lo son: una consulta mal formada, o una
-    respuesta que no es el 200 esperado, no se arregla esperando."""
-    return status_code in (406, 429) or status_code >= 500
+# Reexportados desde `transport.py`, donde viven desde T60.c porque las dos
+# vías de ingesta comparten clasificación, cortesía y mensajes. Se mantienen
+# accesibles con estos nombres para no romper quien los importa de aquí.
+MIN_REQUEST_INTERVAL_S = transport.MIN_REQUEST_INTERVAL_S
+USER_AGENT = transport.USER_AGENT
+_MAX_RESPONSE_BYTES = transport.MAX_RESPONSE_BYTES
+ArxivUnavailable = transport.ArxivUnavailable
+_is_retryable_status = transport.is_retryable_status
 
 
 def _status_error_message(status_code: int) -> str:
-    # Se distingue 4xx de 5xx en el mensaje porque no significan lo mismo
-    # para quien lea el log a las 3 de la mañana: un 5xx es un problema del
-    # lado de arXiv (nada que ajustar aquí); un 4xx (406, 429...) sugiere
-    # algo sobre *nuestra* petición -- cabecera, límite de cortesía, cambio
-    # de política -- aunque, como el 406 observado, también puede ser
-    # transitorio del lado de arXiv. El resto (1xx, 2xx distinto de 200,
-    # 3xx -- httpx no sigue redirecciones por defecto, y el mismo CDN que
-    # dio el 406 puede dar un 301) también se nombra explícitamente: sin
-    # este caso, caía en `parse_feed` y producía el diagnóstico engañoso
-    # ("XML inválido") que este módulo existe para evitar.
-    if status_code >= 500:
-        return f"la API de arXiv respondió {status_code} (error de servidor)"
-    if status_code >= 400:
-        return f"la API de arXiv respondió {status_code} (rechazo de la petición)"
-    return f"la API de arXiv respondió {status_code} (código inesperado, no es 200)"
+    return transport.status_error_message(status_code, service=_SERVICE)
 
 
 class ArxivClient:
@@ -196,122 +160,23 @@ class ArxivClient:
         return parsed.entries[0]
 
     async def _get(self, params: dict[str, str | int]) -> bytes:
-        """Ejecuta la petición dentro de la secuencia de un `Retrier` nuevo
-        (ver docstring del módulo: por qué no se reutiliza uno solo entre
-        llamadas), reintentando SIEMPRE la misma página (mismos `params`:
-        `start` y `max_results` no avanzan entre reintentos). `start` se
-        extrae de `params` solo para identificar en logs/mensajes qué
-        página falló -- `get_abstract` no pagina, así que vale `None` ahí.
-        `limiter.acquire()` se adquiere dentro de cada intento, no una sola
-        vez fuera del bucle: así cada reintento hereda también el
-        espaciado de cortesía de 3 s.
+        """Delegado en `transport.fetch_with_retry` desde T60.c: la
+        clasificación de códigos reintentables, el espaciado de cortesía y
+        el mensaje de agotamiento son comunes a las dos vías de ingesta, y
+        tenerlos duplicados aquí y en `oai_client.py` permitiría que
+        divergieran sin que nadie lo notase.
 
-        Cualquier código distinto de 200 se trata como `ArxivUnavailable`
-        *antes* de intentar parsear: un cuerpo que no es una respuesta 200
-        del feed no es XML válido del feed, y dejarlo caer hasta
-        `parse_feed` produce un diagnóstico engañoso ("XML inválido") que
-        oculta la causa real (observado en producción: un 406 se registró
-        como "no element found", cuando el problema era el propio código
-        de estado).
+        `start` se pasa como contexto solo para identificar en logs y
+        mensajes qué página falló; `get_abstract` no pagina, así que vale
+        `None` ahí.
         """
-        retrier = Retrier(self._retry_policy)
-        start = params.get("start")
-        last_message = ""
-        last_reason: str | None = None
-        last_status: int | None = None
-        last_exc: Exception | None = None
-
-        async for attempt in retrier.attempts():
-            if attempt > 1:
-                _logger.warning(
-                    "arxiv.retry",
-                    extra={
-                        "event": "arxiv.retry",
-                        "attempt": attempt,
-                        "max_attempts": retrier.policy.max_attempts,
-                        "reason": last_reason,
-                        "status_code": last_status,
-                        "delay_s": retrier.last_delay_s,
-                        "elapsed_s": retrier.elapsed_s,
-                    },
-                )
-
-            await self._limiter.acquire()
-            try:
-                response = await self._http.get(
-                    ARXIV_API_URL,
-                    params=params,
-                    headers={"User-Agent": USER_AGENT},
-                )
-            except httpx.TransportError as exc:
-                # Timeout, corte de conexión, RemoteProtocolError...:
-                # transitorio, reintentable.
-                last_message = f"fallo consultando la API de arXiv: {exc}"
-                last_reason = "transport_error"
-                last_status = None
-                last_exc = exc
-                continue
-            except httpx.HTTPError as exc:
-                # httpx.HTTPError no-transporte (por ejemplo, una URL
-                # inválida): no es transitorio, no se reintenta.
-                raise ArxivUnavailable(f"fallo consultando la API de arXiv: {exc}") from exc
-
-            if _is_retryable_status(response.status_code):
-                last_message = _status_error_message(response.status_code)
-                last_reason = f"http_{response.status_code}"
-                last_status = response.status_code
-                last_exc = ArxivUnavailable(last_message)
-                continue
-
-            if response.status_code != 200:
-                # No solo 4xx/5xx no reintentables: también 1xx, 2xx
-                # distinto de 200 y 3xx (httpx no sigue redirecciones por
-                # defecto) -- ver docstring del método y de
-                # `_status_error_message`.
-                raise ArxivUnavailable(_status_error_message(response.status_code))
-
-            content = response.content
-            if len(content) > _MAX_RESPONSE_BYTES:
-                raise ArxivUnavailable(
-                    f"respuesta de arXiv de {len(content)} bytes supera el tope de "
-                    f"{_MAX_RESPONSE_BYTES}"
-                )
-
-            if attempt > 1:
-                _logger.info(
-                    "arxiv.retry_recovered",
-                    extra={
-                        "event": "arxiv.retry_recovered",
-                        "attempts_made": retrier.attempts_made,
-                        "elapsed_s": retrier.elapsed_s,
-                    },
-                )
-            return content
-
-        # El `async for` solo termina sin haber hecho `return content` si
-        # `retrier.attempts()` se agotó (por `max_attempts` o por
-        # `max_elapsed_s`): todos los intentos fallaron de forma
-        # reintentable. `last_message`/`last_reason`/`last_status`/`last_exc`
-        # son los del último intento.
-        _logger.error(
-            "arxiv.retry_exhausted",
-            extra={
-                "event": "arxiv.retry_exhausted",
-                "attempt": retrier.attempts_made,
-                "max_attempts": retrier.policy.max_attempts,
-                "reason": last_reason,
-                "status_code": last_status,
-                "delay_s": retrier.last_delay_s,
-                "elapsed_s": retrier.elapsed_s,
-                "stop_reason": retrier.stop_reason,
-                "start": start,
-            },
+        return await transport.fetch_with_retry(
+            http=self._http,
+            url=ARXIV_API_URL,
+            params=params,
+            limiter=self._limiter,
+            retry_policy=self._retry_policy,
+            logger=_logger,
+            service=_SERVICE,
+            context=params.get("start"),
         )
-        attempts_made = retrier.attempts_made
-        intento_word = "intento" if attempts_made == 1 else "intentos"
-        stop_reason_text = _STOP_REASON_TEXT[retrier.stop_reason]
-        page_context = f" (start={start})" if start is not None else ""
-        raise ArxivUnavailable(
-            f"{last_message}, tras {attempts_made} {intento_word}{page_context} en "
-            f"{retrier.elapsed_s:.1f} s: {stop_reason_text}"
-        ) from last_exc

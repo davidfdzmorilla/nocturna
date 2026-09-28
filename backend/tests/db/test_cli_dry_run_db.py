@@ -54,6 +54,28 @@ class _Recorder:
         return self._response
 
 
+@pytest.fixture(autouse=True)
+def _via_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fija `ingest_via = "api"` para todo este fichero.
+
+    Sus fixtures HTTP son feeds Atom de `/api/query` y sus aserciones miran
+    `search_query`, así que cubren la **vía API**, que desde T60.c sigue
+    viva y seleccionable (`config/pipeline.toml`, ADR 0010) aunque ya no sea
+    la de por defecto. La vía OAI-PMH tiene sus propios tests en
+    `tests/test_oai_client.py`; mezclarlas aquí haría que estos tests
+    dejaran de comprobar lo que su nombre dice.
+    """
+    real = cli.load_pipeline_config
+
+    def _patched(*args: object, **kwargs: object):
+        config = real(*args, **kwargs)
+        arxiv = config.sources.arxiv.model_copy(update={"ingest_via": "api"})
+        sources = config.sources.model_copy(update={"arxiv": arxiv})
+        return config.model_copy(update={"sources": sources})
+
+    monkeypatch.setattr(cli, "load_pipeline_config", _patched)
+
+
 def _patch_arxiv_transport(
     monkeypatch: pytest.MonkeyPatch, handle: Callable[[httpx.Request], httpx.Response]
 ) -> None:
@@ -371,7 +393,15 @@ def test_claude_agent_sdk_no_se_importa_durante_dry_run(
     env["NOCTURNA_DATABASE_URL"] = test_database_url
 
     result = subprocess.run(
-        [sys.executable, "-c", _SUBPROCESS_SCRIPT, str(FIXTURES_DIR / "feed_three_entries.xml")],
+        [
+            sys.executable,
+            "-c",
+            _SUBPROCESS_SCRIPT,
+            # Fixture OAI, no Atom: el subproceso no hereda la fixture
+            # `_via_api` de este fichero, así que usa el `pipeline.toml`
+            # real, cuya vía por defecto es `oai` desde T60.c.
+            str(FIXTURES_DIR / "oai" / "list_records_ep.xml"),
+        ],
         capture_output=True,
         text=True,
         env=env,

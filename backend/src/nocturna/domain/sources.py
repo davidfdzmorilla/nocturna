@@ -39,9 +39,12 @@ class SourceFetch:
 class ArxivSource(Protocol):
     """Fuente de ingesta de novedades de arXiv.
 
-    Implementada estructuralmente por `infrastructure/arxiv/client.py`
-    (`ArxivClient`), que no hereda de este `Protocol`: es infraestructura
-    quien cumple el contrato del dominio, nunca al revés.
+    Tiene dos implementaciones estructurales, ninguna de las cuales hereda de
+    este `Protocol`: es infraestructura quien cumple el contrato del dominio,
+    nunca al revés. `ArxivClient` (`infrastructure/arxiv/client.py`) usa la
+    API de `/api/query`; `ArxivOaiClient` (`oai_client.py`) cosecha por
+    OAI-PMH y es la de por defecto desde T60.c. `sources.arxiv.ingest_via`
+    elige cuál corre, y el dominio no se entera de la diferencia.
     """
 
     async def fetch_new(
