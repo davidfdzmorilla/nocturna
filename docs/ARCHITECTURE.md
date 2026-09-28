@@ -255,3 +255,5 @@ Implementada en T51. Next.js 15.5.25 con App Router, React 19.1.0, Tailwind 4.3.
 ## Lo que no existe en fase 1 (a propósito)
 
 Contrastador, Analista, `ApiKeyProvider`, autenticación, panel de administración, despliegue.
+
+**Fase 2 (aprobada en T61, [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md))**: nada de lo que sigue existe todavía en el código. La fase 2 añade un `Finding.type` nuevo (`catalog_tension`): la tensión entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia en σ la calcula Python y se guarda en un campo estructurado de `Finding`; Claude solo redacta a partir de números ya calculados, sin herramientas (`tools=[]`), y los candidatos pasan por el Editor como los demás. La etapa tiene una reserva de presupuesto fija, análoga a la del Editor, sin subir `nightly_tokens`, y `max_items_per_night` baja a 30. El archivo se integra como adaptador de `infrastructure/`, sin servidor MCP, porque ningún agente lo consulta. Todo lo que sigue a T71, el experimento de viabilidad sin tokens, depende de su resultado. Esta sección se reescribe tarea a tarea conforme las piezas existan.
