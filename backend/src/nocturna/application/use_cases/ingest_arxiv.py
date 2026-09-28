@@ -1,7 +1,7 @@
 """Caso de uso: ingesta de novedades de arXiv.
 
 Recibe el puerto `ArxivSource` (interfaz de dominio, cumplida
-estructuralmente por `infrastructure/arxiv/client.py`) y `ItemRepository`
+estructuralmente por `infrastructure/arxiv/client.py` y `oai_client.py`) y `ItemRepository`
 por constructor. No importa nada de `infrastructure/` ni lee configuración
 global (`config/pipeline.toml`): `since`, `categories` y `max_results` los
 decide quien lo invoca (el CLI en T20-paso7, más adelante `RunNight`).

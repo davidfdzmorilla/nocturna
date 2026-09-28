@@ -56,6 +56,11 @@ editor = "opus"
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+ingest_via = "oai"
+oai_base_url = "https://oaipmh.arxiv.org/oai"
+oai_metadata_prefix = "arXivRaw"
+oai_lookback_days = 2
+max_requests_per_fetch = 6
 retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
@@ -531,3 +536,131 @@ def test_ruta_inexistente_propaga_file_not_found_error(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         load_pipeline_config(missing_path)
+
+
+# --- T60.c: vía de ingesta y límites de OAI-PMH ---------------------------
+
+
+@pytest.mark.parametrize(
+    "clave",
+    [
+        'ingest_via = "oai"\n',
+        'oai_base_url = "https://oaipmh.arxiv.org/oai"\n',
+        'oai_metadata_prefix = "arXivRaw"\n',
+        "oai_lookback_days = 2\n",
+        "max_requests_per_fetch = 6\n",
+    ],
+)
+def test_falta_una_clave_de_la_via_de_ingesta_y_la_carga_falla(tmp_path, clave):
+    """Sin defaults en código, igual que las claves vecinas: un TOML viejo
+    copiado de otra rama debe fallar al cargar, de día, no a las 00:05."""
+    content = BASE_TOML.replace(clave, "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("valor", ['"atom"', '"api2"', '""', '"OAI"'])
+def test_una_ingest_via_desconocida_falla(tmp_path, valor):
+    content = BASE_TOML.replace('ingest_via = "oai"', f"ingest_via = {valor}")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="ingest_via"):
+        load_pipeline_config(path)
+
+
+def test_ingest_via_api_sigue_siendo_valida(tmp_path):
+    """La vía original no se borra: es el punto de comparación si OAI diera
+    problemas, y volver atrás debe ser cambiar este string (ADR 0010)."""
+    content = BASE_TOML.replace('ingest_via = "oai"', 'ingest_via = "api"')
+    path = _write_toml(tmp_path, content)
+
+    assert load_pipeline_config(path).sources.arxiv.ingest_via == "api"
+
+
+@pytest.mark.parametrize(
+    ("clave", "valor"),
+    [
+        ("oai_lookback_days = 2", "oai_lookback_days = 0"),
+        ("oai_lookback_days = 2", "oai_lookback_days = -1"),
+        ("max_requests_per_fetch = 6", "max_requests_per_fetch = 0"),
+        ("max_requests_per_fetch = 6", "max_requests_per_fetch = -3"),
+        ('oai_base_url = "https://oaipmh.arxiv.org/oai"', 'oai_base_url = ""'),
+        ('oai_metadata_prefix = "arXivRaw"', 'oai_metadata_prefix = ""'),
+    ],
+)
+def test_limites_de_oai_fuera_de_rango_fallan(tmp_path, clave, valor):
+    content = BASE_TOML.replace(clave, valor)
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+# --- T60.c: validadores cruzados y de traducción a sets -------------------
+
+
+@pytest.mark.parametrize("valor", ["oai_lookback_days = 8", "oai_lookback_days = 30"])
+def test_oai_lookback_days_demasiado_grande_falla(tmp_path, valor):
+    """Subirlo no trae más novedades: trae lotes más viejos que el suelo del
+    filtro descarta, y esos lotes SÍ gastan `max_requests_per_fetch`. Con un
+    valor grande la ingesta trae ~0 ítems nuevos de forma determinista y sin
+    un solo error en el log, que es el peor modo de fallo posible."""
+    content = BASE_TOML.replace("oai_lookback_days = 2", valor)
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="oai_lookback_days"):
+        load_pipeline_config(path)
+
+
+def test_una_categoria_sin_set_de_oai_falla_al_cargar(tmp_path):
+    """Con `ingest_via = "oai"`, una errata en `categories` debe fallar de
+    día. Sin este validador cargaba sin queja y se descubría a las 00:05,
+    perdiendo la ingesta de la noche."""
+    content = BASE_TOML.replace(
+        'categories = ["astro-ph.EP", "astro-ph.GA"]', 'categories = ["math.AG"]'
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="math.AG"):
+        load_pipeline_config(path)
+
+
+def test_una_categoria_sin_set_no_estorba_con_la_via_api(tmp_path):
+    """El validador es específico de la vía OAI: la vía Atom consulta por
+    `cat:X`, sin sets, así que no debe rechazar categorías que OAI no sepa
+    traducir."""
+    content = BASE_TOML.replace(
+        'categories = ["astro-ph.EP", "astro-ph.GA"]', 'categories = ["math.AG"]'
+    ).replace('ingest_via = "oai"', 'ingest_via = "api"')
+    path = _write_toml(tmp_path, content)
+
+    assert load_pipeline_config(path).sources.arxiv.categories == ["math.AG"]
+
+
+def test_un_max_requests_per_fetch_desproporcionado_falla(tmp_path):
+    """La ingesta es la PRIMERA fase de la noche: el tiempo que se lleve sale
+    del que queda para leer. Con `1000` el peor caso son ~25 horas en una
+    ventana de 4 h 45, y hasta ahora cargaba sin una queja."""
+    content = BASE_TOML.replace("max_requests_per_fetch = 6", "max_requests_per_fetch = 1000")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="peor caso de la ingesta"):
+        load_pipeline_config(path)
+
+
+def test_el_peor_caso_de_la_ingesta_se_calcula_con_los_techos_reales(tmp_path):
+    """El validador duplica `_HTTP_TIMEOUT_CEILING_S` y `_COURTESY_CEILING_S`
+    como constantes para no crear un ciclo de imports. Si los valores reales
+    crecieran, el validador se volvería optimista sin que nada avisara: este
+    test los contrasta."""
+    from nocturna.infrastructure.arxiv.rate_limit import RateLimiter  # noqa: F401
+    from nocturna.infrastructure.arxiv.transport import (
+        MIN_REQUEST_INTERVAL_S,
+        REQUEST_DEADLINE_S,
+    )
+    from nocturna.infrastructure.config import _COURTESY_CEILING_S, _HTTP_TIMEOUT_CEILING_S
+
+    assert _COURTESY_CEILING_S >= MIN_REQUEST_INTERVAL_S
+    assert _HTTP_TIMEOUT_CEILING_S >= REQUEST_DEADLINE_S

@@ -1,7 +1,7 @@
 """Espaciado mínimo entre peticiones a la API de arXiv.
 
 arXiv exige al menos 3 s entre peticiones consecutivas (ver
-`client.py::MIN_REQUEST_INTERVAL_S`, la política vive ahí porque es una
+`transport.py::MIN_REQUEST_INTERVAL_S`, la política vive ahí porque es una
 constante del cliente, no un parámetro de este limitador genérico). El
 reloj (`monotonic`) y la función de espera (`sleep`) son inyectables para
 que los tests verifiquen el espaciado sin dormir de verdad.

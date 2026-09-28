@@ -182,6 +182,48 @@ class ArxivConfig(BaseModel):
     retry_max_attempts: int = Field(ge=1)
     retry_base_delay_s: float = Field(gt=0)
     retry_max_elapsed_s: float = Field(gt=0)
+    # ingest_via: qué vía de ingesta usa la noche (T60.c). "oai" es el
+    # OAI-PMH de `oaipmh.arxiv.org`, el endpoint que arXiv documenta para
+    # cosecha programada; "api" es `/api/query`, degradada desde el 406
+    # sistemático del 2026-09-21. La vía `api` no se borra: es el único
+    # punto de comparación si OAI diera problemas, y volver atrás es
+    # cambiar este string. Ver ADR 0010.
+    ingest_via: Literal["oai", "api"]
+    oai_base_url: str = Field(min_length=1)
+    oai_metadata_prefix: str = Field(min_length=1)
+    # Cota superior deliberada: subirlo no trae más novedades, solo lotes
+    # más viejos que el suelo del filtro descarta, y esos lotes SÍ consumen
+    # `max_requests_per_fetch`. Con un valor grande la ingesta gasta su
+    # presupuesto de peticiones en reediciones antiguas y trae ~0 ítems
+    # nuevos, de forma determinista y sin un solo error en el log.
+    oai_lookback_days: int = Field(ge=1, le=7)
+    # Techo duro de peticiones HTTP por ingesta: sin él, una cadena de
+    # `resumptionToken` inesperada podría encadenar peticiones sin límite a
+    # las 00:05, comiéndose la ventana de lectura.
+    max_requests_per_fetch: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _categories_traducibles_a_sets_oai(self) -> "ArxivConfig":
+        """Con `ingest_via = "oai"`, cada categoría debe tener un set de
+        OAI-PMH conocido.
+
+        El mapa vive en `infrastructure/arxiv/oai_client.py` y no se adivina
+        (`astro-ph.EP` es `physics:astro-ph:EP`, pero `math.AG` es
+        `math:math:AG` y `gr-qc` es `physics:gr-qc`, sin tercer nivel). Sin
+        esta validación, una errata en `categories` carga sin queja y se
+        descubre a las 00:05, perdiendo la ingesta de la noche. Mismo
+        criterio que el resto de `ArxivConfig`: fallar de día.
+        """
+        if self.ingest_via != "oai":
+            return self
+        from nocturna.infrastructure.arxiv.oai_client import UnknownArxivSet, category_to_set
+
+        for category in self.categories:
+            try:
+                category_to_set(category)
+            except UnknownArxivSet as exc:
+                raise ValueError(str(exc)) from exc
+        return self
 
     @model_validator(mode="after")
     def _page_size_within_max_results(self) -> "ArxivConfig":
@@ -217,6 +259,17 @@ class ArxivConfig(BaseModel):
         return self
 
 
+# Techos usados por `PipelineConfig._ingest_worst_case_fits_in_the_night`.
+# Se duplican aquí como constantes en vez de importarse de `cli.py` y
+# `transport.py` para no crear un ciclo de imports en la carga de
+# configuración; si allí cambian, este validador se vuelve optimista, así
+# que `tests/test_config.py` lo contrasta contra los valores reales.
+_HTTP_TIMEOUT_CEILING_S = 30.0
+_COURTESY_CEILING_S = 3.0
+# Fracción de `run_timeout_s` que la ingesta puede consumir en el peor caso.
+_INGEST_TIME_SHARE = 0.25
+
+
 class SourcesConfig(BaseModel):
     """Fuentes de ingesta configuradas."""
 
@@ -244,6 +297,39 @@ class PipelineConfig(BaseModel):
     models: ModelsConfig
     sources: SourcesConfig
     llm: LLMConfig
+
+    @model_validator(mode="after")
+    def _ingest_worst_case_fits_in_the_night(self) -> "PipelineConfig":
+        """El peor caso temporal de la ingesta debe caber holgadamente en
+        `limits.run_timeout_s`.
+
+        La ingesta es la PRIMERA fase de la noche, así que el tiempo que se
+        lleve sale directamente del que queda para leer. El peor caso de una
+        petición es `retry_max_elapsed_s` (que acota cuándo puede *iniciarse*
+        el último intento) más el timeout HTTP y la cortesía de arXiv; con
+        `max_requests_per_fetch` peticiones intentadas, eso es el techo de la
+        fase.
+
+        Existe por el mismo motivo que `_editor_reserve_covers_worst_case`:
+        quien suba `max_requests_per_fetch` «a ver si así cosechamos más»
+        debe ver la configuración fallar de día, no descubrir a las 04:45 que
+        la noche se fue entera en la ingesta.
+
+        El límite es el 25 % de `run_timeout_s`: por encima de eso la ingesta
+        deja de ser un preámbulo y empieza a competir con las lecturas.
+        """
+        arxiv = self.sources.arxiv
+        per_request_s = arxiv.retry_max_elapsed_s + _HTTP_TIMEOUT_CEILING_S + _COURTESY_CEILING_S
+        worst_case_s = arxiv.max_requests_per_fetch * per_request_s
+        budget_s = self.limits.run_timeout_s * _INGEST_TIME_SHARE
+        if worst_case_s > budget_s:
+            raise ValueError(
+                f"el peor caso de la ingesta ({worst_case_s:.0f} s = "
+                f"{arxiv.max_requests_per_fetch} peticiones x {per_request_s:.0f} s) supera el "
+                f"{_INGEST_TIME_SHARE:.0%} de limits.run_timeout_s ({budget_s:.0f} s); "
+                f"baja max_requests_per_fetch o retry_max_elapsed_s"
+            )
+        return self
 
     @model_validator(mode="after")
     def _editor_reserve_covers_worst_case(self) -> "PipelineConfig":

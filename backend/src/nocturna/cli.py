@@ -225,12 +225,14 @@ from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition
 from nocturna.domain.llm import AgentRole, LLMProvider
+from nocturna.domain.sources import ArxivSource
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
 from nocturna.infrastructure.arxiv.client import (
     MIN_REQUEST_INTERVAL_S,
     ArxivClient,
     ArxivUnavailable,
 )
+from nocturna.infrastructure.arxiv.oai_client import ArxivOaiClient
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
 from nocturna.infrastructure.arxiv.retry import RetryPolicy
 from nocturna.infrastructure.clock import SystemClock
@@ -461,6 +463,45 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def arxiv_source_from_config(
+    http: httpx.AsyncClient,
+    *,
+    config: PipelineConfig,
+    limiter: RateLimiter,
+    retry_policy: RetryPolicy,
+    now: Callable[[], datetime],
+) -> ArxivSource:
+    """Elige la vía de ingesta declarada en `pipeline.toml` (T60.c).
+
+    Campo a campo y con argumentos nombrados, igual que
+    `budget_policy_from_config` y `arxiv_retry_policy_from_config`: nada de
+    `**vars()`, para que una clave nueva que nadie mapee reviente aquí.
+
+    Las dos vías cumplen `domain.sources.ArxivSource` estructuralmente y
+    producen `Item` por el mismo `entry_to_item`, así que el resto del
+    pipeline no se entera de cuál está activa.
+    """
+    arxiv = config.sources.arxiv
+    if arxiv.ingest_via == "oai":
+        return ArxivOaiClient(
+            http,
+            limiter=limiter,
+            now=now,
+            retry_policy=retry_policy,
+            base_url=arxiv.oai_base_url,
+            metadata_prefix=arxiv.oai_metadata_prefix,
+            lookback_days=arxiv.oai_lookback_days,
+            max_requests_per_fetch=arxiv.max_requests_per_fetch,
+        )
+    return ArxivClient(
+        http,
+        limiter=limiter,
+        page_size=arxiv.page_size,
+        now=now,
+        retry_policy=retry_policy,
+    )
+
+
 async def _run_ingest(
     *,
     since: datetime,
@@ -472,12 +513,12 @@ async def _run_ingest(
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as http:
         limiter = RateLimiter(MIN_REQUEST_INTERVAL_S)
         retry_policy = arxiv_retry_policy_from_config(config)
-        client = ArxivClient(
+        client = arxiv_source_from_config(
             http,
+            config=config,
             limiter=limiter,
-            page_size=config.sources.arxiv.page_size,
-            now=lambda: datetime.now(UTC),
             retry_policy=retry_policy,
+            now=lambda: datetime.now(UTC),
         )
         engine = create_db_engine(settings)
         factory = create_session_factory(engine)
@@ -521,8 +562,13 @@ def _print_dry_run_report(result: IngestResult) -> None:
     )
     if result.truncated:
         print(
-            "AVISO: la ingesta se truncó por max_results_per_fetch; puede haber más ítems "
-            "sin ingerir esta noche."
+            # No se nombra una sola palanca: con la vía OAI el truncado
+            # también lo pone `max_requests_per_fetch` (el techo de
+            # peticiones), y decir solo `max_results_per_fetch` manda al
+            # autor a subir el valor equivocado a las 8 de la mañana.
+            "AVISO: la ingesta se truncó por max_results_per_fetch o por "
+            "max_requests_per_fetch; puede haber más ítems sin ingerir esta noche. "
+            "El evento arxiv.oai_harvest del log dice cuántas peticiones se hicieron."
         )
 
 

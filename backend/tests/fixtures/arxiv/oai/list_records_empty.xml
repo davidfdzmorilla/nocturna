@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DERIVADA, no capturada: arXiv devolvió `badArgument` al pedir un rango
+     antiguo (ver error_bad_argument.xml), no un `noRecordsMatch`. Este
+     fichero reproduce la respuesta que el protocolo OAI-PMH define para un
+     rango válido sin novedades, que es el caso que el parser debe tratar
+     como página vacía y NO como error. -->
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-09-25T08:31:00Z</responseDate>
+    <request>http://oaipmh.arxiv.org/oai</request>
+    <error code='noRecordsMatch'>The combination of the values of the from, until, set and metadataPrefix arguments results in an empty list.</error>
+</OAI-PMH>
