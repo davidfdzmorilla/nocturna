@@ -11,6 +11,11 @@ export const PAGE_SIZE = 20;
  * límite de saneado para que un entero absurdo nunca llegue a la API.
  * Seis dígitos (hasta 999.999) sobra de margen frente a cualquier
  * paginación real y cabe holgadamente en cualquier entero de backend.
+ *
+ * Coincide a propósito con `MAX_PAGE` de
+ * `backend/src/nocturna/api/routes/findings.py`: desde T70 la API rechaza
+ * con `422` cualquier `page` por encima de ese valor. Si se cambia uno hay
+ * que cambiar el otro.
  */
 const MAX_PAGE = 999_999;
 
@@ -23,10 +28,12 @@ const MAX_PAGE = 999_999;
  * convertir a número, en lugar de comprobar el resultado de `Number()`.
  * `Number()` acepta notación científica (`"1e21"` → `1e+21`, que la API
  * rechazaría con 422) y, sin acotar, un entero arbitrariamente grande
- * como `"100000000000000000000"` se reenvía tal cual a la API, que
- * responde 500 (`bigint out of range` en PostgreSQL) y vuelca una traza
- * completa en el log del servidor. La regex descarta ambos casos antes
- * de que el valor exista como número.
+ * como `"100000000000000000000"` se reenviaría tal cual a la API: antes
+ * de T70 respondía 500 (`bigint out of range` en PostgreSQL) y volcaba
+ * una traza completa en el log del servidor; ahora responde 422, como
+ * con cualquier otro parámetro inválido (`page=0`, `size=51`). La regex
+ * sigue siendo útil aunque la API ya no falle en 500: evita esa ida a la
+ * API y mantiene el "cae a página 1" antes de convertir el valor a número.
  */
 export function parsePageParam(raw: string | string[] | undefined): number {
   const value = Array.isArray(raw) ? raw[0] : raw;

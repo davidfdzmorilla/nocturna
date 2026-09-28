@@ -28,18 +28,26 @@ _FINDING_NOT_FOUND = "finding not found"
 _FindingsDep = Annotated[FindingRepository, Depends(get_findings_repository)]
 _ItemsDep = Annotated[ItemRepository, Depends(get_items_repository)]
 
+#: Coincide a propósito con `MAX_PAGE` de `web/src/lib/pagination.ts`. Su
+#: función es acotar `offset` lejos del límite de `bigint` de PostgreSQL
+#: (con `size <= 50`, `offset <= 49_999_900`), no limitar la paginación
+#: real; por encima, FastAPI responde `422` como con cualquier otro
+#: parámetro inválido (T70).
+MAX_PAGE = 999_999
+
 
 @router.get("/findings", response_model=FindingsPageResponse)
 def list_findings(
     findings: _FindingsDep,
-    page: Annotated[int, Query(ge=1)] = 1,
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     size: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> FindingsPageResponse:
     """Listado paginado, más recientes primero.
 
-    `page` fuera de rango no es un error: devuelve `200` con `items` vacío
-    y el `total` real, igual que cualquier otra página sin resultados. Un
-    listado no tiene un "final" que el cliente pueda equivocar.
+    Dentro de `1..MAX_PAGE`, una página sin resultados no es un error:
+    devuelve `200` con `items` vacío y el `total` real, igual que
+    cualquier otra página sin resultados. Por encima de `MAX_PAGE`,
+    `422`, igual que `page=0` o `size=51`.
     """
     offset = (page - 1) * size
     result = ListPublishedFindings(findings)(limit=size, offset=offset)

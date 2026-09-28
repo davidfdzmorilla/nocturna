@@ -215,7 +215,7 @@ Pydantic se usa solo en las fronteras: `infrastructure/config.py` para el TOML t
 Implementada en T50. FastAPI con tres endpoints expuestos:
 
 - `GET /health`: comprobación de vivacidad. Devuelve `200` si el servicio y PostgreSQL responden. `503` si la base de datos no está disponible. Contrato: `{"status": "ok"}`.
-- `GET /findings?page=<int>&size=<int>`: feed paginado de hallazgos publicados. `page` base 1 (por defecto 1), `size` (1–50, por defecto 20). Respuesta: `{"items": [<finding>, ...], "page": <int>, "size": <int>, "total": <int>}`. Página fuera de rango devuelve `200` con `items` vacía. `total` es `COUNT` exacto, económico a este volumen.
+- `GET /findings?page=<int>&size=<int>`: feed paginado de hallazgos publicados. `page` base 1 (1–999999, por defecto 1; tope `MAX_PAGE` en `api/routes/findings.py`, igual al de la web, T70), `size` (1–50, por defecto 20). Respuesta: `{"items": [<finding>, ...], "page": <int>, "size": <int>, "total": <int>}`. Página sin resultados dentro de 1–999999 devuelve `200` con `items` vacía; `page` por encima del tope, `0` o `size` fuera de 1–50 devuelven `422`. `total` es `COUNT` exacto, económico a este volumen.
 - `GET /findings/{id}`: detalle de un hallazgo publicado. Devuelve el objeto completo. `404` si no existe o no está publicado (indistinguible por diseño). El mismo `404` para «no existe» y «no publicado» impide enumerar candidatos que el Editor rechazó.
 
 **Contrato de hallazgo (`Finding`)**: `id`, `title`, `level_curious`, `level_amateur`, `level_technical`, `published_at`, `item_id` (enlace a arXiv). **Campos ocultos**: `confidence` (es una nota editorial interna, no una métrica científica; expuesta junto a texto generado por IA se malinterpretaría como "grado de certeza científica", contradictorio con el banner obligatorio), `run_id`, `type`. La privacidad de `confidence` protege la semántica del análisis automático.
@@ -250,7 +250,7 @@ Implementada en T51. Next.js 15.5.25 con App Router, React 19.1.0, Tailwind 4.3.
 
 **Problemas técnicos descubiertos y arreglados en T51**:
 - `generateMetadata` duplicaba peticiones porque `AbortSignal.timeout()` por llamada rompe la Request Memoization de Next. Arreglado envolviendo `fetchFinding` en `React.cache()`, verificado contando peticiones en el log de uvicorn (una sola por visita).
-- Backend no acota `page`, permitiendo `?page=100000000000000000000` → SQL error `NumericValueOutOfRange` → 500. Arreglado en la web con validación `parsePageParam` regex `/^\d{1,6}$/` y tope `MAX_PAGE = 999_999`, congelado con tests. El backend sigue siendo vulnerable (no es bug de T51, sino de T50).
+- Backend no acota `page`, permitiendo `?page=100000000000000000000` → SQL error `NumericValueOutOfRange` → 500. Arreglado en la web con validación `parsePageParam` regex `/^\d{1,6}$/` y tope `MAX_PAGE = 999_999`, congelado con tests (no es bug de T51, sino de T50). Saldado en el backend en T70: `page` acotado a `MAX_PAGE = 999_999` con `Query(le=...)`; por encima, `422`.
 
 ## Lo que no existe en fase 1 (a propósito)
 

@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.api.app import create_app
 from nocturna.api.deps import get_session
+from nocturna.api.routes import findings
 from nocturna.domain.entities import Finding, RunStatus
 from nocturna.infrastructure.config import Settings
 from nocturna.infrastructure.db.repositories import (
@@ -403,3 +404,87 @@ async def test_ningun_test_previo_de_este_fichero_dejo_filas_en_findings(
     """
     count = db_session.execute(sa.text("SELECT count(*) FROM findings")).scalar_one()
     assert count == 0
+
+
+# --- 10. Tope de `page` (T70): 422 en vez de 500 por desbordamiento de bigint -
+
+
+@pytest.fixture
+async def client_sin_relanzar_excepciones(
+    db_session: Session,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Mismo `get_session` que la fixture `client`, pero con
+    `raise_app_exceptions=False` (patrón de
+    `tests/test_api_error_handling.py::test_excepcion_no_gestionada_devuelve_500_generico_sin_filtrar_detalle`).
+
+    Sin este parámetro, `ASGITransport` relanza en el propio test cualquier
+    excepción no capturada por la aplicación en vez de dejar que el
+    manejador genérico la convierta en una respuesta -- lo contrario de lo
+    que recibiría un cliente real. Necesario aquí porque, con la mutación
+    descrita en el plan de T70 (quitar `le=MAX_PAGE`), un `page` como
+    `10**20` desborda el `bigint` de PostgreSQL en el cálculo de `offset` y
+    llega a levantar una excepción de base de datos: sin
+    `raise_app_exceptions=False` ese caso no produciría una respuesta `500`
+    observable, sino un fallo del propio test.
+
+    No reutiliza la fixture `client`: el plan pide no tocarla ni a ella ni
+    a los demás tests de este fichero.
+    """
+    app = create_app()
+
+    def _override_get_session() -> Generator[Session, None, None]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _override_get_session
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_listado_con_page_en_el_tope_devuelve_200_con_lista_vacia(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    """`page=999_999` (el propio `MAX_PAGE`) sigue siendo una página válida:
+    ningún hallazgo real llega tan lejos, pero la API responde `200` con
+    `items` vacío y el `total` real, igual que cualquier otra página fuera
+    del rango de datos existentes (test 4 más arriba)."""
+    _seed_published_finding(db_session, title="único hallazgo")
+
+    response = await client.get("/findings", params={"page": 999_999})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 1
+    assert body["page"] == 999_999
+
+
+@pytest.mark.parametrize("page_por_encima_del_tope", [1_000_000, 10**20])
+@pytest.mark.anyio
+async def test_listado_con_page_por_encima_del_tope_devuelve_422_no_500(
+    client_sin_relanzar_excepciones: httpx.AsyncClient,
+    page_por_encima_del_tope: int,
+) -> None:
+    """Por encima de `MAX_PAGE`, `422` como con cualquier otro parámetro
+    fuera de rango (`page=0`, `size=51`) -- nunca un `500` por desbordamiento
+    de `bigint` en PostgreSQL al calcular `offset = (page - 1) * size`."""
+    response = await client_sin_relanzar_excepciones.get(
+        "/findings", params={"page": page_por_encima_del_tope}
+    )
+
+    assert response.status_code == 422
+    assert response.status_code != 500
+    lowered = response.text.lower()
+    for leaked_term in ("traceback", "dataerror", "numericvalueoutofrange", "bigint"):
+        assert leaked_term not in lowered, (
+            f"el cuerpo del 422 filtró detalle de base de datos: '{leaked_term}'"
+        )
+
+
+def test_max_page_coincide_con_el_limite_documentado() -> None:
+    """Congela el valor de `MAX_PAGE` para que cambiarlo obligue a tocar un
+    test. No lee `web/src/lib/pagination.ts`: la coincidencia con la web se
+    mantiene por convención (comentario de la constante en ambos ficheros)."""
+    assert findings.MAX_PAGE == 999_999
