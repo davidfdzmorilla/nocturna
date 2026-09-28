@@ -8,7 +8,7 @@ Guía para Claude Code. Léela completa antes de tocar nada. Si algo no está de
 
 Tres piezas:
 
-1. **Ingesta**: servidores MCP propios que exponen fuentes públicas como herramientas.
+1. **Ingesta**: servidores MCP propios que exponen fuentes públicas como herramientas. Una fuente que solo consume código Python (no un agente) se integra como adaptador de `infrastructure/` sin servidor MCP (ADR 0012).
 2. **Análisis**: orquestador sobre el Claude Agent SDK (Python) con subagentes por rol. Corre una vez por noche, con presupuesto fijo.
 3. **Web**: Next.js sirviendo hallazgos desde PostgreSQL. Nunca llama a Claude.
 
@@ -168,4 +168,4 @@ cd web && pnpm test && pnpm lint && pnpm build
 
 ## Estado actual
 
-**Fase 1 completa en código y verificada en producción**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Cuatro noches automáticas ejecutadas sin interrupciones (2026-09-25 a 2026-09-28) con launchd. Gasto: 76–84% del tope nocturno (300.000 tokens). Humos reales: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. T60 cerrada (redefinida como verificación de estabilidad, no calibración por % semanal). T61 desbloqueada con objetivo abierto: definir "descubrimiento" para fase 2. Sin despliegue.
+**Fase 1 completa en código y verificada en producción**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Cuatro noches automáticas ejecutadas sin interrupciones (2026-09-25 a 2026-09-28) con launchd. Gasto: 76–84% del tope nocturno (300.000 tokens). Humos reales: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. T60 cerrada (ADR 0011). T61 cerrada: fase 2 aprobada (ADR 0012): tensión de un objeto frente al NASA Exoplanet Archive, calculada en Python; Claude solo redacta. Tareas T70–T78 en `docs/PLAN_TAREAS.md`. Sin despliegue.

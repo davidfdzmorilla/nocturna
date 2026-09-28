@@ -202,10 +202,80 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 - **Pendiente**: nada. El agente está instalado y ha disparado solo del 2026-09-25 al 2026-09-28.
 
 ### T61 · Retrospectiva y plan de fase 2
-- **Estado**: pending (desbloqueada)
+- **Estado**: done
 - **Depende de**: T60
 - **Alcance**: lista de deuda técnica real (no anticipada), decisiones abiertas que la fase 1 ha resuelto o hecho irrelevantes, y borrador de `PLAN_TAREAS.md` para fase 2. **Objetivo central de fase 2 sin resolver**: ¿qué cuenta como descubrimiento? (entrada de OPEN_DECISIONS.md). Fase 1 (paper_explained sobre abstracts) demuestra viabilidad del pipeline, no responde a la pregunta de fondo del proyecto: ver cómo Claude puede hacer descubrimientos.
 - **Hecho cuando**: el autor aprueba el plan de fase 2.
+- **Cierre (2026-09-28)**: el autor aprobó el plan de fase 2 (T70–T78) y ADR 0012. Triaje aplicado: `OPEN_DECISIONS.md` (100 entradas abiertas clasificadas: 16 resueltas, 8 sin objeto, 51 a fase 2, 25 de operación; 17 decisiones nuevas de fase 2) y `TECHNICAL_DEBT.md` (14 entradas a cerradas, 3 devueltas a abiertas, 4 marcadas bloqueantes si un agente recibe herramientas). Revisión: aprobada con correcciones, aplicadas.
+
+---
+
+## Fase 2
+
+Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md). Objetivo: publicar como `catalog_tension` las tensiones entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia la calcula Python; Claude solo redacta a partir de números ya calculados. Local, sin despliegue.
+
+**Condición de todo el bloque**: T72–T78 dependen del resultado de T71. Si T71 da cero tensiones reales, se replantea el enfoque antes de construir nada más, y T72–T78 siguen `blocked`.
+
+### T70 · `page` sin tope en `GET /findings`
+- **Estado**: pending
+- **Depende de**: T61
+- **Alcance**: acotar `page` en `backend/src/nocturna/api/routes/findings.py:35` (`Query(ge=1)` sin `le`). Hoy `?page=100000000000000000000` llega a PostgreSQL como `NumericValueOutOfRange` y devuelve un 500. Tope igual al `MAX_PAGE = 999_999` que ya aplica la web desde T51, para que las dos capas digan lo mismo. Salda la deuda "backend no acota `page`" de `TECHNICAL_DEBT.md`.
+- **Pregunta abierta en la tarea**: por encima del tope, ¿`422` (validación de FastAPI) o `200` con lista vacía? Opción reversible propuesta: `422`, porque es una entrada inválida y no una página sin resultados.
+- **Hecho cuando**: tests `-m db`: `page=999999` da 200 con lista vacía; `page=1000000` y `page=10**20` dan la respuesta acordada, sin 500 ni traza en el cuerpo. Quitar el `le=` hace fallar el test. Deuda marcada como saldada y § API de `ARCHITECTURE.md` actualizado.
+
+### T71 · Experimento de viabilidad del cruce con el NASA Exoplanet Archive (sin Claude, sin tokens)
+- **Estado**: pending
+- **Depende de**: T61
+- **Alcance**: script fuera del paquete, en `backend/scripts/` como `seed_demo.py`, solo Python y solo lectura sobre la BD. No importa `claude_agent_sdk` ni gasta tokens. Pasos: (1) toma los `Item` de astro-ph.EP que ya están en BD y su `Reading`; (2) empareja cada nombre de `Reading.objects` con el Exoplanet Archive vía TAP (sin autenticación), con espaciado de cortesía entre peticiones; (3) para los emparejados, recupera las soluciones publicadas de la tabla de soluciones múltiples; (4) obtiene el valor numérico del paper por las dos vías decididas en ADR 0012: **(a)** parser determinista sobre el abstract y sobre `Reading.claims`, y **(b)** la solución del propio paper si el archivo ya la tiene ingerida; (5) calcula la discrepancia en σ entre el valor del paper y las medidas previas. Informe con recuentos de: ítems EP, ítems con `objects`, nombres emparejados, planetas con ≥ 2 soluciones previas, casos con valor del paper disponible **por la vía (a), por la (b) y por ambas**, casos perdidos por falta de ese valor, y distribución de σ por tramos. El experimento no fija umbral: da los tramos para que decida el autor. Salida adicional: tensiones esperadas por noche, que fijan el valor inicial de la reserva de T75 (orden de 20–40k, provisional).
+- **Preguntas abiertas en la tarea**: (a) con las cifras de (a) y (b), qué vía se adopta; la vía (c) —que el Reader extraiga cantidades estructuradas, con cambio de prompt y gasto— solo se valora si (a) y (b) recuperan pocos casos, y requiere decisión expresa del autor. (b) Qué parámetros se contrastan. (c) Si hay algún umbral para seguir, además de "cero".
+- **Hecho cuando**: script versionado; un test en subproceso comprueba que `claude_agent_sdk` no entra en `sys.modules`; nota de cierre de T71 en este fichero con las cifras; el autor decide seguir o replantear y qué vía de valor del paper se adopta. Si las tensiones reales son cero, se replantea y T72–T78 no se desbloquean.
+
+### T72 · Extensión del dominio: `FindingType.CATALOG_TENSION`, datos del contraste y rol nuevo
+- **Estado**: pending
+- **Depende de**: T71 (resultado distinto de cero)
+- **Alcance**: `FindingType.CATALOG_TENSION` (`"catalog_tension"`) ligado a `item_id`, sin entidad nueva (ADR 0012). **Campo estructurado nuevo en `Finding`** con los números del contraste y el enlace al archivo de cada medida (decidido en ADR 0012: los números salen del cálculo de Python, no del texto de Claude); su forma exacta se diseña en esta tarea. Valor nuevo en `AgentRole` para el redactor de T76. Migración Alembic de los enums de PostgreSQL (`finding_type` y el del rol de `agent_calls`) y de la columna nueva, con downgrade. Hoy un test congela `{"paper_explained"}`; pasa a congelar los dos valores.
+- **Pregunta abierta en la tarea**: qué `Item.status` tiene un ítem con un `paper_explained` descartado y un `catalog_tension` publicado, o al revés.
+- **Hecho cuando**: `alembic upgrade head` y `downgrade -1` limpios; tests de dominio, invariantes y mappers en verde; cero imports de IO en `domain/`; § "Modelo de dominio" de `CLAUDE.md` actualizado con el tipo y el campo nuevos.
+
+### T73 · Cálculo determinista de la tensión
+- **Estado**: pending
+- **Depende de**: T71 (resultado distinto de cero)
+- **Alcance**: función pura en `domain/` que recibe el valor del paper con su incertidumbre y las medidas previas del catálogo, y devuelve la discrepancia en σ junto con los números usados. Puerto `ExoplanetCatalog` (`Protocol`) en `domain/`, que implementa T74. Caso de uso en `application/`: toma `Reading.objects`, obtiene el valor del paper por la vía que decidió T71, consulta el puerto y devuelve las tensiones calculadas, sin LLM. Sin discrepancia calculada no hay candidato (P6).
+- **Preguntas abiertas en la tarea**: fórmula (errores asimétricos; comparar con cada medida previa, con la media ponderada o con el rango); umbral de σ; parámetros contrastados; sobre qué ítems se cruza (todos los leídos de astro-ph.EP o solo los de `interest_score >= 4`).
+- **Hecho cuando**: tests con casos calculados a mano: sin tensión, tensión clara, errores asimétricos, catálogo sin medidas previas (nunca publicable) y objeto no emparejado. Caso de uso probado con un catálogo falso. Test de import: el cruce no importa `claude_agent_sdk`.
+
+### T74 · Adaptador del NASA Exoplanet Archive
+- **Estado**: pending
+- **Depende de**: T73
+- **Alcance**: `infrastructure/exoplanet_archive/`: cliente TAP sobre `httpx` (ya es dependencia), con timeout total por petición, espaciado de cortesía y techo de peticiones por noche. Implementa `ExoplanetCatalog` y construye el enlace estable al registro del archivo para cada medida. Sección nueva `[sources.exoplanet_archive]` en `pipeline.toml`, sin valores por defecto en código. El peor caso de tiempo del cruce entra en el validador que ya contrasta la ingesta con `limits.run_timeout_s`. **Sin servidor MCP**: ningún agente lo consume (P3, `tools=[]`); ver ADR 0012 § MCP.
+- **Hecho cuando**: tests con respuestas TAP grabadas, cero red y cero esperas reales; validadores de configuración con test; `--dry-run` muestra las tensiones calculadas sin llamar a ningún agente.
+
+### T75 · Reserva del redactor en `budget.py` y `max_items_per_night = 30`
+- **Estado**: pending
+- **Depende de**: T72, T71 (valor inicial de la reserva)
+- **Alcance**: reserva fija nueva, análoga a la del Editor y anidada: Reader y Popularizer ven `nightly_tokens − editor_reserve − reserva_redactor`; el redactor ve `nightly_tokens − editor_reserve`; el Editor ve `nightly_tokens`. Tope de llamadas del redactor por noche (reintento incluido) y estimación por llamada en `pipeline.toml`. Validadores al cargar, que fallan cerrado: `tope × estimación ≤ reserva_redactor` y `editor_reserve + reserva_redactor < nightly_tokens`. El validador de la reserva del Editor cuenta también los candidatos `catalog_tension` (pasan por el Editor, ADR 0012). `max_items_per_night` pasa de 40 a 30. `nightly_tokens` se queda en 300.000. `--dry-run` muestra las tres porciones.
+- **Hecho cuando**: tests que demuestran que la reserva del Editor sigue intacta aunque el redactor agote la suya, que la del redactor sigue intacta aunque Reader y Popularizer agoten su pool, que el redactor se deniega al alcanzar su tope de llamadas y que se rechaza la configuración incoherente. Verificación por mutantes. **Dos pasadas de revisión con `budget-guard-review`.** § Control de gasto de `ARCHITECTURE.md` y de `CLAUDE.md` actualizados.
+
+### T76 · Rol redactor de tensiones e integración en `run-night`
+- **Estado**: pending
+- **Depende de**: T74, T75
+- **Alcance**: rol nuevo, no una extensión del Popularizer: necesita su propia reserva (T75), su propio tope de llamadas, su modelo en `[models]`, su `prompt_version` y su propio valor de `AgentCall.agent`. Prompt versionado en `prompts/`, esquema Pydantic y caso de uso que llama a través de `AgentRunner`, el único punto de gasto. Una conversación nueva por tensión; `tools=[]`, `setting_sources=[]`, `skills=[]` (ADR 0006). La entrada es solo lo ya calculado: objeto, parámetro, valor del paper, medidas del catálogo, σ, enlaces y título del ítem. Salida inválida → un reintento → `failed` (regla de `CLAUDE.md`). **Los `catalog_tension` pasan por el Editor** junto con los `paper_explained` (ADR 0012): el Editor sigue llamándose una sola vez por noche y asigna `confidence` a todos. Orden de la noche: Reader → cruce determinista (sin tokens) → Popularizer → redactor, solo si hay tensión calculada → Editor.
+- **Preguntas abiertas en la tarea**: (a) modelo por defecto del rol; (b) ¿tres niveles de texto o uno?; (c) nombre definitivo del rol; (d) cómo presenta el Editor los dos tipos de candidato en su única llamada (cambio de prompt, `editor-v2`).
+- **Hecho cuando**: tests con `FakeLLMProvider`: sin tensión, cero `AgentCall` del rol; con tensión, una; JSON inválido → reintento → `failed`; presupuesto del rol agotado → ninguna llamada y el resto de la noche sigue; el Editor recibe los dos tipos en una sola llamada. `test_llm_call_sites.py` sigue con una sola entrada. Humo `-m manual` con una tensión real. **Dos pasadas de revisión, ambas con `budget-guard-review`.** Tabla "Agentes" de `CLAUDE.md` actualizada.
+
+### T77 · API y web: tipo visible, filtro por tipo y etiqueta "candidato"
+- **Estado**: pending
+- **Depende de**: T72, T70
+- **Alcance**: API: `type` en el resumen del listado; `GET /findings?type=` validado contra el enum; los números y enlaces del campo estructurado de T72 en el detalle. Web: mismo feed, etiqueta visible del tipo en feed y detalle, filtro por tipo en la URL sin estado de cliente (como `?nivel=`), etiqueta "candidato" visible en `catalog_tension`, números y enlace al archivo junto a cada afirmación, todo en castellano. Banner intacto; cero llamadas a Claude.
+- **Pregunta abierta en la tarea**: textos exactos de las etiquetas.
+- **Hecho cuando**: tests de API `-m db` (filtro, tipo inválido, `404` que sigue siendo indistinguible); tests, lint y build de la web en verde con la API parada; guarda `no-claude-in-web` en verde; Lighthouse de accesibilidad ≥ 90.
+
+### T78 · Cierre de fase 2
+- **Estado**: pending
+- **Depende de**: T76, T77
+- **Alcance**: dos semanas de noches automáticas con el cruce activo y al menos 10 `catalog_tension` publicados. Registro por noche: tensiones calculadas, llamadas y tokens del redactor, publicados. Al final, el autor valora cuántos son genuinamente interesantes y decide si sigue esta vía o cambia de enfoque.
+- **Pregunta abierta en la tarea**: si pasan las dos semanas con menos de 10 publicados, ¿se prolonga o se cierra con lo que haya?
+- **Hecho cuando**: se cumplen las dos condiciones y la decisión del autor queda registrada en un ADR.
 
 ---
 
