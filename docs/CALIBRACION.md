@@ -1,6 +1,12 @@
 # Calibración — Nocturna Fase 1
 
+**Aviso (2026-09-28, ADR 0011)**: El protocolo de Settings > Usage y cálculo de Δ% queda **retirado**. La suscripción Claude Max es compartida entre múltiples proyectos, así que el % semanal observado es inmedible. T60 cierra con verificación de estabilidad nocturna: cuatro noches automáticas ejecutadas sin interrupciones, gasto 76–84% del tope fijo (300.000 tokens), sin kills por `hard_stop`. Nuevo criterio: si el autor observa presión en su semanal en otros proyectos, baja `nightly_tokens` a mano. Los pasos 3 (Settings > Usage), el protocolo posterior y las decisiones de cierre Regla 1 (constante `k`) quedan inoperantes. Documentado solo con propósito histórico.
+
+---
+
 Runbook para el autor durante catorce noches de ejecución real (T60). Cada mañana, tras la ejecución de `run-night`, se sigue el procedimiento de cinco pasos y se registra una fila en la tabla de abajo. **Si no es utilizable a las siete, medio dormido, la tarea falla.**
+
+**Nota 2026-09-28**: Los pasos 3 y 5 relativos a Settings > Usage quedan retirados (ver aviso arriba).
 
 ---
 
@@ -36,6 +42,14 @@ grep '"event": "arxiv.retry_recovered"' "$LOG" | head -1 | jq .
 **Anotar en la tabla**: en la columna `notas`, con el formato `ingesta: N recuperados, M agotados`, y solo cuando alguno sea distinto de cero. **No se añaden columnas nuevas**: catorce noches con dos columnas casi siempre a cero no compensan ensanchar una tabla que ya tiene veintisiete. Si tras las primeras noches el 406 resulta frecuente, se reconsidera.
 
 **Interpretación**: Un valor > 0 en `retry_exhausted` significa que la ingesta sufrió un fallo que no se pudo recuperar, así que `run.status` podría ser `partial` por motivo `ingest_error`. Ver nota al final de este paso.
+
+#### La vía de ingesta cambió el 2026-09-25 (T60.c)
+
+Desde esa fecha la ingesta va por **OAI-PMH** (`ingest_via = "oai"`), no por la API de `/api/query`, porque esta última devolvía 406 de forma sistemática. Implicaciones para la tabla:
+
+- **Las noches del 21 al 25 no son limpias**: sin ingesta (21, 22, 24) o con la cola casi vacía (25). La del 25 además publicó con papers acumulados, no con novedades del día.
+- La noche del 25 al 26 es la primera con la vía nueva. Anota `via=oai` en `notas` mientras dure T60, por si hay que separar series.
+- Si vuelves a ver `retry_exhausted` **con la vía OAI**, es un problema distinto al de la API: mira el `reason` del evento y consulta ADR 0010 antes de tocar los valores de reintento.
 
 #### Qué hacer si ves `retry_exhausted` por la mañana
 
@@ -79,25 +93,14 @@ Una vez levantadas:
 - Identifica el peor hallazgo publicado de la noche (el que menos te gusta de los aprobados) y etiquétalo con **una sola palabra** del vocabulario cerrado: `impreciso` (falta contexto o contiene error de hecho), `trivial` (no tiene novedad), `ilegible` (exposición confusa o estructura rota), `alucinado` (afirma algo que no está en el paper). Anota en columna `etiqueta_peor`. Si no hay hallazgos publicados, deja vacío.
   - Estos son ~14 juicios binarios: cuatro minutos.
 
-### Paso 3: Leer Settings > Usage (solo el autor puede ver esto)
-- Abre Settings > Usage en el panel de Claude (requiere autenticación personal del autor).
-- **Dos lecturas por noche, no una por semana**: el número absoluto mezcla su uso interactivo con el del pipeline. Lo único atribuible a la noche es el delta.
-  - **`A` (antes de lanzar, si es posible)**: captura el contador exacto de tokens de `Usage` cinco minutos antes de ejecutar `run-night` (ej. 2026-09-19 23:55).
-  - **`B` (a la mañana siguiente)**: el contador de mañana (ej. 2026-09-20 09:00). Esto es **obligatorio**.
-- **Protocolo de `A`**:
-  - Si lanzas `run-night` a mano a medianoche, captura `A` unos minutos antes (es la lectura difícil).
-  - Si usas `cron` o `launchd`, `A` es imposible captar en el momento exacto: toma la **`B` de la noche anterior** — válido solo si `uso_interactivo = no` en esa noche anterior.
-  - Si falta `A` y no tienes `B` de ayer: escribe `—` y **no** reconstruyas de memoria. Una serie con muchas faltas de `A` es inútil.
-- **Columna `uso_interactivo`**: si usaste Claude de forma interactiva entre `A` y `B` (en los ejemplos: noches de 2026-09-19 a 2026-09-20), escribe `sí`. Si no: escribe `no`.
-  - Impacto: si `uso_interactivo = sí`, esa noche se **excluye del cálculo de la constante de conversión tokens→% semanal** (porque el delta es ruido de tu uso, no del pipeline). Se usa solo para dar contexto y saber que el número semanal no es limpio.
-- **Columna `Δ%`**: `B − A` (delta de Settings), convertido a porcentaje del presupuesto semanal. Fórmula: `delta_tokens / presupuesto_semanal × 100%`.
-- **Día de reinicio**: cuando el contador caiga a ~0 (reinicio semanal), **anota la fecha exacta y hora** (ej. `2026-09-21 00:15 UTC`). Eso responde por observación la decisión abierta de T02 sobre `weekly_reset_weekday`.
+### Paso 3: [RETIRADO] Leer Settings > Usage
+**Este paso quedó retirado en ADR 0011** (2026-09-28). La suscripción es compartida, así que el % semanal observado es inmedible. Las columnas de Settings (`A`, `B`, `Δ%`, `uso_interactivo`) en las filas de T60 se rellenan con `—`.
 
 ### Paso 4: Pegar una fila en la tabla
 Rellena la plantilla de fila (ver abajo), con la fecha del día, los tokens de `run.status` desde Q1, `interest_score` desde Q4, descartes desde Q5, tus juicios de calidad. Pega la fila al final de la tabla "Noches reales (T60)", arriba de las notas.
 
-### Paso 5: Actualizar los comandos de referencia del final
-Si hoy cambió `config/pipeline.toml` o las versiones de CLI/SDK: aumenta `config_version` en la sección "Marcadores de baseline" y documenta en qué cambió. Los humos siempre registran CLI y SDK; anota si alguno se salió del rango nominal 2.1.274 / 0.2.153.
+### Paso 5: Actualizar los marcadores de baseline
+Si hoy cambió `config/pipeline.toml` o las versiones de CLI/SDK: aumenta `config_version` en la sección "Marcadores de baseline" y documenta en qué cambió. Los humos siempre registran CLI y SDK; anota si alguno se salió del rango nominal 2.1.274 / 0.2.153. **Nota 2026-09-28**: paso 3 sobre Settings > Usage y cálculo de Δ% queda retirado (ADR 0011).
 
 ### Nota importante: cómo interpretar `run.status = partial`
 
@@ -169,9 +172,13 @@ Sin esa claridad, una serie de catorce noches que incluya varios "partial" se ma
 
 | Fecha | Lanzamiento | CLI | SDK | Prompt | Config | Status | Items | Read | Failed | Candidatos | Tasa% | Pub | Tokens | %Presup | %Pool | %Reserva | Reintentos | Elapsed | A | B | Δ% | Interactivo | Calidad | Rescatables | Peor | Notas |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | killed | 0/0 | 0 | 0 | 0 | —% | 0 | 0 | 0% | —% | —% | 0/0/0 | 0,1 | — | — | — | no | —/— | —/— | — | Ejecución a las 11:44 (fuera de ventana 00:00–04:45). `hard_stop` denegó con `outside_window`; Run cerrado como `KILLED` sin gasto de tokens ni procesamiento. Validación de guarda funcionó exactamente como se diseñó. Ingesta corrió pero falló: `ingest=error:ArxivFeedError fetched=0`. |
-| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | killed | 34/0 | 0 | 0 | 0 | —% | 0 | 0 | 0% | —% | —% | 0/0/0 | 1,2 | — | — | — | no | —/— | —/— | — | Ejecución a las 12:30:59 (fuera de ventana). Ingesta completó exitosamente: 34 ítems nuevos traídos de arXiv. Sin embargo, `hard_stop` externo denegó al primer `authorize` de la fase Reader, por `outside_window`. Run cerrado como `KILLED` sin procesamiento LLM ni gasto de tokens. Los 34 ítems en estado `new` quedaron en base de datos, reutilizables en la siguiente noche (que es precisamente la de las 12:34). |
-| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | completed | 0/34 | 39 | 1 | 14 | 35,9% | 10 | 246.608 | 82,2% | 97,8% | 19,8% | 1/1/0 | 613,8 | — | — | — | no | — | — | — | Ejecución a las 12:34 (fuera de ventana nominal: 00:00–04:45, con `hard_stop` ampliado a 23:59 para validación del circuito). Ciclo completo: ingesta → Reader → Popularizer → Editor → persistencia. `items_fetched = 0` porque los 34 ítems venían del Run anterior (12:30:59); no hay nuevos de arXiv. Ejecución real: 41 llamadas Reader (153.753 tokens, media 3.750), 15 llamadas Popularizer (80.965 tokens, media 5.398, 7,1% reintento), 1 Editor (11.890 tokens). Q7: 0 candidatos huérfanos. Los 4 no publicados son descartes del Editor, no huérfanos. **Juicios de calidad sin emitir**: esta noche se registró antes de que existiera el runbook, así que `calidad_pub`, `rescatables` y `etiqueta_peor` quedan vacíos. Pool al 97,8% — margen mínimo. |
+| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | killed | 0/0 | 0 | 0 | 0 | —% | 0 | 0 | 0% | —% | —% | 0/0/0 | 0,1 | — | — | — | — | —/— | —/— | — | Ejecución a las 11:44 (fuera de ventana 00:00–04:45). `hard_stop` denegó con `outside_window`; Run cerrado como `KILLED` sin gasto de tokens ni procesamiento. Validación de guarda funcionó exactamente como se diseñó. Ingesta corrió pero falló: `ingest=error:ArxivFeedError fetched=0`. |
+| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | killed | 34/0 | 0 | 0 | 0 | —% | 0 | 0 | 0% | —% | —% | 0/0/0 | 1,2 | — | — | — | — | —/— | —/— | — | Ejecución a las 12:30:59 (fuera de ventana). Ingesta completó exitosamente: 34 ítems nuevos traídos de arXiv. Sin embargo, `hard_stop` externo denegó al primer `authorize` de la fase Reader, por `outside_window`. Run cerrado como `KILLED` sin procesamiento LLM ni gasto de tokens. Los 34 ítems en estado `new` quedaron en base de datos, reutilizables en la siguiente noche (que es precisamente la de las 12:34). |
+| 2026-09-18 | manual | 2.1.274 | 0.2.153 | r2/p2/e1 | cfg-2026-09-18 | completed | 0/34 | 39 | 1 | 14 | 35,9% | 10 | 246.608 | 82,2% | 97,8% | 19,8% | 1/1/0 | 613,8 | — | — | — | — | — | — | — | Ejecución a las 12:34 (fuera de ventana nominal: 00:00–04:45, con `hard_stop` ampliado a 23:59 para validación del circuito). Ciclo completo: ingesta → Reader → Popularizer → Editor → persistencia. `items_fetched = 0` porque los 34 ítems venían del Run anterior (12:30:59); no hay nuevos de arXiv. Ejecución real: 41 llamadas Reader (153.753 tokens, media 3.750), 15 llamadas Popularizer (80.965 tokens, media 5.398, 7,1% reintento), 1 Editor (11.890 tokens). Q7: 0 candidatos huérfanos. Los 4 no publicados son descartes del Editor, no huérfanos. **Juicios de calidad sin emitir**: esta noche se registró antes de que existiera el runbook, así que `calidad_pub`, `rescatables` y `etiqueta_peor` quedan vacíos. Pool al 97,8% — margen mínimo. |
+| 2026-09-25 | planif. | — | — | r2/p2/e1 | — | partial | 0/0 | 40 | 0 | 18 | 45,0% | 13 | 252.328 | 84,1% | —% | —% | 0/0/0 | 769,4 | — | — | — | — | —/— | —/— | — | Ingesta por la vía `api` (anterior a T60.c): `ingest=error:ArxivUnavailable`, reintentos agotados (3 `arxiv.retry` + `arxiv.retry_exhausted`). Se procesó la cola de `new` existente. `partial` por el fallo de ingesta, no por presupuesto. |
+| 2026-09-26 | planif. | — | — | r2/p2/e1 | — | completed | 31/101 | 40 | 0 | 17 | 42,5% | 12 | 241.842 | 80,6% | —% | —% | 0/0/0 | 671,6 | — | — | — | — | —/— | —/— | — | Primera noche con ingesta por OAI (`ingest_via = "oai"`): 101 cosechados, 52 fuera del suelo del filtro, 31 nuevos. Cumple el criterio de cierre de T60.c. |
+| 2026-09-27 | planif. | — | — | r2/p2/e1 | — | completed | 0/46 | 40 | 0 | 18 | 45,0% | 13 | 248.068 | 82,7% | —% | —% | 0/0/0 | 774,9 | — | — | — | — | —/— | —/— | — | OAI: 46 cosechados, todos ya presentes (solape de ventana). Sin anuncios nuevos de arXiv (viernes noche ET). |
+| 2026-09-28 | planif. | — | — | r2/p2/e1 | — | completed | 0/0 | 30 | 0 | 18 | 60,0% | 12 | 226.760 | 75,6% | —% | —% | 0/2/0 | 806,8 | — | — | — | — | —/— | —/— | — | OAI: 0 cosechados (fin de semana, arXiv no anuncia). 2 `invalid_output` del Popularizer recuperados por reintento. Cola `new = 0` tras esta noche. |
 
 ---
 

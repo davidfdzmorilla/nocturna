@@ -1,9 +1,11 @@
 ---
-description: Registra la calibración de una noche (T60): tokens del Run frente a porcentaje semanal observado
+description: "[RETIRADO] Calibración de porcentaje semanal (T60) — ADR 0011"
 ---
 
-El autor pasa en `$ARGUMENTS` el porcentaje semanal consumido que ve en Settings > Usage esta mañana (por ejemplo `/calibrate 12`).
+**Este comando quedó retirado en ADR 0011 (2026-09-28).**
 
-1. Lee el último `Run` de la base de datos con `uv run nocturna last-run` (si el comando no existe todavía, léelo con una consulta SQL directa vía `docker compose exec` y anota que falta el comando en `docs/TECHNICAL_DEBT.md`).
-2. Añade una fila a la tabla de `docs/CALIBRACION.md` (créalo con cabecera si no existe): fecha · run_id · status · tokens_used · items_read · findings_published · % semanal observado · tokens por punto porcentual (tokens_used / %).
-3. Con al menos 5 filas, calcula la media de tokens por punto porcentual y propón el `nightly_tokens` que se acerque al 30% semanal repartido entre 7 noches. Preséntalo como propuesta; no toques `config/pipeline.toml` sin aprobación.
+La suscripción Claude Max es compartida entre múltiples proyectos, así que el % semanal observado en Settings > Usage es inmedible. T60 cierra con verificación de estabilidad nocturna (cuatro noches automáticas, gasto 76–84% del tope fijo).
+
+Nuevo criterio: si el autor observa presión en su semanal en otros proyectos, baja `nightly_tokens` a mano. No hay calibración automática.
+
+Ver `docs/adr/0011-abandono-de-calibracion-semanal-por-tope-absoluto.md` para contexto completo.
