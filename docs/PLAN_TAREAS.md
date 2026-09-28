@@ -217,11 +217,12 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 **Condición de todo el bloque**: T72–T78 dependen del resultado de T71. Si T71 da cero tensiones reales, se replantea el enfoque antes de construir nada más, y T72–T78 siguen `blocked`.
 
 ### T70 · `page` sin tope en `GET /findings`
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T61
 - **Alcance**: acotar `page` en `backend/src/nocturna/api/routes/findings.py:35` (`Query(ge=1)` sin `le`). Hoy `?page=100000000000000000000` llega a PostgreSQL como `NumericValueOutOfRange` y devuelve un 500. Tope igual al `MAX_PAGE = 999_999` que ya aplica la web desde T51, para que las dos capas digan lo mismo. Salda la deuda "backend no acota `page`" de `TECHNICAL_DEBT.md`.
 - **Pregunta abierta en la tarea**: por encima del tope, ¿`422` (validación de FastAPI) o `200` con lista vacía? Opción reversible propuesta: `422`, porque es una entrada inválida y no una página sin resultados.
 - **Hecho cuando**: tests `-m db`: `page=999999` da 200 con lista vacía; `page=1000000` y `page=10**20` dan la respuesta acordada, sin 500 ni traza en el cuerpo. Quitar el `le=` hace fallar el test. Deuda marcada como saldada y § API de `ARCHITECTURE.md` actualizado.
+- **Cierre (2026-09-28)**: `MAX_PAGE = 999_999` y `Query(ge=1, le=MAX_PAGE)` en `api/routes/findings.py`; por encima, `422` (decisión del autor). Tres tests nuevos en `tests/db/test_api_findings.py`; mutación manual (quitar `le=`): `page=1000000` pasa a 200 y `page=10**20` a 500, y los tests fallan. Web: solo comentarios en `pagination.ts`. Suites: 974 passed / 4 deselected; `-m db` 141 passed; web 37 tests, lint verde.
 
 ### T71 · Experimento de viabilidad del cruce con el NASA Exoplanet Archive (sin Claude, sin tokens)
 - **Estado**: pending
