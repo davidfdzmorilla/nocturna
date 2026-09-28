@@ -5,7 +5,7 @@ Formato: `- [ ] <tarea> · <pregunta> · opciones vistas: … ` → al resolver:
 - [x] T00 · Nombre del proyecto y del paquete Python · resuelto 2026-09-15: **Nocturna**, paquete `nocturna`
 - [x] T00 · ¿Qué estrategia de ramas sigue el proyecto? · **resuelto 2026-09-17 por el autor: rama por tarea + PR a `main`**, con `main` protegida en GitHub. Practicado en T20, T30 y T40; T41 se commiteó por error directamente sobre `main` tras el merge del PR #9, y esa desviación es lo que motivó proteger la rama. Nunca se commitea ni se pushea a `main`.
 - [ ] T00 · ¿Qué licencia lleva el repositorio? · opciones vistas: sin licencia (privado), MIT, AGPL · **Fase 2** (T61)
-- [ ] T00 · ¿El repositorio es público en GitHub o privado? · opciones vistas: público, privado · **Fase 2** (T61)
+- [x] T00 · ¿El repositorio es público en GitHub o privado? · opciones vistas: público, privado · **Fase 2** (T61) · **resuelto 2026-09-28 por el autor**: público (verificado con `gh repo view`: `visibility: PUBLIC`, sin licencia). Desbloquea la decisión T20/T60.c del `User-Agent` con contacto y hace más urgente la de licencia.
 - [x] T01 · `.claude/agents/` ya está completo en el commit inicial: ¿se cierra T01 como verificación de los ocho ficheros contra `AGENTS.md`, o se reescriben? · resuelto 2026-09-16: cierre como verificación documentada más un delta mínimo de seis ediciones; los ocho ficheros ya satisfacían rol, herramientas y reglas, pero la definición de `backend` no alcanzaba para delegar T02
 - [ ] T01 · ¿Qué subagente tiene la propiedad de `.claude/agents/`, `.claude/commands/`, `.claude/skills/` y `.claude/hooks/`? · opciones vistas: `docs-keeper` (practicado en T01, por ser markdown de proceso), `backend`, subagente nuevo · **Operación** (T61)
 - [ ] T01 · `Bash(git commit*)` no está en `allow` ni en `deny` de `.claude/settings.json`, así que el commit dispara prompt al autor: ¿es deliberado como refuerzo de "preparar ≠ ejecutar"? · opciones vistas: dejarlo así, añadirlo a `allow` · **Operación** (T61)
@@ -170,13 +170,13 @@ Las siguientes decisiones abiertas de T50 y T51 que dicen «ajustable en T60 con
 
 ## Decisiones de fase 2 (T61, ADR 0012)
 
-- [ ] T71 · **Vía del valor numérico del paper** · ADR 0012 §11 fija el procedimiento: T71 mide (a) parser determinista sobre abstract y `Reading.claims` y (b) solución propia en el archivo; (c) extracción por el Reader solo con decisión expresa del autor si (a) y (b) recuperan pocos casos. Queda abierta la elección final con las cifras de T71. Bloquea T73.
+- [x] T71 · **Vía del valor numérico del paper** · ADR 0012 §11 fija el procedimiento: T71 mide (a) parser determinista sobre abstract y `Reading.claims` y (b) solución propia en el archivo; (c) extracción por el Reader solo con decisión expresa del autor si (a) y (b) recuperan pocos casos. Queda abierta la elección final con las cifras de T71. Bloquea T73. · **resuelto 2026-09-28 (T71)**: vía (a) 1 caso (falso positivo), vía (b) 0; el autor adopta la vía (c), condicionada a la prueba manual de T71.b (ADR 0013).
 - [ ] T73 · **Fórmula de la discrepancia** · errores asimétricos; comparar con cada medida previa, con la media ponderada o con el rango.
 - [ ] T73 · **Umbral de σ para considerar tensión** · T71 da la distribución por tramos.
 - [ ] T71/T73 · **Parámetros contrastados** (masa, radio, periodo…).
 - [ ] T71/T73 · **Emparejamiento de nombres** entre `Reading.objects` y el archivo: alias, estrella anfitriona frente a letra del planeta.
 - [ ] T73 · **Sobre qué ítems se cruza** · todos los leídos de astro-ph.EP o solo los de `interest_score >= 4`.
-- [ ] T71 · **Umbral para seguir**, además de "cero tensiones".
+- [x] T71 · **Umbral para seguir**, además de "cero tensiones". · **resuelto 2026-09-28 (T71)**: el autor decide seguir con la vía (c) tras ver las cifras (ADR 0013).
 - [x] T72 · **Dónde se guardan los números y el enlace** · **resuelto 2026-09-28 por ADR 0012 §13**: campo estructurado nuevo en `Finding`; su forma se diseña en T72.
 - [ ] T72 · **`Item.status` con dos `Finding` de tipos distintos.**
 - [x] T76 · **¿`catalog_tension` pasa por el Editor?** · **resuelto 2026-09-28 por ADR 0012 §12**: sí; una sola llamada al Editor con los dos tipos; su validador de reserva cuenta esos candidatos.
@@ -186,4 +186,9 @@ Las siguientes decisiones abiertas de T50 y T51 que dicen «ajustable en T60 con
 - [ ] T74 · **Cortesía con el Exoplanet Archive** · espaciado, techo de peticiones e identificación en el `User-Agent` (enlaza con la decisión T20/T60.c del `User-Agent` con contacto).
 - [x] T70 · **`page` por encima del tope** · `422` o `200` con lista vacía; propuesta reversible `422`. · **resuelto 2026-09-28 (T70)**: `422`, decisión del autor al aprobar el plan; `Query(ge=1, le=MAX_PAGE)` en `backend/src/nocturna/api/routes/findings.py`.
 - [ ] T77 · **Textos exactos** de la etiqueta "candidato" y de las etiquetas de tipo.
-- [ ] T78 · **Menos de 10 publicados** al acabar las dos semanas: ¿se prolonga o se cierra?
+- [ ] T78 · **Menos de 10 publicados** al acabar las dos semanas: ¿se prolonga o se cierra? · Relacionada con la nueva decisión de criterio de cierre (T71, ADR 0013).
+- [ ] T71/T78 · **Criterio de cierre de fase 2** · ADR 0012 §9 pide al menos 10 candidatos en dos semanas; T71 observó una tensión real en cinco noches (ADR 0013). Opciones vistas: rebajar el número, alargar el periodo, o ambas. Decide el autor.
+- [ ] T71.b · **Gasto máximo de la prueba manual de la vía (c)** · se fija en el plan de T71.b.
+- [ ] T71/T74 · **Formato de `pl_refname` en las filas que citan preprints de arXiv** · el archivo tiene 103 filas con "arXiv" en `pl_refname`, pero su formato no se ha verificado; la vía (b) busca bibcode `arXivYYMMnnnnn`, `arxiv.org/abs/` y `arXiv:`.
+- [ ] T71/T74 · **Columna Gaia inexistente en `ps`/`pscomppars`** · `gaia_id` da `ORA-00904`; si T74 necesita cruce por Gaia, buscar la columna real o descartarlo.
+- [ ] T71/T74 · **Bibcode con punto para IDs de arXiv de 4 dígitos (antes de 2015)** · `arXiv1309.1234` no casa con el fragmento de la vía (b); no afecta a ítems recientes.
