@@ -1,0 +1,98 @@
+{
+    "manifest": {
+        "requested_name": "WASP-12",
+        "resolved_name": "WASP-12",
+        "system_name": "WASP-12",
+        "lookup_status": "OK",
+        "compilation_date": "2026-09-28 05:04:35.007010",
+        "system_snapshot": {
+            "number_of_stars": 3,
+            "number_of_planets": 1
+        }
+    },
+    "system": {
+        "system_info": {
+            "id": "WASP-12",
+            "alias_set": {
+                "item_count": 2,
+                "default_name": "WASP-12",
+                "aliases": [
+                    "WASP-12",
+                    "TOI-1725"
+                ]
+            }
+        },
+        "objects": {
+            "stellar_set": {
+                "item_count": 3,
+                "stars": {
+                    "WASP-12": {
+                        "requested_object": "True",
+                        "is_host": "True",
+                        "alias_set": {
+                            "item_count": 10,
+                            "default_name": "WASP-12",
+                            "aliases": [
+                                "TOI-1725",
+                                "Gaia DR2 3435282862461427072",
+                                "TIC 86396382",
+                                "Gaia DR3 3435282862461427072",
+                                "WASP-12",
+                                "WASP-12 A",
+                                "TYC 1891-1178-1",
+                                "2MASS J06303279+2940202",
+                                "WISE J063032.78+294020.2",
+                                "1SWASP J063032.79+294020.4"
+                            ]
+                        }
+                    },
+                    "WASP-12 B": {
+                        "alias_set": {
+                            "item_count": 4,
+                            "default_name": "WASP-12 B",
+                            "aliases": [
+                                "TIC 86396386",
+                                "Gaia DR2 3435282862462524032",
+                                "Gaia DR3 3435282862462524032",
+                                "WASP-12 B"
+                            ]
+                        }
+                    },
+                    "WASP-12 C": {
+                        "alias_set": {
+                            "item_count": 1,
+                            "default_name": "WASP-12 C",
+                            "aliases": [
+                                "WASP-12 C"
+                            ]
+                        }
+                    }
+                }
+            },
+            "planet_set": {
+                "item_count": 1,
+                "planets": {
+                    "WASP-12 b": {
+                        "alias_set": {
+                            "item_count": 11,
+                            "default_name": "WASP-12 b",
+                            "aliases": [
+                                "TOI-1725.01",
+                                "WASP-12 b",
+                                "WASP-12 A b",
+                                "TYC 1891-1178-1 b",
+                                "2MASS J06303279+2940202 b",
+                                "WISE J063032.78+294020.2  b",
+                                "1SWASP J063032.79+294020.4 b",
+                                "TIC 86396382 b",
+                                "Gaia DR2 3435282862461427072 b",
+                                "TOI-1725 b",
+                                "Gaia DR3 3435282862461427072 b"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
