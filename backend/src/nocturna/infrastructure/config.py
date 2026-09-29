@@ -70,6 +70,14 @@ class BudgetConfig(BaseModel):
     # llamada al Editor. Mismo motivo de ausencia de default que
     # editor_base_tokens. Ver comentario en config/pipeline.toml.
     editor_tokens_per_candidate: int = Field(gt=0)
+    # reader_v3_estimated_tokens: estimación de coste que `BudgetGuard.
+    # authorize` compara contra el presupuesto restante para la variante
+    # `reader-v3` del Reader (medidas estructuradas, T71.c) -- mismo criterio
+    # que `reader_estimated_tokens`, pero solo para los ítems de
+    # `[reader] measurement_categories`. Sin default, mismo motivo que las
+    # claves vecinas: que falte ruidosamente si alguien copia un TOML viejo.
+    # Ver comentario en config/pipeline.toml.
+    reader_v3_estimated_tokens: int = Field(gt=0)
 
     @model_validator(mode="after")
     def _reserve_within_nightly_budget(self) -> "BudgetConfig":
@@ -286,6 +294,21 @@ class LLMConfig(BaseModel):
     provider: Literal["agent_sdk"]
 
 
+class ReaderConfig(BaseModel):
+    """Categorías arXiv sobre las que el Reader usa el prompt `reader-v3`
+    (medidas estructuradas por planeta, T71.c)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # measurement_categories: lista vacía admitida a propósito -- "v3
+    # apagado", decisión del autor (2026-09-29): sin categorías, `ReadItem`
+    # nunca elige la variante `reader-v3` y todos los ítems se leen con
+    # `reader-v2`, igual que antes de T71.c. Cada categoría debe existir
+    # también en `sources.arxiv.categories` (validado en `PipelineConfig`,
+    # que es quien ve ambas secciones a la vez).
+    measurement_categories: list[str]
+
+
 class PipelineConfig(BaseModel):
     """Configuración completa del pipeline, agregando todas las secciones."""
 
@@ -297,6 +320,27 @@ class PipelineConfig(BaseModel):
     models: ModelsConfig
     sources: SourcesConfig
     llm: LLMConfig
+    reader: ReaderConfig
+
+    @model_validator(mode="after")
+    def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":
+        """Cada categoría de `reader.measurement_categories` debe existir
+        también en `sources.arxiv.categories`.
+
+        `reader` y `sources.arxiv` viven en secciones distintas de
+        `pipeline.toml` y este es el único modelo que ve ambas a la vez
+        (mismo motivo que `_editor_reserve_covers_worst_case`): una
+        categoría con medidas que no se ingesta nunca produce candidatos
+        para `reader-v3` -- señal casi segura de una errata, que debe
+        fallar al cargar, de día, no descubrirse callada por la noche.
+        """
+        unknown = set(self.reader.measurement_categories) - set(self.sources.arxiv.categories)
+        if unknown:
+            raise ValueError(
+                "reader.measurement_categories contiene categorías ausentes de "
+                f"sources.arxiv.categories: {sorted(unknown)}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _ingest_worst_case_fits_in_the_night(self) -> "PipelineConfig":

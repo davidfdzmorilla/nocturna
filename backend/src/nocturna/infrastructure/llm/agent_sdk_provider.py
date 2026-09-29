@@ -70,12 +70,12 @@ relativo de los 946 tokens fijos de Haiku frente al resto del gasto varía
 con el tamaño de cada prompt real.
 
 Para una noche completa, con `limits.max_calls_per_item = 2` (T30) y en el
-peor caso (reintento en todos los ítems): `max_items_per_night = 40` ítems
-× 2 llamadas + 2 llamadas del Editor = 82 llamadas. Asumiendo el mismo
-coste fijo de 946 tokens invisibles por llamada del humo manual, son
-82 × 946 = 77.572 tokens invisibles al `BudgetGuard`, que cortaría a
-`nightly_tokens=300_000` registrados habiendo gastado 377.572 reales de
-verdad — un déficit del 20,5%: exactamente el modo de fallo que
+peor caso (reintento en todos los ítems): `max_items_per_night = 30` ítems
+(T71.c lo bajó de 40) × 2 llamadas + 2 llamadas del Editor = 62 llamadas.
+Asumiendo el mismo coste fijo de 946 tokens invisibles por llamada del
+humo manual, son 62 × 946 = 58.652 tokens invisibles al `BudgetGuard`, que
+cortaría a `nightly_tokens=300_000` registrados habiendo gastado 358.652
+reales de verdad — un déficit del 16,4%: exactamente el modo de fallo que
 `budget.py` existe para impedir.
 
 Verificado contra el paquete instalado, no de memoria: `model_usage` es

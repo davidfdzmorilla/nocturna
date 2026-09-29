@@ -405,10 +405,11 @@ class EditNight:
 
         Solo `item_id`, `title` y `level_curious` de cada candidato --
         nunca los tres niveles completos, que son ~1.100 tokens/candidato:
-        con `max_items_per_night = 40` eso serían decenas de miles de
-        tokens de entrada frente a unos pocos miles con solo el titular y
-        el nivel curioso (`prompts/editor.md` no necesita más para decidir
-        qué merece salir). Todo el bloque viaja envuelto en las marcas
+        con `max_items_per_night = 30` (T71.c lo bajó de 40) eso serían
+        decenas de miles de tokens de entrada frente a unos pocos miles
+        con solo el titular y el nivel curioso (`prompts/editor.md` no
+        necesita más para decidir qué merece salir). Todo el bloque viaja
+        envuelto en las marcas
         `<candidates>`/`</candidates>` que `prompts/editor.md` instruye
         tratar como dato puro, nunca como instrucción -- mismo patrón que
         `ReadItem`/`PopularizeReading` aplican a `<abstract>`/`<reading>`.

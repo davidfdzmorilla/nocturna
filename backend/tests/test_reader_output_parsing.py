@@ -10,7 +10,12 @@ import json
 import pytest
 
 from nocturna.application.agents.parsing import InvalidAgentOutput, extract_json_object
-from nocturna.application.agents.reader_output import ReaderOutput, parse_reader_output
+from nocturna.application.agents.reader_output import (
+    ReaderOutput,
+    ReaderV3Output,
+    parse_reader_output,
+    parse_reader_v3_output,
+)
 
 # --- extract_json_object: variantes de envoltura ---------------------------
 
@@ -264,3 +269,77 @@ def test_reader_output_con_claves_extra_se_acepta_y_las_ignora():
     assert not hasattr(output, "confidence")
     assert not hasattr(output, "unexpected_field")
     assert output.summary == "resumen"
+
+
+# --- ReaderV3Output / parse_reader_v3_output (T71.c) -----------------------
+#
+# `ReaderV3Output` es `ReaderOutput` + `measurements: list[Any]`: solo exige
+# que el campo exista y sea una lista, sin validar cada elemento (eso es
+# cosa de `reader_measurements.filter_measurements`, con `parse_measurement`
+# elemento a elemento -- ver el docstring de la clase). Los casos de abajo
+# cubren exactamente esa frontera.
+
+
+def _valid_v3_payload(**overrides) -> dict:
+    payload = _valid_payload()
+    payload["measurements"] = []
+    payload.update(overrides)
+    return payload
+
+
+def test_reader_v3_output_valido_con_measurements_vacio_se_parsea():
+    text = json.dumps(_valid_v3_payload())
+
+    output = parse_reader_v3_output(text)
+
+    assert isinstance(output, ReaderV3Output)
+    assert output.measurements == []
+
+
+def test_reader_v3_output_sin_measurements_falla():
+    payload = _valid_payload()  # sin la clave 'measurements'
+    assert "measurements" not in payload
+
+    with pytest.raises(InvalidAgentOutput):
+        parse_reader_v3_output(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "bad_measurements",
+    [{"planet_name": "X b"}, "no soy una lista", 42, None],
+    ids=["dict", "cadena", "numero", "null"],
+)
+def test_reader_v3_output_measurements_no_lista_falla(bad_measurements):
+    payload = _valid_v3_payload(measurements=bad_measurements)
+
+    with pytest.raises(InvalidAgentOutput):
+        parse_reader_v3_output(json.dumps(payload))
+
+
+def test_reader_v3_output_con_un_elemento_mal_formado_no_invalida_la_salida():
+    """`measurements: list[Any]` no valida cada elemento (ver docstring de
+    `ReaderV3Output`): un elemento con forma inválida -- que
+    `parse_measurement` rechazaría, después, elemento a elemento -- no debe
+    invalidar el resto de la salida del Reader v3 ni disparar un reintento
+    del ítem completo por su culpa."""
+    payload = _valid_v3_payload(
+        measurements=[
+            {"esto": "no es una medida válida"},
+            {
+                "planet_name": "Kepler-0000 b",
+                "parameter": "mass",
+                "value": 2.8,
+                "err_plus": 0.5,
+                "err_minus": 0.5,
+                "unit": "M_jup",
+                "limit": "none",
+                "origin": "this_work",
+                "evidence": "a mass of 2.8 M_jup",
+            },
+        ]
+    )
+
+    output = parse_reader_v3_output(json.dumps(payload))
+
+    assert len(output.measurements) == 2
+    assert output.measurements[0] == {"esto": "no es una medida válida"}

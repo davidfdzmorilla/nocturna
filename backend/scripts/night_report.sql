@@ -1,6 +1,6 @@
 -- night_report.sql — Informe de la mañana (T60).
 --
--- Siete consultas de solo lectura sobre la última noche ejecutada, pensadas
+-- Ocho consultas de solo lectura sobre la última noche ejecutada, pensadas
 -- para leerse con café en dos minutos en vez de reconstruirse a mano cada
 -- mañana durante las catorce noches de calibración. Uso:
 --
@@ -11,7 +11,7 @@
 --
 -- Cada consulta abre su propio `WITH n AS (...)` porque una CTE no
 -- sobrevive al `;` que separa una sentencia de la siguiente en un script de
--- psql -- no hay forma de compartirla entre las siete sin repetirla. `n` es
+-- psql -- no hay forma de compartirla entre las ocho sin repetirla. `n` es
 -- siempre la última fila de `runs` por `started_at`, es decir, la noche que
 -- se quiere revisar esta mañana.
 --
@@ -212,3 +212,18 @@ JOIN n ON f.run_id = n.id
 JOIN items i ON i.id = f.item_id
 WHERE f.published_at IS NULL AND i.status = 'read'
 ORDER BY f.title;
+
+\echo ''
+\echo '=== Q8 · Medidas del Reader de la noche (reader-v3) ==='
+WITH n AS (SELECT * FROM runs ORDER BY started_at DESC LIMIT 1),
+lecturas AS (
+  SELECT DISTINCT ac.item_id, ac.prompt_version FROM agent_calls ac JOIN n ON ac.run_id = n.id
+  WHERE ac.agent = 'reader' AND ac.status = 'ok' AND ac.item_id IS NOT NULL)
+SELECT i.external_id, l.prompt_version,
+       m->>'planet_name' AS planeta, m->>'parameter' AS parametro, m->>'value' AS valor,
+       m->>'err_plus' AS err_plus, m->>'err_minus' AS err_minus, m->>'unit' AS unidad,
+       m->>'limit' AS limite, m->>'origin' AS origen, m->>'evidence' AS evidencia
+FROM lecturas l JOIN readings r ON r.item_id = l.item_id JOIN items i ON i.id = l.item_id
+LEFT JOIN LATERAL jsonb_array_elements(r.measurements) m ON true
+WHERE r.measurements IS NOT NULL
+ORDER BY i.external_id, planeta, parametro;

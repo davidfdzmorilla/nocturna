@@ -31,13 +31,17 @@ from fakes.clock import FakeClock
 from helpers.sdk_doubles import build_fake_query, make_result_message
 
 from nocturna import cli
-from nocturna.application.agents.prompt_loader import READER_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    READER_PROMPT_VERSION,
+    READER_V3_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import (
     BudgetExceeded,
     BudgetPolicy,
     OutsideExecutionWindow,
 )
-from nocturna.application.use_cases.read_item import ReadItem
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.domain.entities import AgentCallStatus, ItemStatus
 from nocturna.infrastructure.db.models import AgentCallRow
 from nocturna.infrastructure.db.repositories import (
@@ -89,15 +93,27 @@ def _persist_run_and_item(db_session_factory, *, budget_tokens: int) -> tuple[An
 
 
 def _make_read_item(*, work, provider, estimated_tokens: int) -> ReadItem:
+    # `measures_categories=frozenset()` (T71.c): estos tests ejercitan el
+    # corte de presupuesto/ventana del Reader, no la variante `reader-v3`
+    # -- ver `test_read_item_measures.py`, del tester -- así que la
+    # variante `measures` nunca se elige.
     return ReadItem(
         work=work,
         provider=provider,
-        system_prompt=load_prompt("reader"),
-        prompt_version=READER_PROMPT_VERSION,
         model=_MODEL,
         max_turns=3,
-        estimated_tokens=estimated_tokens,
         max_attempts=2,
+        base=ReaderPrompt(
+            system_prompt=load_prompt("reader"),
+            prompt_version=READER_PROMPT_VERSION,
+            estimated_tokens=estimated_tokens,
+        ),
+        measures=ReaderPrompt(
+            system_prompt=load_prompt("reader-v3"),
+            prompt_version=READER_V3_PROMPT_VERSION,
+            estimated_tokens=estimated_tokens,
+        ),
+        measures_categories=frozenset(),
     )
 
 

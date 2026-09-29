@@ -24,6 +24,10 @@ EXPECTED_TABLES = {"items", "readings", "findings", "runs", "agent_calls"}
 # prompt version): el `down_revision` declarado en esa migración.
 _REVISION_BEFORE_FAILED_STATUS = "a318e7fd86a9"
 
+# Revisión anterior a "52ccb04d0f06" (reading measurements jsonb column):
+# el `down_revision` declarado en esa migración.
+_REVISION_BEFORE_MEASUREMENTS = "950738867fb9"
+
 
 def test_upgrade_head_crea_las_cinco_tablas(scratch_database_url):
     run_alembic_upgrade(scratch_database_url, "head")
@@ -84,9 +88,12 @@ def test_columnas_y_nulabilidad_de_readings(scratch_database_url):
         "tokens_out",
         "model",
     }
-    assert set(columns) == expected_not_null
+    expected_nullable = {"measurements"}
+    assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:
         assert columns[name]["nullable"] is False, f"'{name}' debería ser NOT NULL"
+    for name in expected_nullable:
+        assert columns[name]["nullable"] is True, f"'{name}' debería admitir NULL"
 
 
 def test_columnas_y_nulabilidad_de_findings(scratch_database_url):
@@ -193,6 +200,43 @@ def test_downgrade_base_deja_el_esquema_vacio_y_permite_upgrade_de_nuevo(scratch
         assert tables == EXPECTED_TABLES
     finally:
         engine.dispose()
+
+
+def test_downgrade_de_measurements_elimina_la_columna_y_upgrade_la_recupera(
+    scratch_database_url,
+):
+    """`52ccb04d0f06` (reading measurements jsonb column) es una migración
+    aditiva y sin backfill: su `downgrade` se limita a `drop_column`, sin
+    la comprobación ruidosa que sí necesita `950738867fb9` (no hay filas
+    `failed` que perder aquí, solo una columna nullable sin dato de
+    dominio que reescribir).
+    """
+    run_alembic_upgrade(scratch_database_url, "head")
+
+    engine = sa.create_engine(scratch_database_url)
+    try:
+        columns_at_head = {c["name"] for c in inspect(engine).get_columns("readings")}
+    finally:
+        engine.dispose()
+    assert "measurements" in columns_at_head
+
+    run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE_MEASUREMENTS)
+
+    engine = sa.create_engine(scratch_database_url)
+    try:
+        columns_after_downgrade = {c["name"] for c in inspect(engine).get_columns("readings")}
+    finally:
+        engine.dispose()
+    assert "measurements" not in columns_after_downgrade
+
+    run_alembic_upgrade(scratch_database_url, "head")
+
+    engine = sa.create_engine(scratch_database_url)
+    try:
+        columns_after_upgrade = {c["name"] for c in inspect(engine).get_columns("readings")}
+    finally:
+        engine.dispose()
+    assert "measurements" in columns_after_upgrade
 
 
 def test_downgrade_con_item_en_estado_failed_falla_ruidosamente_y_no_lo_reescribe(

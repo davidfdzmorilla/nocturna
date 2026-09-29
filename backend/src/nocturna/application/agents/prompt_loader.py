@@ -14,6 +14,14 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 #: informe de calibración de T60 la muestra tal cual, no un hash.
 READER_PROMPT_VERSION: str = "reader-v2"
 
+#: Versión a mano del prompt del Reader con medidas estructuradas (T71.c),
+#: a partir de `reader-measures-exp1.md` (T71.b). Fichero propio
+#: (`reader-v3.md`), no una edición de `reader.md`: el Reader base
+#: (`READER_PROMPT_VERSION`) sigue existiendo para los ítems fuera de
+#: `[reader] measurement_categories` (`config/pipeline.toml`). Mismo
+#: criterio de subida a mano que las constantes vecinas.
+READER_V3_PROMPT_VERSION: str = "reader-v3"
+
 #: Versión a mano del prompt del Popularizer, mismo criterio que
 #: `READER_PROMPT_VERSION`: se sube a mano al editar `popularizer.md`.
 #: Subida a "popularizer-v2" en T42: se reforzó la regla de no usar saltos

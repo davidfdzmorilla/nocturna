@@ -33,13 +33,14 @@ from nocturna.application.agents.prompt_loader import (
     EDITOR_PROMPT_VERSION,
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
+    READER_V3_PROMPT_VERSION,
     load_prompt,
 )
 from nocturna.application.budget import BudgetPolicy, effective_nightly_tokens
 from nocturna.application.use_cases.edit_night import EditNight
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
-from nocturna.application.use_cases.read_item import ReadItem
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
 from nocturna.domain.entities import ItemStatus, RunStatus
 from nocturna.domain.llm import AgentRole
@@ -122,15 +123,25 @@ def _build_run_night(
     fake: FakeLLMProvider,
 ) -> RunNight:
     work = cli._agent_work_factory(db_session_factory, run_id, policy, clock)
+    # `measures_categories=frozenset()` (T71.c): este fichero prueba
+    # `RunNight`, no la variante `reader-v3` del Reader.
     read_item = ReadItem(
         work=work,
         provider=fake,
-        system_prompt=load_prompt("reader"),
-        prompt_version=READER_PROMPT_VERSION,
         model=_MODEL_SONNET,
         max_turns=policy.max_turns_per_agent,
-        estimated_tokens=1_500,
         max_attempts=policy.max_calls_per_item,
+        base=ReaderPrompt(
+            system_prompt=load_prompt("reader"),
+            prompt_version=READER_PROMPT_VERSION,
+            estimated_tokens=1_500,
+        ),
+        measures=ReaderPrompt(
+            system_prompt=load_prompt("reader-v3"),
+            prompt_version=READER_V3_PROMPT_VERSION,
+            estimated_tokens=1_500,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=work,

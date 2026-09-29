@@ -55,6 +55,7 @@ weekly_reset_weekday = "{weekday}"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
 reader_estimated_tokens = 6000
+reader_v3_estimated_tokens = 13000
 popularizer_estimated_tokens = 7000
 editor_base_tokens = 4000
 editor_tokens_per_candidate = 700
@@ -79,6 +80,9 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+
+[reader]
+measurement_categories = ["astro-ph.EP"]
 
 [sources.arxiv]
 categories = ["astro-ph.EP", "astro-ph.GA"]

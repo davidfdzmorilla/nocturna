@@ -90,8 +90,9 @@ camino de siempre, con la ingesta y el plan de gasto) y
 llamada de todo el proceso, `infrastructure/logging.py`); construye, en
 este orden, todo lo que puede fallar por sí solo, antes de comprometerse
 con ningún `Run` -- `AgentSDKProvider()` (puede lanzar
-`ApiKeyInEnvironment`), los tres prompts (`load_prompt`, puede lanzar
-`FileNotFoundError`) y `deadline_s`/`deadline_reason`
+`ApiKeyInEnvironment`), los cuatro prompts -- los dos del Reader (T71.c,
+`_load_reader_prompts`) y los del Popularizer/Editor (`load_prompt`,
+puede lanzar `FileNotFoundError`) -- y `deadline_s`/`deadline_reason`
 (`_deadline_for_run_night`, ver más abajo) --; solo entonces adopta o
 cierra un `Run` huérfano y crea el de esta noche
 (`_current_or_new_run_night`, ver más abajo); construye los tres casos de
@@ -188,6 +189,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -199,6 +201,7 @@ from nocturna.application.agents.prompt_loader import (
     EDITOR_PROMPT_VERSION,
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
+    READER_V3_PROMPT_VERSION,
     load_prompt,
 )
 from nocturna.application.budget import (
@@ -219,7 +222,7 @@ from nocturna.application.use_cases.popularize_reading import (
     PopularizeReading,
     PopularizeResult,
 )
-from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
@@ -348,6 +351,62 @@ def system_clock_from_config(config: PipelineConfig) -> SystemClock:
     """Construye el `SystemClock` de la ventana de ejecución, en la zona de
     `window.timezone` (`config/pipeline.toml`)."""
     return SystemClock(ZoneInfo(config.window.timezone))
+
+
+@dataclass(frozen=True, slots=True)
+class _ReaderPrompts:
+    """Los dos ficheros de prompt del Reader (T71.c), ya leídos.
+
+    Se cargan una sola vez, en `_load_reader_prompts`, ANTES de abrir
+    ningún `Run` -- mismo orden que la revisión de T44, punto 3, exige para
+    `AgentSDKProvider()`/`load_prompt(...)`: un fichero de prompt ausente
+    (`FileNotFoundError`) no debe dejar un `Run` `RUNNING` colgado, ni en
+    `run-night` ni en `run-item`.
+    """
+
+    base: str
+    measures: str
+
+
+def _load_reader_prompts() -> _ReaderPrompts:
+    """Lee `reader.md` (`reader-v2`) y `reader-v3.md`, los dos prompts que
+    `_build_read_item` combina en un `ReadItem`."""
+    return _ReaderPrompts(base=load_prompt("reader"), measures=load_prompt("reader-v3"))
+
+
+def _build_read_item(
+    *,
+    config: PipelineConfig,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    prompts: _ReaderPrompts,
+) -> ReadItem:
+    """Construye el `ReadItem` de la noche, con sus dos variantes (T71.c).
+
+    Único sitio que traduce `PipelineConfig`/`_ReaderPrompts` a los dos
+    `ReaderPrompt` que pide `ReadItem.__init__` -- usado tanto por
+    `_run_night_for_real` como por `_read_one_item`, para que los dos
+    caminos de invocación no puedan divergir en modelo, turnos, intentos,
+    estimaciones o categorías con medidas.
+    """
+    return ReadItem(
+        work=work,
+        provider=provider,
+        model=config.models.reader,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_calls_per_item,
+        base=ReaderPrompt(
+            system_prompt=prompts.base,
+            prompt_version=READER_PROMPT_VERSION,
+            estimated_tokens=config.budget.reader_estimated_tokens,
+        ),
+        measures=ReaderPrompt(
+            system_prompt=prompts.measures,
+            prompt_version=READER_V3_PROMPT_VERSION,
+            estimated_tokens=config.budget.reader_v3_estimated_tokens,
+        ),
+        measures_categories=frozenset(config.reader.measurement_categories),
+    )
 
 
 def _deadline_for_run_night(policy: BudgetPolicy, now: datetime) -> tuple[int, str]:
@@ -872,7 +931,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     # bloqueando la noche siguiente y expuesto, mientras tanto, a que un
     # `run-item` intermedio lo adoptara y gastara contra su presupuesto.
     provider = AgentSDKProvider()
-    reader_prompt = load_prompt("reader")
+    reader_prompts = _load_reader_prompts()
     popularizer_prompt = load_prompt("popularizer")
     editor_prompt = load_prompt("editor")
     deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
@@ -880,15 +939,8 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     run_id = _current_or_new_run_night(session_factory, policy, clock)
     work = _agent_work_factory(session_factory, run_id, policy, clock)
 
-    read_item = ReadItem(
-        work=work,
-        provider=provider,
-        system_prompt=reader_prompt,
-        prompt_version=READER_PROMPT_VERSION,
-        model=config.models.reader,
-        max_turns=config.limits.max_turns_per_agent,
-        estimated_tokens=config.budget.reader_estimated_tokens,
-        max_attempts=config.limits.max_calls_per_item,
+    read_item = _build_read_item(
+        config=config, work=work, provider=provider, prompts=reader_prompts
     )
     popularize = PopularizeReading(
         work=work,
@@ -1108,20 +1160,29 @@ def _print_read_item_report(
     reading: Reading,
     attempts: int,
     tokens_spent: int,
+    prompt_version: str,
     work: AgentWorkFactory,
     run_id: UUID,
 ) -> None:
     """Recibe `reading` ya estrechada por el llamador (`_read_one_item`), en
     vez de un `ReadItemResult` con `reading: Reading | None` -- así no hace
     falta un segundo `assert`/comprobación redundante aquí para lo mismo que
-    ya comprobó `_read_one_item` antes de llamar."""
+    ya comprobó `_read_one_item` antes de llamar.
+
+    `prompt_version` (T71.c) es `result.prompt_version`, la variante que de
+    verdad se usó para este ítem (`reader-v2` o `reader-v3`) -- nunca la
+    constante `READER_PROMPT_VERSION` a pelo, que solo describe una de las
+    dos.
+    """
     with work() as w:
         remaining = w.guard.remaining_for(AgentRole.READER)
 
     print(f"{item.external_id} · {item.title}")
-    print(f"  modelo={reading.model} · prompt={READER_PROMPT_VERSION} · intentos={attempts}")
+    print(f"  modelo={reading.model} · prompt={prompt_version} · intentos={attempts}")
     print(f"  tokens gastados={tokens_spent} · tokens restantes para el Reader={remaining}")
     print(f"  interest_score={reading.interest_score} · reading_id={reading.id} · run_id={run_id}")
+    if reading.measurements is not None:
+        print(f"  medidas: {len(reading.measurements)}")
     print(f"  resumen: {_abstract_preview(reading.summary)}")
 
 
@@ -1366,13 +1427,16 @@ def _read_one_item(
     config: PipelineConfig,
     clock: Clock,
     run_id: UUID,
+    prompts: _ReaderPrompts,
 ) -> tuple[int, RunStatus]:
     """Ejecuta el Reader sobre `item` y, si produce una `Reading`, encadena el
     Popularizer sobre ella. Traduce el resultado a `(exit_code, run_status)`.
 
     Toda la configuración del Reader (modelo, turnos, versión de prompt,
-    estimación de coste, intentos) sale de `config`, nunca hardcodeada
-    (T41, paso 8).
+    estimación de coste, intentos, categorías con medidas) sale de `config`,
+    nunca hardcodeada (T41, paso 8); `prompts` son los dos ficheros de
+    prompt ya leídos por `_run_item` antes de abrir el `Run` (T71.c, ver
+    `_load_reader_prompts`).
 
     `run_status` es, en el mismo `return` que fija `exit_code`, el estado
     terminal con el que `_run_item` debe cerrar el `Run` que él mismo haya
@@ -1401,16 +1465,7 @@ def _read_one_item(
     construya `PopularizeReading`: ningún fallo del Popularizer puede
     perder la lectura ya escrita (T42, paso 8).
     """
-    read_item = ReadItem(
-        work=work,
-        provider=provider,
-        system_prompt=load_prompt("reader"),
-        prompt_version=READER_PROMPT_VERSION,
-        model=config.models.reader,
-        max_turns=config.limits.max_turns_per_agent,
-        estimated_tokens=config.budget.reader_estimated_tokens,
-        max_attempts=config.limits.max_calls_per_item,
-    )
+    read_item = _build_read_item(config=config, work=work, provider=provider, prompts=prompts)
     try:
         result = asyncio.run(read_item(item))
     except InvalidTransition:
@@ -1450,6 +1505,7 @@ def _read_one_item(
         reading=reading,
         attempts=result.attempts,
         tokens_spent=result.tokens_spent,
+        prompt_version=result.prompt_version,
         work=work,
         run_id=run_id,
     )
@@ -1477,6 +1533,12 @@ def _run_item(args: argparse.Namespace) -> int:
     clock = system_clock_from_config(config)
     engine = create_db_engine(settings)
     session_factory = create_session_factory(engine)
+
+    # Los dos prompts del Reader (T71.c) se cargan antes de abrir ningún
+    # Run, mismo orden que `_run_night_for_real` (revisión de T44, punto 3):
+    # un fichero de prompt ausente (`FileNotFoundError`) no debe dejar un
+    # `Run` `RUNNING` colgado.
+    reader_prompts = _load_reader_prompts()
 
     run_id, run_reused = _current_or_new_run(session_factory, policy, clock)
     if not run_reused:
@@ -1519,6 +1581,7 @@ def _run_item(args: argparse.Namespace) -> int:
                 config=config,
                 clock=clock,
                 run_id=run_id,
+                prompts=reader_prompts,
             )
     except Exception:
         # Camino de salida imprevisto: el Run que este proceso creó no debe

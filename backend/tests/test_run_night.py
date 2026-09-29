@@ -70,7 +70,7 @@ from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.application.use_cases.edit_night import EditNight
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
-from nocturna.application.use_cases.read_item import ReadItem
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.domain.entities import AgentCall, AgentCallStatus, Item, ItemStatus, Run, RunStatus
 from nocturna.domain.errors import LLMError, LLMRateLimited
@@ -176,12 +176,18 @@ def _make_run_night(
     read_item = ReadItem(
         work=env.work,
         provider=provider,
-        system_prompt="prompt del Reader",
-        prompt_version="reader-v1",
         model="claude-sonnet-test",
         max_turns=3,
-        estimated_tokens=500,
         max_attempts=2,
+        base=ReaderPrompt(
+            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=500
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt del Reader v3 (no usado en este test)",
+            prompt_version="reader-v1-v3",
+            estimated_tokens=500,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=env.work,
@@ -742,12 +748,18 @@ async def test_budget_exhausted_en_fase_b_no_toca_la_reserva_y_el_editor_se_llam
     read_item = ReadItem(
         work=env.work,
         provider=fake,
-        system_prompt="prompt del Reader",
-        prompt_version="reader-v1",
         model="claude-sonnet-test",
         max_turns=3,
-        estimated_tokens=200,
         max_attempts=1,
+        base=ReaderPrompt(
+            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=200
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt del Reader v3 (no usado en este test)",
+            prompt_version="reader-v1-v3",
+            estimated_tokens=200,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=env.work,
@@ -942,12 +954,18 @@ async def test_ingesta_fallida_continua_con_los_new_existentes_y_no_supera_parti
     read_item = ReadItem(
         work=env.work,
         provider=fake,
-        system_prompt="prompt del Reader",
-        prompt_version="reader-v1",
         model="claude-sonnet-test",
         max_turns=3,
-        estimated_tokens=500,
         max_attempts=2,
+        base=ReaderPrompt(
+            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=500
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt del Reader v3 (no usado en este test)",
+            prompt_version="reader-v1-v3",
+            estimated_tokens=500,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=env.work,
@@ -1021,12 +1039,18 @@ async def test_el_log_de_ingesta_fallida_incluye_error_detail(caplog, monkeypatc
     read_item = ReadItem(
         work=env.work,
         provider=fake,
-        system_prompt="prompt del Reader",
-        prompt_version="reader-v1",
         model="claude-sonnet-test",
         max_turns=3,
-        estimated_tokens=500,
         max_attempts=2,
+        base=ReaderPrompt(
+            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=500
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt del Reader v3 (no usado en este test)",
+            prompt_version="reader-v1-v3",
+            estimated_tokens=500,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=env.work,

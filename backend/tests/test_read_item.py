@@ -49,7 +49,7 @@ from nocturna.application.budget import (
 )
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases import read_item as read_item_module
-from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.domain.entities import AgentCall, AgentCallStatus, Item, ItemStatus, Reading, Run
 from nocturna.domain.errors import InvalidTransition, LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRole
@@ -171,15 +171,28 @@ def _make_read_item(
     system_prompt: str = "prompt de sistema del Reader",
     prompt_version: str = "v1",
 ) -> ReadItem:
+    # `measures_categories=frozenset()` (T71.c): ningún test de este fichero
+    # ejercita la variante `reader-v3` -- ver `test_read_item_measures.py`,
+    # del tester -- así que la variante `measures` nunca se elige
+    # (`frozenset().isdisjoint(...)` es siempre `True`) y sus valores son
+    # placeholders sin efecto en el resultado.
     return ReadItem(
         work=work,
         provider=provider,
-        system_prompt=system_prompt,
-        prompt_version=prompt_version,
         model=model,
         max_turns=max_turns,
-        estimated_tokens=estimated_tokens,
         max_attempts=max_attempts,
+        base=ReaderPrompt(
+            system_prompt=system_prompt,
+            prompt_version=prompt_version,
+            estimated_tokens=estimated_tokens,
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt de sistema del Reader v3 (no usado en estos tests)",
+            prompt_version="v1-v3",
+            estimated_tokens=estimated_tokens,
+        ),
+        measures_categories=frozenset(),
     )
 
 
