@@ -21,6 +21,18 @@ reset_day_multiplier = 1.0
 # estimado) de esa última llamada: modo de fallo que ya tenía el diseño de
 # T30, no uno nuevo de T41. Valor a calibrar en T60, como item_timeout_s.
 reader_estimated_tokens = 6000
+# reader_v3_estimated_tokens: misma lógica que reader_estimated_tokens, para
+# la variante `reader-v3` del Reader (medidas estructuradas por planeta,
+# T71.c), usada solo en los ítems de `[reader] measurement_categories`.
+# Composición: T71.b midió 6.400 tokens/llamada (por abstract, no por
+# medida individual: un abstract con varias medidas es una sola llamada) en
+# promedio y un máximo de 7.574 sobre los 4 abstracts de
+# `tests/fixtures/t71b/abstracts.json` (prompt experimental
+# `reader-measures-exp1`, precursor de `reader-v3`, con el mismo tamaño de
+# salida). 13.000 ≈ 2x la media medida (6.400) y ≈ 1,7x el máximo observado
+# (7.574), mismo criterio de margen que T41/T42 aplicaron a sus propias
+# estimaciones. Valor a calibrar en T60/T71.c con datos de una noche real.
+reader_v3_estimated_tokens = 13000
 # popularizer_estimated_tokens: misma lógica que reader_estimated_tokens,
 # para el Popularizer. Composición aproximada (T42): prompt de rol (~600-700
 # tokens, define tres niveles, más largo que los ~290 del Reader) + la
@@ -36,12 +48,30 @@ reader_estimated_tokens = 6000
 # en T60, con popularizer-v1 como baseline.
 #
 # Aritmética del pool Reader+Popularizer = nightly_tokens -
-# editor_reserve_tokens = 300.000 - 60.000 = 240.000. Reader: 40 ítems x
-# 2.796 medidos ≈ 112.000. Candidatos con score >= 4 por noche es la
-# incógnita de T60: con 25% -> 145.500 (61% del pool); 40% -> 165.600 (69%);
-# 60% -> 192.400 (80%). Punto de ruptura: ~38 candidatos de 40, y a partir de
-# ahí authorize deniega, el Run queda partial y la reserva del Editor sigue
-# intacta -- comportamiento correcto, no un fallo.
+# editor_reserve_tokens = 300.000 - 60.000 = 240.000. T71.c introdujo
+# reader-v3 (más caro) solo para los ítems de astro-ph.EP
+# ([reader] measurement_categories); el resto de categorías sigue con
+# reader-v2. Con los 30 ítems de max_items_per_night repartidos entre EP y
+# no-EP, y usando lo MEDIDO (no la estimación conservadora de arriba): 6.400
+# tokens/llamada en EP (reader-v3, T71.b) y 3.056 tokens/ítem en no-EP
+# (reader-v2, ver CLAUDE.md). Caso esperado (mezcla ilustrativa, 11 EP de
+# 30): 11 x 6.400 + 19 x 3.056 ≈ 128.500 de Reader, dejando ≈ 111.500 para
+# el Popularizer -- a ~4.560 tokens/candidato medidos (CLAUDE.md), ≈ 24
+# candidatos, sin reintento. Peor caso, los 30 ítems siendo EP: 30 x 6.400 =
+# 192.000 de Reader, dejando solo 48.000 para el Popularizer:
+# BudgetGuard.authorize exige que el presupuesto restante cubra la
+# ESTIMACIÓN (popularizer_estimated_tokens = 7.000), no el gasto medido de
+# 4.560/9.120, así que admite menos candidatos de los que daría
+# 48.000 / 4.560 sin más: ≈ 9 sin reintento (con ~4.560 medidos gastados
+# por cada uno de los 9 anteriores, a la 10ª llamada ya no quedan 7.000
+# libres) y ≈ 5 con reintento a 9.120 (mismo motivo, con el coste doblado
+# de cada candidato ya gastado). La noche cierra `partial`, con la reserva
+# del Editor (60.000) intacta -- el fallo es "se publica menos", no "se
+# rebasa el presupuesto".
+# Qué fracción de la ingesta real es EP sigue siendo la incógnita de T60;
+# este cálculo es orientativo, a recalibrar con datos de campo. Si algún
+# día se sube max_items_per_night, hay que repetirlo (ver también el
+# comentario de [limits] sobre por qué T71.c lo bajó de 40 a 30).
 popularizer_estimated_tokens = 7000
 # editor_base_tokens: parte fija de la estimación de coste del Editor, la
 # única llamada de la noche a Opus, sobre la que `PipelineConfig` exige que
@@ -56,12 +86,15 @@ popularizer_estimated_tokens = 7000
 # exactamente en N=10 (ambas dan 11.000); por debajo de N=10 la nueva es
 # MENOS conservadora que la vieja: el margen baja de 1,80x a 1,49x en N=3,
 # y de 2,56x a 1,83x en N=1. Lo que motiva el cambio no es una monotonía
-# inexistente sino el peor caso que la guarda existe para cubrir: en N=40
-# (`max_items_per_night`) la vieja estimación (32.000) ya caía por DEBAJO
-# de la recta observada (≈32.002) -- ya era un subestimador justo donde
-# más importa. La nueva queda por ENCIMA de la recta observada en todo el
-# rango 1-40 (nuevo - recta = 1.440 + 76xN, estrictamente positivo y
-# creciente): margen mínimo 1,14x en N=40; N=3 -> 1,49x; N=14 -> 1,21x.
+# inexistente sino el peor caso que la guarda existe para cubrir: en N=40,
+# que era `max_items_per_night` cuando se hizo este ajuste (T71.c lo bajó a
+# 30, ver [limits]), la vieja estimación (32.000) ya caía por DEBAJO de la
+# recta observada (≈32.002) -- ya era un subestimador justo donde más
+# importa. La nueva queda por ENCIMA de la recta observada en todo el rango
+# 1-40 (nuevo - recta = 1.440 + 76xN, estrictamente positivo y creciente):
+# margen mínimo 1,14x en N=40; N=3 -> 1,49x; N=14 -> 1,21x. Con
+# `max_items_per_night = 30` el peor caso real hoy es N=30, dentro de ese
+# mismo rango y con margen aún mayor: 1,15x.
 #
 # Es un ajuste PROVISIONAL: dos observaciones para dos parámetros es un
 # sistema exactamente determinado (residuo cero, cero confianza), no una
@@ -70,13 +103,16 @@ popularizer_estimated_tokens = 7000
 #
 # El invariante que valida `PipelineConfig` (arriba) cubre UN intento del
 # Editor; `max_editor_calls_per_night = 2` autoriza un segundo intento
-# contra el presupuesto completo si el primero falla por JSON inválido,
-# así que dos intentos a N=40 suman 73.000 tokens (2 x 36.500) frente a
-# los 60.000 de `editor_reserve_tokens`. Es propiedad preexistente -- el
-# segundo intento se autoriza contra el presupuesto completo y se deniega
-# si no cabe, cerrando la noche `partial` --, pero este ajuste sube ese
-# peor caso de 64.000 (con los valores viejos: 2 x 32.000) a 73.000, y
-# merece constar.
+# contra el presupuesto completo si el primero falla por JSON inválido. Con
+# `max_items_per_night = 40` (el valor de cuando se hizo este ajuste), dos
+# intentos a N=40 suman 73.000 tokens (2 x 36.500) frente a los 60.000 de
+# `editor_reserve_tokens`. Es propiedad preexistente -- el segundo intento
+# se autoriza contra el presupuesto completo y se deniega si no cabe,
+# cerrando la noche `partial` --, pero este ajuste sube ese peor caso de
+# 64.000 (con los valores viejos: 2 x 32.000) a 73.000, y merece constar.
+# Con `max_items_per_night = 30` (T71.c) el peor caso real hoy es menor:
+# dos intentos a N=30 suman 56.000 tokens (2 x 28.000), holgado frente a
+# los 60.000 de `editor_reserve_tokens`.
 editor_base_tokens = 2500
 # editor_tokens_per_candidate: coste marginal, por candidato, de la única
 # llamada al Editor. Multiplicado por `max_items_per_night` en el
@@ -92,8 +128,12 @@ editor_base_tokens = 2500
 editor_tokens_per_candidate = 850
 
 [limits]
-# max_items_per_night y max_turns_per_agent: valores fijados en CLAUDE.md ("Control de gasto").
-max_items_per_night = 40
+# max_items_per_night: valor inicial de CLAUDE.md ("Control de gasto") era
+# 40; T71.c lo bajó a 30 -- sin el recorte, el pool Reader+Popularizer se
+# agota antes de que la variante `reader-v3` (más cara, ver
+# budget.reader_v3_estimated_tokens) pueda leer los ítems de
+# [reader] measurement_categories. max_turns_per_agent: fijado en CLAUDE.md.
+max_items_per_night = 30
 max_turns_per_agent = 3
 # item_timeout_s y run_timeout_s: propuestos, se calibran en T60.
 item_timeout_s = 180
@@ -101,13 +141,13 @@ run_timeout_s = 16200
 # editor_timeout_s: timeout propio del Editor, separado de item_timeout_s.
 # item_timeout_s (180 s) está pensado para una llamada del Reader/Popularizer
 # sobre un único abstract; el Editor recibe, en una sola llamada a Opus,
-# hasta max_items_per_night (40) candidatos de la noche entera -- no cabe en
+# hasta max_items_per_night (30) candidatos de la noche entera -- no cabe en
 # esa ventana. Un LLMTimeout no se reintenta en AgentRunner.run (es uno de
 # los tres desenlaces terminales, junto a LLMRateLimited y LLMError), así que
 # un timeout corto para el Editor no es "otro intento": es la noche entera
 # sin publicar nada, con la reserva del Editor ya gastada. 300 s es un valor
 # propuesto, igual que item_timeout_s; se calibra en T60 con la latencia real
-# de Opus sobre 40 candidatos.
+# de Opus sobre 30 candidatos.
 editor_timeout_s = 300
 # max_editor_calls_per_night: acota intentos, no éxitos. Lo que cuesta
 # presupuesto es el intento, no el acierto, así que se cuentan las llamadas
@@ -154,6 +194,17 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+
+[reader]
+# measurement_categories: categorías arXiv sobre las que el Reader usa la
+# variante `reader-v3` (medidas estructuradas por planeta, T71.c) en vez de
+# `reader-v2`. Cada categoría debe existir también en
+# sources.arxiv.categories (validado en PipelineConfig). Lista vacía
+# admitida = v3 apagado (decisión del autor, 2026-09-29). Solo
+# "astro-ph.EP" por ahora: es la única categoría de las ingeridas hoy donde
+# un abstract razonablemente menciona masa/radio/periodo de un planeta
+# concreto con error.
+measurement_categories = ["astro-ph.EP"]
 
 [sources.arxiv]
 # PROVISIONAL · decisión abierta (docs/OPEN_DECISIONS.md, T20); astro-ph.HE en evaluación

@@ -240,7 +240,7 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-09-29)**: humo `tests/manual/test_reader_attribution_smoke.py` con prompt experimental `reader-measures-exp1` (neutro: sin nombres ni cifras del fixture, verificado). 4 llamadas, 0 reintentos, **25.524 tokens** (tope 40.000): 5.258 / 6.247 / 6.445 / 7.574 por abstract (≈6.400 de media, frente a 3.056 del Reader de producción). Atribución: 2609.17025 sin medidas (OK); 2609.20748 masa 2,8 (+0,5/−0,5) M_J a RX J0534.0-0221 b, nada a TWA 7 b (OK); 2609.26894 R, M y P de TOI-2109 b exactos con `origin=literature`, nada a WASP-12 b (OK); 2609.30038 las 4 masas de b y las 3 de e con sus errores exactos, `this_work`, sin cruce b/e, nada para c/d ni periodos — el informe lo marca FALLO porque `planet_name` salió como "b"/"e" (el prompt pedía copiar el nombre sin completarlo): atribución correcta, nombre incompleto. σ no calculado automáticamente por ese nombre; cálculo manual con la fórmula provisional frente a la solución por defecto (Livingston et al. 2026): b 3,4–3,9σ, e 2,7–3,4σ; frente a Suárez Mascareño et al. 2022: b ≈0,5σ, e 1,3–2,3σ. **Decisión del autor (2026-09-29): se adopta la vía (c) en firme**, con el ajuste de pedir el nombre completo del planeta (anfitriona + letra). Pendiente del autor: criterio de cierre de fase 2. Siguiente: revisar T72–T78 con esta decisión.
 
 ### T71.c · Reader v3: medidas estructuradas por planeta
-- **Estado**: pending
+- **Estado**: in_progress
 - **Depende de**: T71.b
 - **Toca agentes y gasto**: sí. **Dos pasadas de revisión con `budget-guard-review`.**
 - **Alcance**:

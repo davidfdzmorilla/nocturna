@@ -43,10 +43,14 @@ from fakes.clock import FakeClock
 from helpers.sdk_doubles import build_fake_query, make_result_message
 
 from nocturna import cli
-from nocturna.application.agents.prompt_loader import READER_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    READER_PROMPT_VERSION,
+    READER_V3_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.unit_of_work import AgentWorkFactory
-from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.domain.entities import AgentCallStatus, ItemStatus
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.db.models import AgentCallRow
@@ -118,15 +122,26 @@ def _make_read_item(
     max_attempts: int,
     estimated_tokens: int = 100,
 ) -> ReadItem:
+    # `measures_categories=frozenset()` (T71.c): la variante `reader-v3` no
+    # es lo que este fichero prueba (contabilización de gasto contra un
+    # proveedor real), así que nunca se elige.
     return ReadItem(
         work=work,
         provider=provider,
-        system_prompt=load_prompt("reader"),
-        prompt_version=READER_PROMPT_VERSION,
         model=_MODEL,
         max_turns=3,
-        estimated_tokens=estimated_tokens,
         max_attempts=max_attempts,
+        base=ReaderPrompt(
+            system_prompt=load_prompt("reader"),
+            prompt_version=READER_PROMPT_VERSION,
+            estimated_tokens=estimated_tokens,
+        ),
+        measures=ReaderPrompt(
+            system_prompt=load_prompt("reader-v3"),
+            prompt_version=READER_V3_PROMPT_VERSION,
+            estimated_tokens=estimated_tokens,
+        ),
+        measures_categories=frozenset(),
     )
 
 

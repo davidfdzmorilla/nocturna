@@ -27,6 +27,7 @@ Todos los `datetime` que entran en una entidad deben ser *aware* (con
 es cosa de `infrastructure/`.
 """
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -151,12 +152,135 @@ class Item:
         self._transition_to(ItemStatus.FAILED)
 
 
+class MeasuredParameter(StrEnum):
+    """Parámetro físico de un planeta que el Reader v3 puede medir (T71.c).
+
+    Fase 2, alcance inicial: masa, radio y periodo. `m sin i` (masa mínima
+    de velocidad radial, distinta de la masa verdadera) queda fuera de este
+    esquema por decisión expresa del autor; el riesgo de mezclarla con
+    `MASS` se acepta durante T71.c (ver `OPEN_DECISIONS.md`).
+    """
+
+    MASS = "mass"
+    RADIUS = "radius"
+    PERIOD = "period"
+
+
+class MeasurementUnit(StrEnum):
+    """Unidad de una medida estructurada (T71.c)."""
+
+    M_JUP = "M_jup"
+    M_EARTH = "M_earth"
+    R_JUP = "R_jup"
+    R_EARTH = "R_earth"
+    DAY = "day"
+
+
+class MeasurementLimit(StrEnum):
+    """Si una medida es un valor puntual o una cota (T71.c).
+
+    Una cota (`UPPER`/`LOWER`) no tiene los dos errores del valor puntual
+    que hace falta para calcular una tensión: por eso `Measurement` la
+    excluye de `usable_for_tension` con independencia de qué traigan
+    `err_plus`/`err_minus`.
+    """
+
+    NONE = "none"
+    UPPER = "upper"
+    LOWER = "lower"
+
+
+class MeasurementOrigin(StrEnum):
+    """Si la medida es el resultado propio del paper o una cita a literatura
+    previa (T71.c). Solo `THIS_WORK` es candidata a tensión: citar el valor
+    de otro trabajo no es lo que T73 quiere comparar contra el archivo.
+    """
+
+    THIS_WORK = "this_work"
+    LITERATURE = "literature"
+
+
+_UNITS_BY_PARAMETER: Mapping[MeasuredParameter, frozenset[MeasurementUnit]] = {
+    MeasuredParameter.MASS: frozenset({MeasurementUnit.M_JUP, MeasurementUnit.M_EARTH}),
+    MeasuredParameter.RADIUS: frozenset({MeasurementUnit.R_JUP, MeasurementUnit.R_EARTH}),
+    MeasuredParameter.PERIOD: frozenset({MeasurementUnit.DAY}),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Measurement:
+    """Medida de un parámetro físico de un planeta, atribuida por el Reader
+    v3 a partir de un abstract (T71.c).
+
+    Value object sin identidad propia: nace dentro de `Reading.measurements`
+    y no se referencia desde fuera de esa tupla.
+
+    `evidence` es la subcadena literal del abstract de la que sale la
+    medida; el filtrado de si lo es de verdad (salvo espacios) vive en
+    `application/`, no aquí -- este `__post_init__` solo exige que no esté
+    en blanco.
+    """
+
+    planet_name: str
+    parameter: MeasuredParameter
+    value: float
+    err_plus: float | None
+    err_minus: float | None
+    unit: MeasurementUnit
+    limit: MeasurementLimit
+    origin: MeasurementOrigin
+    evidence: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.planet_name, "planet_name")
+        _require_non_empty(self.evidence, "evidence")
+        if not math.isfinite(self.value):
+            raise InvariantViolation("'value' debe ser un número finito")
+        if self.value <= 0:
+            raise InvariantViolation("'value' debe ser mayor que cero")
+        for err_field_name in ("err_plus", "err_minus"):
+            err_value = getattr(self, err_field_name)
+            if err_value is None:
+                continue
+            if not math.isfinite(err_value):
+                raise InvariantViolation(f"'{err_field_name}' debe ser un número finito")
+            if err_value < 0:
+                raise InvariantViolation(f"'{err_field_name}' no puede ser negativo")
+        if self.unit not in _UNITS_BY_PARAMETER[self.parameter]:
+            raise InvariantViolation(
+                f"'unit' {self.unit.value!r} no es coherente con "
+                f"'parameter' {self.parameter.value!r}"
+            )
+
+    @property
+    def usable_for_tension(self) -> bool:
+        """Utilizable para calcular una tensión contra el archivo (T73):
+        resultado propio del paper (no una cita a literatura previa), un
+        valor puntual (no una cota superior o inferior) y con los dos
+        errores informados, que es lo que necesita la fórmula de σ.
+        """
+        return (
+            self.origin == MeasurementOrigin.THIS_WORK
+            and self.limit == MeasurementLimit.NONE
+            and self.err_plus is not None
+            and self.err_minus is not None
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Reading:
     """Salida del Reader para un `Item`: una llamada ya ocurrida.
 
     No tiene `created_at`: es un hecho inmutable, no un registro con su
     propio ciclo de vida.
+
+    `measurements` distingue dos hechos distintos de una lectura (T71.c):
+    `None` significa que esta lectura no se hizo con el prompt que extrae
+    medidas (`reader-v2`, o un ítem fuera de las categorías con medidas de
+    `pipeline.toml`); `()` significa que sí se hizo con ese prompt y no
+    encontró ninguna medida utilizable en el abstract. Confundir ambos casos
+    escondería, en el informe de la noche, la diferencia entre "no se buscó"
+    y "se buscó y no había".
     """
 
     item_id: UUID
@@ -167,6 +291,7 @@ class Reading:
     tokens_in: int
     tokens_out: int
     model: str
+    measurements: tuple[Measurement, ...] | None = None
     id: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
@@ -186,6 +311,14 @@ class Reading:
         if self.tokens_out < 0:
             raise InvariantViolation("'tokens_out' no puede ser negativo")
         _require_non_empty(self.model, "model")
+        if self.measurements is not None:
+            if not isinstance(self.measurements, tuple):
+                raise InvariantViolation(
+                    "'measurements' debe ser una tupla, o None si no se extrajo"
+                )
+            for measurement in self.measurements:
+                if not isinstance(measurement, Measurement):
+                    raise InvariantViolation("cada elemento de 'measurements' debe ser Measurement")
 
 
 class FindingType(StrEnum):

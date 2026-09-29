@@ -34,7 +34,7 @@ from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.application.use_cases.edit_night import EditNight
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
-from nocturna.application.use_cases.read_item import ReadItem
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
 from nocturna.domain.entities import Item, Run
 from nocturna.domain.llm import AgentRole
@@ -304,12 +304,18 @@ async def _run_minimal_night_for_night_item_log() -> None:
     read_item = ReadItem(
         work=work,
         provider=fake,
-        system_prompt="prompt del Reader",
-        prompt_version="reader-v1",
         model="claude-sonnet-test",
         max_turns=3,
-        estimated_tokens=500,
         max_attempts=2,
+        base=ReaderPrompt(
+            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=500
+        ),
+        measures=ReaderPrompt(
+            system_prompt="prompt del Reader v3 (no usado en este test)",
+            prompt_version="reader-v1-v3",
+            estimated_tokens=500,
+        ),
+        measures_categories=frozenset(),
     )
     popularize = PopularizeReading(
         work=work,

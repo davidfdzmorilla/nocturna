@@ -1,7 +1,10 @@
 """Traducción entidad de dominio ↔ fila ORM, campo a campo.
 
 Diez funciones puras, dos por entidad (`*_to_row` / `*_from_row`), todas con
-argumentos nombrados explícitos. Deliberadamente **no** se usa
+argumentos nombrados explícitos, más `_measurements_to_json` /
+`_measurements_from_json` (T71.c), la traducción de
+`Reading.measurements` al `JSONB` de `ReadingRow.measurements` y su
+inversa. Deliberadamente **no** se usa
 `**vars(entity)`, `dataclasses.asdict()` ni un bucle sobre
 `dataclasses.fields(entity)`: si mañana se añade un campo al dominio y se
 olvida aquí, un mapper genérico lo colaría en silencio (columna `NULL` o
@@ -23,6 +26,11 @@ from nocturna.domain.entities import (
     AgentCall,
     Finding,
     Item,
+    MeasuredParameter,
+    Measurement,
+    MeasurementLimit,
+    MeasurementOrigin,
+    MeasurementUnit,
     Reading,
     Run,
 )
@@ -33,6 +41,60 @@ from nocturna.infrastructure.db.models import (
     ReadingRow,
     RunRow,
 )
+
+
+def _measurements_to_json(
+    measurements: tuple[Measurement, ...] | None,
+) -> list[dict] | None:
+    """`None` -> SQL `NULL` ("no se extrajo con este prompt"); `()` -> `[]`
+    ("se buscó y no había ninguna medida"). Ver `Reading.measurements` y el
+    `mapped_column(JSONB(none_as_null=True))` de `ReadingRow.measurements`
+    en `models.py`: sin ese `none_as_null=True`, esta distinción se perdería
+    en la columna. Los enums se guardan por su *valor* string (`.value`),
+    no por el nombre del miembro, igual que `_str_enum` en `models.py`.
+    """
+    if measurements is None:
+        return None
+    return [
+        {
+            "planet_name": measurement.planet_name,
+            "parameter": measurement.parameter.value,
+            "value": measurement.value,
+            "err_plus": measurement.err_plus,
+            "err_minus": measurement.err_minus,
+            "unit": measurement.unit.value,
+            "limit": measurement.limit.value,
+            "origin": measurement.origin.value,
+            "evidence": measurement.evidence,
+        }
+        for measurement in measurements
+    ]
+
+
+def _measurements_from_json(
+    raw: list[dict] | None,
+) -> tuple[Measurement, ...] | None:
+    """Inversa de `_measurements_to_json`. SQL `NULL` -> `None`; `[]` -> `()`.
+
+    Reconstruye cada `Measurement` por su constructor normal: pasa por
+    `__post_init__` y sus invariantes, no las repite aquí.
+    """
+    if raw is None:
+        return None
+    return tuple(
+        Measurement(
+            planet_name=entry["planet_name"],
+            parameter=MeasuredParameter(entry["parameter"]),
+            value=entry["value"],
+            err_plus=entry["err_plus"],
+            err_minus=entry["err_minus"],
+            unit=MeasurementUnit(entry["unit"]),
+            limit=MeasurementLimit(entry["limit"]),
+            origin=MeasurementOrigin(entry["origin"]),
+            evidence=entry["evidence"],
+        )
+        for entry in raw
+    )
 
 
 def item_to_row(item: Item) -> ItemRow:
@@ -77,6 +139,7 @@ def reading_to_row(reading: Reading) -> ReadingRow:
         tokens_in=reading.tokens_in,
         tokens_out=reading.tokens_out,
         model=reading.model,
+        measurements=_measurements_to_json(reading.measurements),
     )
 
 
@@ -93,6 +156,7 @@ def reading_from_row(row: ReadingRow) -> Reading:
         tokens_in=row.tokens_in,
         tokens_out=row.tokens_out,
         model=row.model,
+        measurements=_measurements_from_json(row.measurements),
     )
 
 

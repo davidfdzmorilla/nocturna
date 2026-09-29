@@ -111,10 +111,14 @@ from claude_agent_sdk import ResultMessage
 from fakes.clock import FakeClock
 from sqlalchemy import select
 
-from nocturna.application.agents.prompt_loader import READER_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    READER_PROMPT_VERSION,
+    READER_V3_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
-from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.domain.entities import Item, ItemStatus, Run
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.config import load_pipeline_config
@@ -276,15 +280,28 @@ async def test_smoke_read_item_llamada_real_produce_reading_persistida_y_gasto_c
 
     work = _work_factory(db_session_factory, run_id, policy)
 
+    # `measures_categories=frozenset()`: el ítem de este humo es
+    # "astro-ph.HE", fuera de `[reader] measurement_categories`
+    # (`config/pipeline.toml`, T71.c), así que la variante `reader-v3`
+    # nunca se elegiría de todos modos -- se fija explícita, no se lee de
+    # `config.reader`, para que este humo no dependa de esa sección.
     read_item = ReadItem(
         work=work,
         provider=AgentSDKProvider(),
-        system_prompt=load_prompt("reader"),
-        prompt_version=READER_PROMPT_VERSION,
         model=config.models.reader,
         max_turns=policy.max_turns_per_agent,
-        estimated_tokens=_ESTIMATED_TOKENS,
         max_attempts=policy.max_calls_per_item,
+        base=ReaderPrompt(
+            system_prompt=load_prompt("reader"),
+            prompt_version=READER_PROMPT_VERSION,
+            estimated_tokens=_ESTIMATED_TOKENS,
+        ),
+        measures=ReaderPrompt(
+            system_prompt=load_prompt("reader-v3"),
+            prompt_version=READER_V3_PROMPT_VERSION,
+            estimated_tokens=config.budget.reader_v3_estimated_tokens,
+        ),
+        measures_categories=frozenset(),
     )
 
     # --- la llamada real (uno o dos intentos, según haga falta) -------------

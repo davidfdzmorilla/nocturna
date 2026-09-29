@@ -117,11 +117,18 @@ class _ClockStub:
 
 
 def _valid_reading_json(**overrides: object) -> dict:
+    # `measurements: []` (T71.c): `make_item()` (factories.py) pone por
+    # defecto `categories = ["astro-ph.EP"]`, que es justo
+    # `[reader] measurement_categories` en `config/pipeline.toml` real (el
+    # que carga `main()`), así que estos tests -- que llaman a `main()` de
+    # verdad -- disparan la variante `reader-v3`, que exige este campo.
+    # Vacío: ninguno de estos tests prueba medidas.
     defaults: dict[str, object] = {
         "summary": "Resumen generado por el FakeLLMProvider.",
         "objects": ["NGC 1234"],
         "claims": ["Una afirmación de prueba."],
         "interest_score": 4,
+        "measurements": [],
     }
     defaults.update(overrides)
     return defaults
@@ -558,7 +565,14 @@ def test_denegacion_de_presupuesto_en_el_popularizer_devuelve_4_y_nombra_el_rol_
     6500 tokens disponibles tras la reserva del Editor) pero no para el
     Popularizer (`popularizer_estimated_tokens=7000` no cabe en los 5400
     tokens que quedan tras el gasto real del Reader). `_print_budget_denial`
-    debe nombrar "Popularizer" en su mensaje, no "Reader" a pelo."""
+    debe nombrar "Popularizer" en su mensaje, no "Reader" a pelo.
+
+    `categories=["astro-ph.GA"]` (T71.c): fuera de
+    `[reader] measurement_categories` (`["astro-ph.EP"]` en
+    `config/pipeline.toml`), para que el Reader use `reader_estimated_tokens`
+    (6000) y no `reader_v3_estimated_tokens` (13000, no cabría en los 6500
+    disponibles y el Reader se denegaría antes de llegar al Popularizer,
+    que es justo lo que este test no quiere probar)."""
     fake_provider.respond(
         AgentRole.READER,
         json=_valid_reading_json(interest_score=5),
@@ -566,7 +580,7 @@ def test_denegacion_de_presupuesto_en_el_popularizer_devuelve_4_y_nombra_el_rol_
         tokens_out=100,
     )
     _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=66_500)
-    item_id = _seed_item(db_session_factory)
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.GA"])
 
     code = main(["run-item", str(item_id)])
 
@@ -799,3 +813,123 @@ def test_editor_ya_llamado_devuelve_6_run_partial_sin_value_error(
         item_row = check_session.get(ItemRow, item.id)
         assert item_row is not None
         assert item_row.status is ItemStatus.READ
+
+
+# --- T71.c, correcciones tras la pasada 1 de revisión: cableado de --------
+# --- `_build_read_item` (composition root) con el `run-item` real ---------
+#
+# `test_read_item_measures.py::test_reader_autoriza_cada_variante_con_su_propia_estimacion`
+# ya prueba, a nivel de `ReadItem`, que cada variante usa su propia
+# `estimated_tokens` -- pero esa prueba construye `ReaderPrompt` a mano,
+# nunca pasa por `cli._build_read_item`, que es el único sitio que traduce
+# `PipelineConfig` (`config/pipeline.toml`) a esos dos `ReaderPrompt`. Un
+# error ahí (pasar `reader_estimated_tokens` a la variante v3, o
+# `frozenset()` en vez de `config.reader.measurement_categories`) no lo
+# detectaría ningún test existente porque ninguno ejercita `main()` con las
+# dos categorías a la vez ni con un presupuesto que distinga una
+# estimación de la otra. Estos tres tests, en cambio, ejercitan `main()`
+# de punta a punta -- composition root real, `config/pipeline.toml` real
+# -- así que sí detectarían esos dos mutantes concretos (ver el resumen del
+# tester para la comprobación manual de que efectivamente lo hacen).
+
+
+def test_item_astro_ph_ep_usa_reader_v3_y_el_agentcall_registra_esa_prompt_version(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """`make_item()` ya pone `categories=["astro-ph.EP"]` por defecto (igual
+    que `[reader] measurement_categories` en `config/pipeline.toml` real);
+    se fija aquí de forma explícita para que el test no dependa en
+    silencio de ese valor por defecto de la factoría."""
+    fake_provider.respond(
+        AgentRole.READER,
+        json=_valid_reading_json(interest_score=2),  # por debajo del umbral: sin Popularizer
+        tokens_in=1200,
+        tokens_out=300,
+    )
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"])
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 0
+    calls = _all_agent_calls(db_session_factory)
+    assert len(calls) == 1
+    assert calls[0].prompt_version == "reader-v3"
+
+
+def test_item_astro_ph_ga_usa_reader_v2_y_el_agentcall_registra_esa_prompt_version(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """`astro-ph.GA` está en `sources.arxiv.categories` pero fuera de
+    `[reader] measurement_categories` -- el Reader debe usar `reader-v2`.
+    `_valid_reading_json()` no lleva `measurements` (solo lo añade
+    `_valid_reading_json` cuando se le pide para la variante v3 en otros
+    tests de este fichero), coherente con que `reader-v2` no lo exige."""
+    fake_provider.respond(
+        AgentRole.READER,
+        json={
+            "summary": "Resumen generado por el FakeLLMProvider.",
+            "objects": ["NGC 1234"],
+            "claims": ["Una afirmación de prueba."],
+            "interest_score": 2,  # por debajo del umbral: sin Popularizer
+        },
+        tokens_in=1200,
+        tokens_out=300,
+    )
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.GA"])
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 0
+    calls = _all_agent_calls(db_session_factory)
+    assert len(calls) == 1
+    assert calls[0].prompt_version == "reader-v2"
+
+
+def test_item_astro_ph_ep_con_presupuesto_entre_v2_y_v3_se_deniega_sin_llamar_al_proveedor(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """Presupuesto restante para el Reader estrictamente entre
+    `budget.reader_estimated_tokens` (6.000) y `budget.reader_v3_estimated_tokens`
+    (13.000) de `config/pipeline.toml` real: cabría la variante `reader-v2`
+    pero no la `reader-v3`. Un ítem `astro-ph.EP` (que exige `reader-v3`)
+    debe denegarse sin llamar al proveedor -- exactamente el mutante que
+    describe el encargo: si `cli._build_read_item` pasara
+    `reader_estimated_tokens` (6.000) a la variante de medidas en vez de
+    `reader_v3_estimated_tokens` (13.000), esta llamada sí cabría en el
+    presupuesto y llegaría a autorizarse, y este test lo distinguiría.
+
+    `available = run.budget_tokens - editor_reserve_tokens` para el Reader
+    (`BudgetGuard._available_tokens`), así que `budget_tokens` se fija en
+    `editor_reserve_tokens + 10_000` (10.000 está estrictamente entre las
+    dos estimaciones) para que el presupuesto disponible para el Reader
+    sea justo esos 10.000, no los 60.000 de reserva del Editor."""
+    config = load_pipeline_config()
+    reader_v2_tokens = config.budget.reader_estimated_tokens
+    reader_v3_tokens = config.budget.reader_v3_estimated_tokens
+    assert reader_v2_tokens < 10_000 < reader_v3_tokens, (
+        "el presupuesto de este test (10.000) debe seguir cayendo estrictamente entre "
+        "las dos estimaciones reales de config/pipeline.toml; si esa relación deja de "
+        "cumplirse, el test hay que recalibrarlo, no confiar en un margen que ya no existe"
+    )
+    budget_tokens = config.budget.editor_reserve_tokens + 10_000
+    _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=budget_tokens)
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"])
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 4
+    assert fake_provider.calls == [], "BudgetGuard deniega antes de llamar al proveedor"
+    assert _all_agent_calls(db_session_factory) == []
+    assert _all_readings(db_session_factory) == []
+    assert _item_status(db_session_factory, item_id) is ItemStatus.NEW
+
+    runs = _all_runs(db_session_factory)
+    assert len(runs) == 1
+    assert runs[0].status is RunStatus.RUNNING, (
+        "el Run se pre-sembró RUNNING (run_reused=True): '_run_item' no lo cierra -- "
+        "'_finish_run' solo se llama si 'not run_reused' -- así que la denegación de "
+        "BudgetGuard no debe tocar su estado"
+    )

@@ -94,11 +94,18 @@ class _ClockStub:
 
 
 def _valid_reading_json(**overrides: object) -> dict:
+    # `measurements: []` (T71.c): `make_item()` (factories.py) pone por
+    # defecto `categories = ["astro-ph.EP"]`, que es justo
+    # `[reader] measurement_categories` en `config/pipeline.toml` real (el
+    # que carga `main()`), así que estos tests -- que llaman a `main()` de
+    # verdad -- disparan la variante `reader-v3`, que exige este campo.
+    # Vacío: ninguno de estos tests prueba medidas.
     defaults: dict[str, object] = {
         "summary": "Resumen generado por el FakeLLMProvider.",
         "objects": ["NGC 1234"],
         "claims": ["Una afirmación de prueba."],
         "interest_score": 5,
+        "measurements": [],
     }
     defaults.update(overrides)
     return defaults

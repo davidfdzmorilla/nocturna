@@ -27,6 +27,7 @@ weekly_reset_weekday = "monday"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
 reader_estimated_tokens = 6000
+reader_v3_estimated_tokens = 13000
 popularizer_estimated_tokens = 7000
 editor_base_tokens = 4000
 editor_tokens_per_candidate = 700
@@ -51,6 +52,9 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+
+[reader]
+measurement_categories = ["astro-ph.EP"]
 
 [sources.arxiv]
 categories = ["astro-ph.EP", "astro-ph.GA"]
@@ -82,7 +86,7 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.budget.nightly_tokens == 300000
     assert config.budget.editor_base_tokens == 2500
     assert config.budget.editor_tokens_per_candidate == 850
-    assert config.limits.max_items_per_night == 40
+    assert config.limits.max_items_per_night == 30
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
     assert config.limits.max_calls_per_item == 2
@@ -131,6 +135,57 @@ def test_arxiv_page_size_y_max_results_se_cargan():
 
     assert config.sources.arxiv.page_size == 100
     assert config.sources.arxiv.max_results_per_fetch == 400
+
+
+# --- reader.measurement_categories (T71.c) ---------------------------------
+
+
+def test_el_pipeline_toml_real_carga_con_los_valores_de_t71c():
+    """Los tres valores que T71.c fijó de verdad en `config/pipeline.toml`:
+    `max_items_per_night` bajado de 40 a 30, `reader_v3_estimated_tokens` a
+    13.000 y `reader.measurement_categories` con solo `astro-ph.EP`."""
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+
+    assert config.limits.max_items_per_night == 30
+    assert config.budget.reader_v3_estimated_tokens == 13000
+    assert config.reader.measurement_categories == ["astro-ph.EP"]
+
+
+def test_falta_reader_v3_estimated_tokens_falla(tmp_path):
+    content = BASE_TOML.replace("reader_v3_estimated_tokens = 13000\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_measurement_categories_con_categoria_ausente_de_arxiv_categories_falla(tmp_path):
+    content = BASE_TOML.replace(
+        'measurement_categories = ["astro-ph.EP"]', 'measurement_categories = ["astro-ph.HE"]'
+    )
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_measurement_categories_vacia_se_admite(tmp_path):
+    content = BASE_TOML.replace(
+        'measurement_categories = ["astro-ph.EP"]', "measurement_categories = []"
+    )
+    path = _write_toml(tmp_path, content)
+
+    config = load_pipeline_config(path)
+
+    assert config.reader.measurement_categories == []
+
+
+def test_falta_la_seccion_reader_falla(tmp_path):
+    content = BASE_TOML.replace('[reader]\nmeasurement_categories = ["astro-ph.EP"]\n\n', "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
 
 
 def test_una_clave_desconocida_falla(tmp_path):
@@ -631,9 +686,14 @@ def test_una_categoria_sin_set_no_estorba_con_la_via_api(tmp_path):
     """El validador es específico de la vía OAI: la vía Atom consulta por
     `cat:X`, sin sets, así que no debe rechazar categorías que OAI no sepa
     traducir."""
-    content = BASE_TOML.replace(
-        'categories = ["astro-ph.EP", "astro-ph.GA"]', 'categories = ["math.AG"]'
-    ).replace('ingest_via = "oai"', 'ingest_via = "api"')
+    content = (
+        BASE_TOML.replace('categories = ["astro-ph.EP", "astro-ph.GA"]', 'categories = ["math.AG"]')
+        .replace('ingest_via = "oai"', 'ingest_via = "api"')
+        # `reader.measurement_categories` (T71.c) debe seguir siendo un
+        # subconjunto de `sources.arxiv.categories`: vacío aquí porque este
+        # test no ejercita esa sección, solo la de la vía "api".
+        .replace('measurement_categories = ["astro-ph.EP"]', "measurement_categories = []")
+    )
     path = _write_toml(tmp_path, content)
 
     assert load_pipeline_config(path).sources.arxiv.categories == ["math.AG"]

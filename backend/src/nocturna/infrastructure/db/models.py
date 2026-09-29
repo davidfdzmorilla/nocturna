@@ -45,7 +45,7 @@ import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -132,6 +132,14 @@ class ReadingRow(Base):
     tokens_in: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     tokens_out: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     model: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    # `none_as_null=True` es el punto clave: sin él, SQLAlchemy persiste el
+    # `None` de Python como el literal JSON `null` (dato, "no se extrajo con
+    # este prompt"), y guardar `()` guarda `[]` (dato, "se buscó y no había
+    # ninguna medida"). Ambos son distintos de SQL `NULL` a secas si no se
+    # pasa este flag: por defecto, `None` en Python se traduce siempre a
+    # `null` JSON, nunca a `NULL` de columna, y la distinción documentada en
+    # `Reading.measurements` (T71.c) se perdería.
+    measurements: Mapped[list[dict] | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     __table_args__ = (
         sa.UniqueConstraint("item_id", name="uq_readings_item_id"),

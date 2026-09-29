@@ -67,6 +67,11 @@ from nocturna.domain.entities import (
     FindingType,
     Item,
     ItemStatus,
+    MeasuredParameter,
+    Measurement,
+    MeasurementLimit,
+    MeasurementOrigin,
+    MeasurementUnit,
     Reading,
     Run,
 )
@@ -705,6 +710,41 @@ def test_build_prompt_envuelve_la_reading_entre_marcas_e_incluye_el_titulo_dentr
     assert reading.summary in prompt
     assert "NGC 1" in prompt
     assert "Afirmación T42" in prompt
+
+
+def test_build_prompt_no_incluye_nada_de_measurements_t71c():
+    """T71.c añadió `Reading.measurements` (medidas estructuradas del Reader
+    v3), pero el Popularizer sigue trabajando solo con resumen/objetos/
+    afirmaciones: `_build_prompt` no debe filtrar ningún dato de las
+    medidas -- ni el nombre del planeta, ni el valor, ni la evidencia -- al
+    prompt de usuario."""
+    item = _make_item(title="Un título de prueba T71C")
+    measurement = Measurement(
+        planet_name="Kepler-0000 b",
+        parameter=MeasuredParameter.MASS,
+        value=2.8,
+        err_plus=0.5,
+        err_minus=0.5,
+        unit=MeasurementUnit.M_JUP,
+        limit=MeasurementLimit.NONE,
+        origin=MeasurementOrigin.THIS_WORK,
+        evidence="una cita literal y singular ZQXMEASURE71C del abstract",
+    )
+    reading = _make_reading(
+        item.id,
+        summary="Resumen T71C",
+        objects=("Kepler-0000",),
+        claims=("Afirmación T71C",),
+        interest_score=5,
+        measurements=(measurement,),
+    )
+
+    prompt = PopularizeReading._build_prompt(item, reading)
+
+    assert "Kepler-0000 b" not in prompt
+    assert "2.8" not in prompt
+    assert "ZQXMEASURE71C" not in prompt
+    assert "M_jup" not in prompt
 
 
 async def test_agent_request_prompt_lleva_titulo_y_reading_y_el_system_prompt_va_aparte():
