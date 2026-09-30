@@ -13,6 +13,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
+from helpers.exoplanet import catalog_tension_v1298_b
+
 from nocturna.domain.entities import (
     AgentCall,
     AgentCallStatus,
@@ -27,6 +30,8 @@ from nocturna.domain.entities import (
 from nocturna.domain.errors import GuardedFieldAssignment
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.db.mappers import (
+    _catalog_tension_from_json,
+    _catalog_tension_to_json,
     agent_call_from_row,
     agent_call_to_row,
     finding_from_row,
@@ -253,3 +258,102 @@ def test_todos_los_datetimes_rehidratados_son_aware_y_el_mismo_instante():
         assert value.tzinfo is not None
         assert value.utcoffset() is not None
         assert value == AWARE_NOW
+
+
+# --- catalog_tension (T72) -----------------------------------------------------
+
+
+def test_finding_paper_explained_round_trip_deja_la_columna_catalog_tension_en_none():
+    finding = _finding()
+
+    row = finding_to_row(finding)
+
+    assert row.catalog_tension is None
+    assert finding_from_row(row) == finding
+
+
+def test_finding_catalog_tension_round_trip_produce_una_entidad_igual():
+    tension = catalog_tension_v1298_b()
+    finding = _finding(type=FindingType.CATALOG_TENSION, catalog_tension=tension)
+
+    rehydrated = finding_from_row(finding_to_row(finding))
+
+    assert rehydrated == finding
+    assert rehydrated.catalog_tension == tension
+
+
+def test_catalog_tension_json_congela_claves_version_y_enums_por_valor():
+    tension = catalog_tension_v1298_b()
+
+    raw = _catalog_tension_to_json(tension)
+
+    assert raw is not None
+    assert set(raw) == {
+        "schema_version",
+        "planet_name",
+        "parameter",
+        "archive_url",
+        "threshold_sigma",
+        "reference_sigma",
+        "comparisons",
+    }
+    assert raw["schema_version"] == 1
+    assert raw["parameter"] == tension.parameter.value
+    assert isinstance(raw["comparisons"], list) and raw["comparisons"]
+    for entry in raw["comparisons"]:
+        assert set(entry) == {"paper", "prior", "sigma"}
+        assert set(entry["paper"]) == {
+            "planet_name",
+            "parameter",
+            "value",
+            "err_plus",
+            "err_minus",
+            "unit",
+            "limit",
+            "origin",
+            "evidence",
+        }
+        assert set(entry["prior"]) == {
+            "planet_name",
+            "parameter",
+            "value",
+            "err_plus",
+            "err_minus",
+            "unit",
+            "limit",
+            "reference",
+            "is_default",
+            "arxiv_id",
+        }
+        for enum_field in ("parameter", "unit", "limit", "origin"):
+            assert type(entry["paper"][enum_field]) is str
+        for enum_field in ("parameter", "unit", "limit"):
+            assert type(entry["prior"][enum_field]) is str
+    first = tension.comparisons[0]
+    assert raw["comparisons"][0]["paper"]["unit"] == first.paper.unit.value
+    assert raw["comparisons"][0]["paper"]["origin"] == first.paper.origin.value
+    assert raw["comparisons"][0]["prior"]["limit"] == first.prior.limit.value
+
+
+def test_catalog_tension_none_se_serializa_como_none_y_se_rehidrata_como_none():
+    assert _catalog_tension_to_json(None) is None
+    assert _catalog_tension_from_json(None) is None
+
+
+@pytest.mark.parametrize("version", [2, 0, "1", None, True])
+def test_catalog_tension_schema_version_desconocida_lanza_value_error(version):
+    raw = _catalog_tension_to_json(catalog_tension_v1298_b())
+    assert raw is not None
+    raw["schema_version"] = version
+
+    with pytest.raises(ValueError, match="schema_version"):
+        _catalog_tension_from_json(raw)
+
+
+def test_catalog_tension_schema_version_ausente_lanza_value_error():
+    raw = _catalog_tension_to_json(catalog_tension_v1298_b())
+    assert raw is not None
+    del raw["schema_version"]
+
+    with pytest.raises(ValueError, match="schema_version"):
+        _catalog_tension_from_json(raw)

@@ -1,7 +1,10 @@
 """Constructores de `Measurement`, `CatalogSolution`, `Item` y `Reading` para
-los tests de T73 (tension frente al catalogo). Sin IO ni red."""
+los tests de T73 (tensión frente al catálogo). Sin IO ni red."""
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from nocturna.domain.catalog import CatalogSolution
@@ -14,6 +17,9 @@ from nocturna.domain.entities import (
     MeasurementUnit,
     Reading,
 )
+
+if TYPE_CHECKING:
+    from nocturna.domain.tension import TensionResult
 
 MASS = MeasuredParameter.MASS
 RADIUS = MeasuredParameter.RADIUS
@@ -99,4 +105,45 @@ def make_reading(
         tokens_out=50,
         model="fake-model",
         measurements=measurements,
+    )
+
+
+# --- T72: CatalogTension real de V1298 Tau (datos de T74) -------------------
+
+V1298_MEASURES = "2609.30038.reader-measures-exp1.derived-fullname.json"
+V1298_ARCHIVE_URL = "https://exoplanetarchive.ipac.caltech.edu/overview/V1298%20Tau%20b"
+V1298_THRESHOLD = 3.0
+
+
+def v1298_tension_results() -> dict[str, TensionResult]:
+    """`TensionResult` reales por planeta ("V1298 Tau b" / "V1298 Tau e").
+
+    Origen: `ComputeTensions` sobre el catálogo sin red de `helpers.archive`
+    (fixture `ps_v1298tau.csv`, filas reales del archivo) y las medidas del
+    Reader de `tests/fixtures/t71c/` (paper 2609.30038). Síncrono: usa
+    `anyio.run`, así que no debe llamarse desde un test async.
+    """
+    import anyio
+
+    from helpers.archive import load_t71c_measurements, make_catalog
+    from nocturna.application.use_cases.compute_tensions import ComputeTensions
+
+    async def run():
+        catalog, _, _ = make_catalog()
+        item = make_item("2609.30038")
+        reading = make_reading(item.id, load_t71c_measurements(V1298_MEASURES))
+        return await ComputeTensions(catalog)([(item, reading)])
+
+    report = anyio.run(run)
+    return {r.planet_name: r for r in report.results}
+
+
+def catalog_tension_v1298_b():
+    """`CatalogTension` de V1298 Tau b (masa, referencia ~3,368 sigma, umbral 3)."""
+    from nocturna.domain.tension import catalog_tension_from
+
+    return catalog_tension_from(
+        v1298_tension_results()["V1298 Tau b"],
+        threshold_sigma=V1298_THRESHOLD,
+        archive_url=V1298_ARCHIVE_URL,
     )
