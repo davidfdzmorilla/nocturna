@@ -18,8 +18,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
-from nocturna.domain.catalog import CatalogSolution
 from nocturna.domain.entities import (
+    CatalogSolution,
+    CatalogTension,
+    CatalogTensionComparison,
     MeasuredParameter,
     Measurement,
     MeasurementUnit,
@@ -145,3 +147,26 @@ class TensionResult:
         (OPEN_DECISIONS T73, 2026-09-30)."""
         sigma = self.reference_sigma()
         return sigma is not None and sigma >= threshold_sigma
+
+
+def catalog_tension_from(
+    result: TensionResult, *, threshold_sigma: float, archive_url: str
+) -> CatalogTension:
+    """Construye la `CatalogTension` publicable de un `TensionResult`.
+    `InvariantViolation` si el resultado no es candidato al umbral dado."""
+    if not result.is_candidate(threshold_sigma):
+        raise InvariantViolation("el resultado no es candidato a hallazgo con ese umbral")
+    reference_sigma = result.reference_sigma()
+    if reference_sigma is None:
+        raise InvariantViolation("el resultado no tiene 'reference_sigma'")
+    return CatalogTension(
+        planet_name=result.planet_name,
+        parameter=result.parameter,
+        archive_url=archive_url,
+        threshold_sigma=threshold_sigma,
+        reference_sigma=reference_sigma,
+        comparisons=tuple(
+            CatalogTensionComparison(paper=c.paper, prior=c.prior, sigma=c.sigma)
+            for c in result.comparisons
+        ),
+    )

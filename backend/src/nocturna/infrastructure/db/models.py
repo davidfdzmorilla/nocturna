@@ -168,8 +168,16 @@ class FindingRow(Base):
     level_technical: Mapped[str] = mapped_column(sa.Text, nullable=False)
     confidence: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    # Solo para `type = 'catalog_tension'` (T72, ADR 0012); `NULL` en el resto.
+    # `none_as_null=True`: `None` es SQL NULL y no el JSON `null`, para que el
+    # CHECK `catalog_tension_iff_type` funcione. Lleva `schema_version` dentro.
+    catalog_tension: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     __table_args__ = (
+        sa.CheckConstraint(
+            "(type = 'catalog_tension') = (catalog_tension IS NOT NULL)",
+            name="catalog_tension_iff_type",
+        ),
         sa.CheckConstraint(
             "confidence IS NULL OR confidence BETWEEN 0 AND 1", name="confidence_range"
         ),

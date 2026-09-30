@@ -24,6 +24,9 @@ resueltos al constructor es válido y no dispara ninguna guarda.
 
 from nocturna.domain.entities import (
     AgentCall,
+    CatalogSolution,
+    CatalogTension,
+    CatalogTensionComparison,
     Finding,
     Item,
     MeasuredParameter,
@@ -43,6 +46,36 @@ from nocturna.infrastructure.db.models import (
 )
 
 
+def _measurement_to_dict(measurement: Measurement) -> dict:
+    """Un `Measurement` como dict JSON; enums por `.value`."""
+    return {
+        "planet_name": measurement.planet_name,
+        "parameter": measurement.parameter.value,
+        "value": measurement.value,
+        "err_plus": measurement.err_plus,
+        "err_minus": measurement.err_minus,
+        "unit": measurement.unit.value,
+        "limit": measurement.limit.value,
+        "origin": measurement.origin.value,
+        "evidence": measurement.evidence,
+    }
+
+
+def _measurement_from_dict(entry: dict) -> Measurement:
+    """Inversa de `_measurement_to_dict`; pasa por `__post_init__`."""
+    return Measurement(
+        planet_name=entry["planet_name"],
+        parameter=MeasuredParameter(entry["parameter"]),
+        value=entry["value"],
+        err_plus=entry["err_plus"],
+        err_minus=entry["err_minus"],
+        unit=MeasurementUnit(entry["unit"]),
+        limit=MeasurementLimit(entry["limit"]),
+        origin=MeasurementOrigin(entry["origin"]),
+        evidence=entry["evidence"],
+    )
+
+
 def _measurements_to_json(
     measurements: tuple[Measurement, ...] | None,
 ) -> list[dict] | None:
@@ -55,20 +88,7 @@ def _measurements_to_json(
     """
     if measurements is None:
         return None
-    return [
-        {
-            "planet_name": measurement.planet_name,
-            "parameter": measurement.parameter.value,
-            "value": measurement.value,
-            "err_plus": measurement.err_plus,
-            "err_minus": measurement.err_minus,
-            "unit": measurement.unit.value,
-            "limit": measurement.limit.value,
-            "origin": measurement.origin.value,
-            "evidence": measurement.evidence,
-        }
-        for measurement in measurements
-    ]
+    return [_measurement_to_dict(measurement) for measurement in measurements]
 
 
 def _measurements_from_json(
@@ -81,19 +101,90 @@ def _measurements_from_json(
     """
     if raw is None:
         return None
-    return tuple(
-        Measurement(
-            planet_name=entry["planet_name"],
-            parameter=MeasuredParameter(entry["parameter"]),
-            value=entry["value"],
-            err_plus=entry["err_plus"],
-            err_minus=entry["err_minus"],
-            unit=MeasurementUnit(entry["unit"]),
-            limit=MeasurementLimit(entry["limit"]),
-            origin=MeasurementOrigin(entry["origin"]),
-            evidence=entry["evidence"],
+    return tuple(_measurement_from_dict(entry) for entry in raw)
+
+
+# Versión del JSON de `findings.catalog_tension`. Solo existe en
+# infraestructura; el dominio no la conoce.
+CATALOG_TENSION_SCHEMA_VERSION = 1
+
+
+def _solution_to_dict(solution: CatalogSolution) -> dict:
+    return {
+        "planet_name": solution.planet_name,
+        "parameter": solution.parameter.value,
+        "value": solution.value,
+        "err_plus": solution.err_plus,
+        "err_minus": solution.err_minus,
+        "unit": solution.unit.value,
+        "limit": solution.limit.value,
+        "reference": solution.reference,
+        "is_default": solution.is_default,
+        "arxiv_id": solution.arxiv_id,
+    }
+
+
+def _solution_from_dict(entry: dict) -> CatalogSolution:
+    return CatalogSolution(
+        planet_name=entry["planet_name"],
+        parameter=MeasuredParameter(entry["parameter"]),
+        value=entry["value"],
+        err_plus=entry["err_plus"],
+        err_minus=entry["err_minus"],
+        unit=MeasurementUnit(entry["unit"]),
+        limit=MeasurementLimit(entry["limit"]),
+        reference=entry["reference"],
+        is_default=entry["is_default"],
+        arxiv_id=entry["arxiv_id"],
+    )
+
+
+def _catalog_tension_to_json(tension: CatalogTension | None) -> dict | None:
+    """`None` -> SQL `NULL` (finding que no es `catalog_tension`)."""
+    if tension is None:
+        return None
+    return {
+        "schema_version": CATALOG_TENSION_SCHEMA_VERSION,
+        "planet_name": tension.planet_name,
+        "parameter": tension.parameter.value,
+        "archive_url": tension.archive_url,
+        "threshold_sigma": tension.threshold_sigma,
+        "reference_sigma": tension.reference_sigma,
+        "comparisons": [
+            {
+                "paper": _measurement_to_dict(comparison.paper),
+                "prior": _solution_to_dict(comparison.prior),
+                "sigma": comparison.sigma,
+            }
+            for comparison in tension.comparisons
+        ],
+    }
+
+
+def _catalog_tension_from_json(raw: dict | None) -> CatalogTension | None:
+    """Inversa. `schema_version` ausente o distinta de la conocida -> `ValueError`."""
+    if raw is None:
+        return None
+    version = raw.get("schema_version")
+    if type(version) is not int or version != CATALOG_TENSION_SCHEMA_VERSION:
+        raise ValueError(
+            f"catalog_tension: schema_version {version!r} desconocida "
+            f"(soportada: {CATALOG_TENSION_SCHEMA_VERSION})"
         )
-        for entry in raw
+    return CatalogTension(
+        planet_name=raw["planet_name"],
+        parameter=MeasuredParameter(raw["parameter"]),
+        archive_url=raw["archive_url"],
+        threshold_sigma=raw["threshold_sigma"],
+        reference_sigma=raw["reference_sigma"],
+        comparisons=tuple(
+            CatalogTensionComparison(
+                paper=_measurement_from_dict(entry["paper"]),
+                prior=_solution_from_dict(entry["prior"]),
+                sigma=entry["sigma"],
+            )
+            for entry in raw["comparisons"]
+        ),
     )
 
 
@@ -172,6 +263,7 @@ def finding_to_row(finding: Finding) -> FindingRow:
         level_technical=finding.level_technical,
         confidence=finding.confidence,
         published_at=finding.published_at,
+        catalog_tension=_catalog_tension_to_json(finding.catalog_tension),
     )
 
 
@@ -187,6 +279,7 @@ def finding_from_row(row: FindingRow) -> Finding:
         level_technical=row.level_technical,
         confidence=row.confidence,
         published_at=row.published_at,
+        catalog_tension=_catalog_tension_from_json(row.catalog_tension),
     )
 
 

@@ -268,6 +268,139 @@ class Measurement:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogSolution:
+    """Una solución publicada de un parámetro de un planeta en el catálogo.
+
+    Es la "previa" frente a la que se compara la medida de un paper.
+    `is_default` marca la solución que el archivo declara por defecto para
+    el planeta (referencia de `TensionResult.is_candidate`, OPEN_DECISIONS
+    T73, 2026-09-30). `arxiv_id` identifica el paper de origen, si el
+    archivo lo conoce, para que el caso de uso excluya la solución del
+    propio paper que se está analizando. Contrato para el adaptador (T74):
+    identificador arXiv SIN versión y con el mismo formato que
+    `Item.external_id` (p. ej. `2609.30038`, nunca `2609.30038v2` ni
+    `arXiv:2609.30038`), porque la exclusión compara por igualdad exacta
+    de cadenas. `None` si el adaptador no lo reconoce: entonces el paper se
+    compara consigo mismo y sale σ ≈ 0 (fallo hacia el lado seguro).
+    """
+
+    planet_name: str
+    parameter: MeasuredParameter
+    value: float
+    err_plus: float | None
+    err_minus: float | None
+    unit: MeasurementUnit
+    limit: MeasurementLimit
+    reference: str
+    is_default: bool
+    arxiv_id: str | None
+
+    def __post_init__(self) -> None:
+        if not self.planet_name.strip():
+            raise InvariantViolation("'planet_name' no puede estar vacío")
+        if not self.reference.strip():
+            raise InvariantViolation("'reference' no puede estar vacío")
+        if not math.isfinite(self.value):
+            raise InvariantViolation("'value' debe ser un número finito")
+        if self.value <= 0:
+            raise InvariantViolation("'value' debe ser mayor que cero")
+        for name in ("err_plus", "err_minus"):
+            err = getattr(self, name)
+            if err is None:
+                continue
+            if not math.isfinite(err):
+                raise InvariantViolation(f"'{name}' debe ser un número finito")
+            if err < 0:
+                raise InvariantViolation(f"'{name}' no puede ser negativo")
+        if self.unit not in UNITS_BY_PARAMETER[self.parameter]:
+            raise InvariantViolation(
+                f"'unit' {self.unit.value!r} no es coherente con "
+                f"'parameter' {self.parameter.value!r}"
+            )
+
+    @property
+    def usable_as_prior(self) -> bool:
+        """Utilizable como previa: valor puntual (no cota) y con los dos
+        errores informados y estrictamente positivos (un error cero haría
+        degenerar el denominador de σ)."""
+        return (
+            self.limit == MeasurementLimit.NONE
+            and self.err_plus is not None
+            and self.err_plus > 0
+            and self.err_minus is not None
+            and self.err_minus > 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogTensionComparison:
+    """Una medida del paper frente a una previa del catálogo, con su σ."""
+
+    paper: Measurement
+    prior: CatalogSolution
+    sigma: float
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogTension:
+    """Tensión de un parámetro de un planeta frente al catálogo (ADR 0012).
+
+    Value object sin identidad: nace dentro de `Finding.catalog_tension`.
+    `planet_name` es el nombre canónico del archivo y `archive_url` la ficha
+    del planeta. `reference_sigma` es el σ frente a la previa por defecto.
+    """
+
+    planet_name: str
+    parameter: MeasuredParameter
+    archive_url: str
+    threshold_sigma: float
+    reference_sigma: float
+    comparisons: tuple[CatalogTensionComparison, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.planet_name, "planet_name")
+        _require_non_empty(self.archive_url, "archive_url")
+        object.__setattr__(self, "comparisons", tuple(self.comparisons))
+        if not self.comparisons:
+            raise InvariantViolation("'comparisons' no puede estar vacía")
+        if not math.isfinite(self.threshold_sigma) or self.threshold_sigma <= 0:
+            raise InvariantViolation("'threshold_sigma' debe ser finito y mayor que cero")
+        if not math.isfinite(self.reference_sigma) or self.reference_sigma < self.threshold_sigma:
+            raise InvariantViolation("'reference_sigma' debe ser finito y >= 'threshold_sigma'")
+        for comparison in self.comparisons:
+            if not isinstance(comparison, CatalogTensionComparison):
+                raise InvariantViolation(
+                    "cada elemento de 'comparisons' debe ser CatalogTensionComparison"
+                )
+            if comparison.paper.parameter != self.parameter:
+                raise InvariantViolation("'paper' debe medir el 'parameter' de la tensión")
+            if comparison.prior.parameter != self.parameter:
+                raise InvariantViolation("'prior' debe ser del 'parameter' de la tensión")
+            if comparison.prior.planet_name != self.planet_name:
+                raise InvariantViolation("'prior' debe ser del planeta de la tensión")
+            if not comparison.paper.usable_for_tension:
+                raise InvariantViolation("'paper' no es utilizable para tensión")
+            if not comparison.prior.usable_as_prior:
+                raise InvariantViolation("'prior' no es utilizable como previa")
+            if not math.isfinite(comparison.sigma) or comparison.sigma < 0:
+                raise InvariantViolation("'sigma' debe ser finito y no negativo")
+        # Misma regla que `TensionResult.reference_sigma()` (domain/tension.py):
+        # una única previa `is_default` (por igualdad de valor) y `reference_sigma`
+        # igual al mínimo de los σ frente a ella. Comparación exacta: la factoría
+        # copia el valor y el JSON de Python round-tripea los float sin pérdida.
+        defaults = {c.prior for c in self.comparisons if c.prior.is_default}
+        if len(defaults) != 1:
+            raise InvariantViolation(
+                "las comparaciones deben tener exactamente una previa 'is_default'"
+            )
+        (reference,) = defaults
+        if self.reference_sigma != min(c.sigma for c in self.comparisons if c.prior == reference):
+            raise InvariantViolation(
+                "'reference_sigma' debe ser el mínimo de los σ frente a la previa por defecto"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class Reading:
     """Salida del Reader para un `Item`: una llamada ya ocurrida.
 
@@ -322,9 +455,10 @@ class Reading:
 
 
 class FindingType(StrEnum):
-    """Tipo de hallazgo publicado. Fase 1: solo explicación de un paper."""
+    """Tipo de hallazgo publicado: explicación de un paper o tensión con el catálogo."""
 
     PAPER_EXPLAINED = "paper_explained"
+    CATALOG_TENSION = "catalog_tension"
 
 
 @dataclass(slots=True)
@@ -341,6 +475,7 @@ class Finding:
     confidence: float | None = None
     published_at: datetime | None = None
     id: UUID = field(default_factory=uuid4)
+    catalog_tension: CatalogTension | None = None
 
     _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"confidence", "published_at"})
 
@@ -356,6 +491,14 @@ class Finding:
         _require_non_empty(self.level_curious, "level_curious")
         _require_non_empty(self.level_amateur, "level_amateur")
         _require_non_empty(self.level_technical, "level_technical")
+        if (self.type == FindingType.CATALOG_TENSION) != (self.catalog_tension is not None):
+            raise InvariantViolation(
+                "'catalog_tension' debe informarse si y solo si 'type' es catalog_tension"
+            )
+        if self.catalog_tension is not None and not isinstance(
+            self.catalog_tension, CatalogTension
+        ):
+            raise InvariantViolation("'catalog_tension' debe ser CatalogTension")
         if (self.published_at is None) != (self.confidence is None):
             raise InvariantViolation(
                 "'published_at' y 'confidence' deben estar ambos informados o ambos vacíos"
