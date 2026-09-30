@@ -70,7 +70,7 @@ El análisis corre contra la **suscripción Claude Max personal del autor**, no 
 ## Modelo de dominio (fase 1)
 
 - **Item**: unidad de ingesta. `source` (arxiv), `external_id`, `title`, `abstract`, `categories`, `published_at`, `fetched_at`, `status` (new / read / discarded / published / failed).
-- **Reading**: salida del Lector para un Item. `summary`, `objects` (lista de nombres), `claims` (lista), `interest_score` (1–5), `tokens_in`, `tokens_out`, `model`.
+- **Reading**: salida del Lector para un Item. `summary`, `objects` (lista de nombres), `claims` (lista), `interest_score` (1–5), `tokens_in`, `tokens_out`, `model`, `measurements` (fase 2, T71.c: lista de `Measurement` —planeta, parámetro mass/radius/period, valor, errores, unidad, límite, origen this_work/literature, cita literal—; `None` = no extraído, vacía = sin medidas; value object sin identidad, ADR 0014).
 - **Finding** (hallazgo): lo que se publica. `item_id`, `type` (fase 1: `paper_explained`), `title`, `level_curious`, `level_amateur`, `level_technical`, `confidence` (0–1, asignado por Editor), `published_at`, `run_id`.
 - **Run**: una ejecución nocturna. `started_at`, `finished_at`, `status` (completed / partial / failed / killed), `budget_tokens`, `tokens_used`, `items_fetched`, `items_read`, `findings_published`, `notes`.
 - **AgentCall**: registro de cada llamada a un agente. `run_id`, `item_id` (nullable), `agent` (reader / popularizer / editor), `model`, `tokens_in`, `tokens_out`, `duration_ms`, `status`, `prompt_version` (nullable).
@@ -83,7 +83,7 @@ Definidos programáticamente con `AgentDefinition` en el orquestador, no en `.cl
 
 | Agente | Modelo por defecto | Entrada | Salida (JSON estructurado) |
 |---|---|---|---|
-| **Reader** | Sonnet | un Item | Reading |
+| **Reader** | Sonnet | un Item | Reading; con `reader-v3` (ítems de `[reader] measurement_categories`, hoy astro-ph.EP) además `measurements`, filtradas en Python medida a medida |
 | **Popularizer** | Sonnet | Reading con `interest_score >= 4` | los tres niveles de texto |
 | **Editor** | Opus | todos los candidatos de la noche, en una sola llamada | lista de `item_id` a publicar con `confidence` y motivo |
 
@@ -105,7 +105,7 @@ Implementado en `application/budget.py` y aplicado por el orquestador antes de c
 - El Editor se llama como máximo **una vez por noche**.
 - `budget.weekly_reset_weekday` y `budget.weekly_reset_hour` se leen de configuración; el orquestador puede aplicar `budget.reset_day_multiplier` esa noche.
 
-Valor fijo (sin calibración automática): `nightly_tokens = 300_000`. Si el autor observa presión en su presupuesto semanal en otros proyectos, baja este tope a mano. Otros valores iniciales conservadores: `max_items_per_night = 40`, `max_turns_per_agent = 3`.
+Valor fijo (sin calibración automática): `nightly_tokens = 300_000`. Si el autor observa presión en su presupuesto semanal en otros proyectos, baja este tope a mano. Otros valores: `max_items_per_night = 30` (desde T71.c, ADR 0014), `max_turns_per_agent = 3`. Cada variante del Reader autoriza con su propia estimación (`reader_estimated_tokens`, `reader_v3_estimated_tokens`).
 
 ## Proveedor LLM desacoplado
 
@@ -168,4 +168,4 @@ cd web && pnpm test && pnpm lint && pnpm build
 
 ## Estado actual
 
-**Fase 1 completa en código y verificada en producción**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Cuatro noches automáticas ejecutadas sin interrupciones (2026-09-25 a 2026-09-28) con launchd. Gasto: 76–84% del tope nocturno (300.000 tokens). Humos reales: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. T60 cerrada (ADR 0011). T61 cerrada: fase 2 aprobada (ADR 0012): tensión de un objeto frente al NASA Exoplanet Archive, calculada en Python; Claude solo redacta. Tareas T70–T78 en `docs/PLAN_TAREAS.md`. Sin despliegue.
+**Fase 1 completa en código y verificada en producción**: Reader (T41), Popularizer (T42), Editor (T43), Orquestador nocturno (T44), API de lectura (T50) y Web Next.js (T51) finalizados. Cuatro noches automáticas ejecutadas sin interrupciones (2026-09-25 a 2026-09-28) con launchd. Gasto: 76–84% del tope nocturno (300.000 tokens). Humos reales: Reader 3.056 tokens/ítem, Popularizer ~4.560 tokens/candidato (~9.120 con reintento), Editor 3.381 tokens/3 candidatos (Opus). Gasto lateral del CLI (Haiku) ~1.163 tokens/sesión, variable entre versiones. API: `/health`, `/findings?page=&size=`, `/findings/{id}` sobre PostgreSQL, sin escritura, CORS para `localhost:3000`. Web: SSR dinámico, feed paginado `/`, detalle `/hallazgo/[id]` con selector de nivel por URL, Lighthouse accesibilidad 100/100. Suite backend: 815 passed (API 134 de -m db). Suite web: 37 tests verdes, lint y build verdes con API parada. T60 cerrada (ADR 0011). T61 cerrada: fase 2 aprobada (ADR 0012): tensión de un objeto frente al NASA Exoplanet Archive, calculada en Python; Claude solo redacta. Fase 2 en curso: T70 (tope de `page`), T71 (viabilidad), T71.b (prueba de atribución) y T71.c (Reader v3 con medidas, ADR 0013/0014) cerradas; la primera noche con `reader-v3` (2026-09-30) completó sin incidencias. Siguiente: T73 (cálculo de la tensión). Sin despliegue.
