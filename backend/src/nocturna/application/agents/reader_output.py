@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from nocturna.application.agents.parsing import InvalidAgentOutput, extract_json_object
 
-#: Mismo mapa que `domain.entities._UNITS_BY_PARAMETER`, con claves y
+#: Mismo mapa que `domain.entities.UNITS_BY_PARAMETER`, con claves y
 #: valores en texto (no en los enums `MeasuredParameter`/`MeasurementUnit`)
 #: porque `MeasurementOut` valida el JSON crudo del agente, antes de que
 #: exista ningún enum de dominio -- la construcción de `Measurement(...)`

@@ -200,7 +200,7 @@ class MeasurementOrigin(StrEnum):
     LITERATURE = "literature"
 
 
-_UNITS_BY_PARAMETER: Mapping[MeasuredParameter, frozenset[MeasurementUnit]] = {
+UNITS_BY_PARAMETER: Mapping[MeasuredParameter, frozenset[MeasurementUnit]] = {
     MeasuredParameter.MASS: frozenset({MeasurementUnit.M_JUP, MeasurementUnit.M_EARTH}),
     MeasuredParameter.RADIUS: frozenset({MeasurementUnit.R_JUP, MeasurementUnit.R_EARTH}),
     MeasuredParameter.PERIOD: frozenset({MeasurementUnit.DAY}),
@@ -246,7 +246,7 @@ class Measurement:
                 raise InvariantViolation(f"'{err_field_name}' debe ser un número finito")
             if err_value < 0:
                 raise InvariantViolation(f"'{err_field_name}' no puede ser negativo")
-        if self.unit not in _UNITS_BY_PARAMETER[self.parameter]:
+        if self.unit not in UNITS_BY_PARAMETER[self.parameter]:
             raise InvariantViolation(
                 f"'unit' {self.unit.value!r} no es coherente con "
                 f"'parameter' {self.parameter.value!r}"
