@@ -254,6 +254,14 @@ Implementada en T51. Next.js 15.5.25 con App Router, React 19.1.0, Tailwind 4.3.
 - `generateMetadata` duplicaba peticiones porque `AbortSignal.timeout()` por llamada rompe la Request Memoization de Next. Arreglado envolviendo `fetchFinding` en `React.cache()`, verificado contando peticiones en el log de uvicorn (una sola por visita).
 - Backend no acota `page`, permitiendo `?page=100000000000000000000` → SQL error `NumericValueOutOfRange` → 500. Arreglado en la web con validación `parsePageParam` regex `/^\d{1,6}$/` y tope `MAX_PAGE = 999_999`, congelado con tests (no es bug de T51, sino de T50). Saldado en el backend en T70: `page` acotado a `MAX_PAGE = 999_999` con `Query(le=...)`; por encima, `422`.
 
+## Cálculo de la tensión (fase 2, T73)
+
+Implementado en T73 ([ADR 0015](adr/0015-calculo-de-la-tension.md)). Todo en dominio y aplicación, sin red ni LLM:
+
+- **Puerto `domain/catalog.py::ExoplanetCatalog`** (asíncrono, como `ArxivSource`): `resolve_planet(name)` → nombre canónico o `None`; `solutions(planet, parameter)` → todas las `CatalogSolution` publicadas, incluida la del propio paper. `CatalogSolution` es un value object con `is_default`, `reference` y `arxiv_id` (sin versión, mismo formato que `Item.external_id`). El adaptador real es T74.
+- **`domain/tension.py`**: `compare(paper, prior)` calcula σ en unidad común terrestre con el error que mira al otro valor y devuelve `CatalogComparison` con los números usados; `TensionResult` agrupa por (ítem, planeta, parámetro) todas las comparaciones y expone `is_candidate(umbral)`: referencia = la previa por defecto (por igualdad de valor, exactamente una) y todas las medidas del paper deben superar el umbral frente a ella.
+- **`application/use_cases/compute_tensions.py::ComputeTensions`**: filtra medidas no utilizables sin llamar al catálogo, resuelve el planeta, agrupa, excluye la solución propia (`arxiv_id == external_id`), filtra previas utilizables y devuelve `TensionReport` con resultados y descartes (`NOT_USABLE`, `UNMATCHED`, `NO_PRIORS`). No aplica el umbral ni captura excepciones del puerto. Aún no está cableado en `run-night` (T74/T76).
+
 ## Lo que no existe en fase 1 (a propósito)
 
 Contrastador, Analista, `ApiKeyProvider`, autenticación, panel de administración, despliegue.
