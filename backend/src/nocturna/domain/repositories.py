@@ -46,6 +46,15 @@ class ReadingRepository(Protocol):
         """Recupera la lectura de un ítem, si existe. Usado por T42."""
         ...
 
+    def with_measurements(self) -> list[Reading]:
+        """Lecturas con `measurements` extraídas (T74).
+
+        Incluye las de lista vacía (`()`, "se buscó y no había medidas") y
+        excluye las de `None` (SQL NULL, "no extraído"). Orden determinista
+        por `id`.
+        """
+        ...
+
 
 class FindingRepository(Protocol):
     """Persistencia de `Finding`."""
@@ -108,4 +117,8 @@ class AgentCallRepository(Protocol):
 
     def count_for_run(self, run_id: UUID, agent: AgentRole) -> int:
         """Número de llamadas de un rol en el Run, para el límite del Editor. Usado por T30."""
+        ...
+
+    def count_runs_with_prompt_version(self, prompt_version: str) -> int:
+        """Número de Runs distintos con al menos una llamada de esa `prompt_version` (T74)."""
         ...

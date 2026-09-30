@@ -136,6 +136,17 @@ class SqlAlchemyReadingRepository:
         row = self._session.execute(stmt).scalar_one_or_none()
         return reading_from_row(row) if row is not None else None
 
+    def with_measurements(self) -> list[Reading]:
+        """Lecturas con `measurements IS NOT NULL`, ordenadas por `id`.
+
+        `JSONB(none_as_null=True)` guarda `None` como SQL NULL y `()` como
+        `[]`, así que `IS NOT NULL` separa "no extraído" de "sin medidas".
+        """
+        stmt = (
+            select(ReadingRow).where(ReadingRow.measurements.is_not(None)).order_by(ReadingRow.id)
+        )
+        return [reading_from_row(row) for row in self._session.execute(stmt).scalars()]
+
 
 class SqlAlchemyFindingRepository:
     """Persistencia de `Finding`. Cumple `domain.repositories.FindingRepository`."""
@@ -318,5 +329,12 @@ class SqlAlchemyAgentCallRepository:
         """
         stmt = select(func.count()).where(
             AgentCallRow.run_id == run_id, AgentCallRow.agent == agent
+        )
+        return self._session.execute(stmt).scalar_one()
+
+    def count_runs_with_prompt_version(self, prompt_version: str) -> int:
+        """Runs distintos con al menos una llamada de esa `prompt_version`."""
+        stmt = select(func.count(func.distinct(AgentCallRow.run_id))).where(
+            AgentCallRow.prompt_version == prompt_version
         )
         return self._session.execute(stmt).scalar_one()

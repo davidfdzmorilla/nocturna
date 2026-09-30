@@ -97,6 +97,16 @@ retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
 
+[sources.exoplanet_archive]
+tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+alias_url = "https://exoplanetarchive.ipac.caltech.edu/cgi-bin/Lookup/nph-aliaslookup.py"
+min_request_interval_s = 2.0
+request_timeout_s = 30.0
+max_requests_per_night = 40
+
+[tension]
+threshold_sigma = 3.0
+
 [llm]
 provider = "agent_sdk"
 """

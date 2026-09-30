@@ -278,12 +278,36 @@ _COURTESY_CEILING_S = 3.0
 _INGEST_TIME_SHARE = 0.25
 
 
+class ExoplanetArchiveConfig(BaseModel):
+    """NASA Exoplanet Archive: URLs y límites de cortesía (T74, ADR 0012)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tap_url: str = Field(min_length=1)
+    alias_url: str = Field(min_length=1)
+    # Espaciado mínimo entre peticiones consecutivas.
+    min_request_interval_s: float = Field(gt=0)
+    # Duración TOTAL máxima de una petición (no por operación de httpx).
+    request_timeout_s: float = Field(gt=0)
+    # Techo duro de peticiones por noche, INTENTADAS.
+    max_requests_per_night: int = Field(gt=0)
+
+
 class SourcesConfig(BaseModel):
     """Fuentes de ingesta configuradas."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     arxiv: ArxivConfig
+    exoplanet_archive: ExoplanetArchiveConfig
+
+
+class TensionConfig(BaseModel):
+    """Umbral de la tensión frente al catálogo (T73/T74)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    threshold_sigma: float = Field(gt=0)
 
 
 class LLMConfig(BaseModel):
@@ -321,6 +345,7 @@ class PipelineConfig(BaseModel):
     sources: SourcesConfig
     llm: LLMConfig
     reader: ReaderConfig
+    tension: TensionConfig
 
     @model_validator(mode="after")
     def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":
@@ -365,13 +390,20 @@ class PipelineConfig(BaseModel):
         arxiv = self.sources.arxiv
         per_request_s = arxiv.retry_max_elapsed_s + _HTTP_TIMEOUT_CEILING_S + _COURTESY_CEILING_S
         worst_case_s = arxiv.max_requests_per_fetch * per_request_s
+        archive = self.sources.exoplanet_archive
+        archive_per_request_s = archive.request_timeout_s + archive.min_request_interval_s
+        archive_worst_case_s = archive.max_requests_per_night * archive_per_request_s
+        total_s = worst_case_s + archive_worst_case_s
         budget_s = self.limits.run_timeout_s * _INGEST_TIME_SHARE
-        if worst_case_s > budget_s:
+        if total_s > budget_s:
             raise ValueError(
-                f"el peor caso de la ingesta ({worst_case_s:.0f} s = "
-                f"{arxiv.max_requests_per_fetch} peticiones x {per_request_s:.0f} s) supera el "
-                f"{_INGEST_TIME_SHARE:.0%} de limits.run_timeout_s ({budget_s:.0f} s); "
-                f"baja max_requests_per_fetch o retry_max_elapsed_s"
+                f"el peor caso de la ingesta ({total_s:.0f} s = arXiv {worst_case_s:.0f} s "
+                f"[{arxiv.max_requests_per_fetch} peticiones x {per_request_s:.0f} s] + "
+                f"Exoplanet Archive {archive_worst_case_s:.0f} s "
+                f"[{archive.max_requests_per_night} peticiones x {archive_per_request_s:.0f} s]) "
+                f"supera el {_INGEST_TIME_SHARE:.0%} de limits.run_timeout_s ({budget_s:.0f} s); "
+                f"baja max_requests_per_fetch, retry_max_elapsed_s o "
+                f"max_requests_per_night"
             )
         return self
 

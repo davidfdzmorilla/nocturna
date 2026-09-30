@@ -23,6 +23,9 @@ Tres responsabilidades:
   gastar suscripción; ver `pyproject.toml`, marcador `manual`).
 """
 
+import asyncio
+from collections.abc import Iterator
+
 import httpx
 import pytest
 
@@ -63,6 +66,15 @@ async def _blocked_transport_connect(self: object, *args: object, **kwargs: obje
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _close_archive_http_clients() -> Iterator[None]:
+    """Cierra los `httpx.AsyncClient` que `helpers.archive.make_client` abre."""
+    yield
+    from helpers.archive import close_open_clients
+
+    asyncio.run(close_open_clients())
 
 
 @pytest.fixture(autouse=True)

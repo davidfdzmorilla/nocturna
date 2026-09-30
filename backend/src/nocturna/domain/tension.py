@@ -121,21 +121,27 @@ class TensionResult:
             if comparison.paper.parameter != self.parameter:
                 raise InvariantViolation("'comparisons' debe ser homogénea en 'parameter'")
 
-    def is_candidate(self, threshold_sigma: float) -> bool:
-        """Candidato a hallazgo: la referencia es la previa marcada
-        `is_default` (exactamente una; con 0 o más de 1 no hay referencia y
-        devuelve `False`) y todas las medidas del paper deben superar el
-        umbral frente a ella (σ mínimo >= umbral). Las demás previas no
-        cuentan (OPEN_DECISIONS T73, 2026-09-30).
+    def reference_sigma(self) -> float | None:
+        """σ mínimo de las medidas del paper frente a la única previa marcada
+        `is_default`; `None` si no hay exactamente una (con 0 o más de 1 no
+        hay referencia).
 
         La previa por defecto se identifica por igualdad de valor, no por
         identidad de objeto: un `TensionResult` rehidratado o construido con
-        copias iguales de la misma previa debe dar el mismo veredicto. Dos
+        copias iguales de la misma previa debe dar el mismo resultado. Dos
         filas por defecto idénticas cuentan como una; dos distintas, como
-        ambigüedad (`False`)."""
+        ambigüedad (`None`)."""
         defaults = {c.prior for c in self.comparisons if c.prior.is_default}
         if len(defaults) != 1:
-            return False
+            return None
         (reference,) = defaults
         sigmas = [c.sigma for c in self.comparisons if c.prior == reference]
-        return bool(sigmas) and min(sigmas) >= threshold_sigma
+        return min(sigmas) if sigmas else None
+
+    def is_candidate(self, threshold_sigma: float) -> bool:
+        """Candidato a hallazgo: hay referencia por defecto (ver
+        `reference_sigma`) y todas las medidas del paper superan el umbral
+        frente a ella (σ mínimo >= umbral). Las demás previas no cuentan
+        (OPEN_DECISIONS T73, 2026-09-30)."""
+        sigma = self.reference_sigma()
+        return sigma is not None and sigma >= threshold_sigma
