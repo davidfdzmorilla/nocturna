@@ -374,3 +374,53 @@ def test_is_candidate_con_dos_defaults_es_falso():
     result = _result([make_measurement(0.52, 0.12, 0.14)], priors)
 
     assert result.is_candidate(0.1) is False
+
+
+# ---------- reference_sigma (T74) ----------
+
+
+def test_reference_sigma_es_el_minimo_frente_a_la_unica_default():
+    papers = [make_measurement(0.52, 0.12, 0.14), make_measurement(0.67, 0.16, 0.16)]
+    result = _result(papers, _v1298_b_priors())
+
+    assert result.reference_sigma() == pytest.approx(3.39648, abs=1e-4)
+
+
+def test_reference_sigma_con_una_medida_es_su_sigma_frente_a_la_default():
+    result = _result([make_measurement(0.67, 0.16, 0.16)], _v1298_b_priors())
+
+    assert result.reference_sigma() == pytest.approx(3.90925, abs=1e-4)
+
+
+def test_reference_sigma_sin_ninguna_default_es_none():
+    priors = [make_solution(0.64, 0.19, 0.19), make_solution(0.30, 0.10, 0.10)]
+    result = _result([make_measurement(0.52, 0.12, 0.14)], priors)
+
+    assert result.reference_sigma() is None
+    assert result.is_candidate(0.0) is False
+
+
+def test_reference_sigma_con_dos_defaults_distintas_es_none():
+    priors = [
+        make_solution(0.041, 0.017, 0.017, reference="A", is_default=True),
+        make_solution(0.050, 0.017, 0.017, reference="B", is_default=True),
+    ]
+    result = _result([make_measurement(0.52, 0.12, 0.14)], priors)
+
+    assert result.reference_sigma() is None
+    assert result.is_candidate(0.0) is False
+
+
+def test_reference_sigma_con_dos_defaults_identicas_cuenta_como_una():
+    default = make_solution(0.041, 0.017, 0.017, is_default=True)
+    result = _result([make_measurement(0.52, 0.12, 0.14)], [default, dataclasses.replace(default)])
+
+    assert result.reference_sigma() == pytest.approx(3.39648, abs=1e-4)
+
+
+def test_is_candidate_es_reference_sigma_contra_el_umbral():
+    result = _result([make_measurement(0.52, 0.12, 0.14)], _v1298_b_priors())
+    sigma = result.reference_sigma()
+
+    assert result.is_candidate(sigma) is True
+    assert result.is_candidate(sigma + 1e-9) is False

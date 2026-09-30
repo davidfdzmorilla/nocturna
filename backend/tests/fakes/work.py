@@ -89,6 +89,9 @@ class InMemoryAgentCallRepository:
     def count_for_run(self, run_id: UUID, agent: AgentRole) -> int:
         return sum(1 for call in self.calls if call.run_id == run_id and call.agent is agent)
 
+    def count_runs_with_prompt_version(self, prompt_version: str) -> int:
+        return len({c.run_id for c in self.calls if c.prompt_version == prompt_version})
+
 
 class InMemoryItemRepository:
     """Repositorio de `Item` en memoria: suficiente para lo que `ReadItem` usa
@@ -127,6 +130,9 @@ class InMemoryReadingRepository:
 
     def get_for_item(self, item_id: UUID) -> Reading | None:
         return next((r for r in self.readings if r.item_id == item_id), None)
+
+    def with_measurements(self) -> list[Reading]:
+        return sorted((r for r in self.readings if r.measurements is not None), key=lambda r: r.id)
 
 
 class InMemoryFindingRepository:

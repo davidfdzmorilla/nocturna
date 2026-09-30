@@ -215,6 +215,11 @@ from nocturna.application.budget import (
     terminal_status_for,
 )
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
+from nocturna.application.use_cases.compute_tensions import (
+    ComputeTensions,
+    SkipReason,
+    TensionReport,
+)
 from nocturna.application.use_cases.edit_night import EditNight, EditNightResult, EditOutcome
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
 from nocturna.application.use_cases.popularize_reading import (
@@ -252,6 +257,12 @@ from nocturna.infrastructure.db.session import (
     create_session_factory,
     unit_of_work,
 )
+from nocturna.infrastructure.exoplanet_archive.catalog import ExoplanetArchiveCatalog
+from nocturna.infrastructure.exoplanet_archive.client import (
+    ArchiveHttpClient,
+    ExoplanetArchiveUnavailable,
+)
+from nocturna.infrastructure.exoplanet_archive.mappers import planet_overview_url
 from nocturna.infrastructure.logging import configure_json_logging
 
 # `AgentSDKProvider` (infrastructure/llm/agent_sdk_provider.py) NO se importa
@@ -472,7 +483,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Ejecuta la noche de análisis: ingesta de arXiv, Reader, Popularizer y Editor, "
             "en ese orden y dentro del presupuesto de la noche (--dry-run se queda solo en "
-            "la ingesta y el plan de gasto, sin llamar a ningún agente)."
+            "la ingesta y el plan de gasto, sin llamar a ningún agente; además calcula las "
+            "tensiones de las lecturas con medidas consultando el NASA Exoplanet Archive, "
+            "con cero tokens, y sale con código 1 si el archivo no está disponible)."
         ),
     )
     run_night.add_argument(
@@ -692,6 +705,132 @@ def _print_budget_plan(
         print("  dentro de la ventana ahora mismo: no")
 
 
+_SIGMA_BINS: tuple[tuple[str, float, float], ...] = (
+    ("<1", 0.0, 1.0),
+    ("1-2", 1.0, 2.0),
+    ("2-3", 2.0, 3.0),
+    ("3-5", 3.0, 5.0),
+    (">=5", 5.0, float("inf")),
+)
+
+
+def exoplanet_catalog_from_config(
+    http: httpx.AsyncClient, config: PipelineConfig
+) -> tuple[ExoplanetArchiveCatalog, ArchiveHttpClient]:
+    """Catálogo del NASA Exoplanet Archive con los límites de `pipeline.toml`.
+
+    Devuelve también el cliente HTTP para poder informar de las peticiones
+    hechas. Campo a campo, como `budget_policy_from_config`.
+    """
+    archive = config.sources.exoplanet_archive
+    client = ArchiveHttpClient(
+        http,
+        tap_url=archive.tap_url,
+        alias_url=archive.alias_url,
+        limiter=RateLimiter(archive.min_request_interval_s),
+        request_timeout_s=archive.request_timeout_s,
+        max_requests=archive.max_requests_per_night,
+    )
+    return ExoplanetArchiveCatalog(client), client
+
+
+def _format_tension_section(
+    report: TensionReport,
+    *,
+    external_ids: dict[UUID, str],
+    readings_count: int,
+    readings_with_measurements: int,
+    total_measurements: int,
+    runs_with_reader_v3: int,
+    threshold_sigma: float,
+    requests_made: int,
+) -> str:
+    """Sección de tensiones del `--dry-run`: pura y determinista (mismo
+    informe, mismo texto), sin IO ni reloj."""
+    skipped_by_reason = {reason: 0 for reason in SkipReason}
+    for skipped in report.skipped:
+        skipped_by_reason[skipped.reason] += 1
+    usable = total_measurements - skipped_by_reason[SkipReason.NOT_USABLE]
+    matched = usable - skipped_by_reason[SkipReason.UNMATCHED]
+
+    sigmas = [result.reference_sigma() for result in report.results]
+    with_reference = [sigma for sigma in sigmas if sigma is not None]
+    candidates = sum(1 for result in report.results if result.is_candidate(threshold_sigma))
+    rate = f"{candidates / runs_with_reader_v3:.2f}" if runs_with_reader_v3 else "n/d"
+
+    lines = [
+        "",
+        "Tensiones frente al NASA Exoplanet Archive:",
+        f"  lecturas con extracción de medidas ({READER_V3_PROMPT_VERSION}): {readings_count} "
+        f"(con al menos una medida: {readings_with_measurements}) "
+        f"en {runs_with_reader_v3} Runs con {READER_V3_PROMPT_VERSION}",
+        f"  medidas: total={total_measurements} utilizables={usable} emparejadas={matched} "
+        f"sin previas={skipped_by_reason[SkipReason.NO_PRIORS]}",
+        f"  resultados: {len(report.results)} (con referencia por defecto: "
+        f"{len(with_reference)}, sin ella: {len(sigmas) - len(with_reference)})",
+        "  sigma de referencia por tramos: "
+        + " | ".join(
+            f"{label}: {sum(1 for sigma in with_reference if low <= sigma < high)}"
+            for label, low, high in _SIGMA_BINS
+        ),
+        f"  candidatos (threshold_sigma={threshold_sigma}): {candidates}; "
+        f"por Run con {READER_V3_PROMPT_VERSION}: {rate}",
+        f"  peticiones al archivo: {requests_made}",
+    ]
+    for result, sigma in zip(report.results, sigmas, strict=True):
+        sigma_text = f"{sigma:.2f}" if sigma is not None else "-"
+        candidate_text = "sí" if result.is_candidate(threshold_sigma) else "no"
+        lines.append(
+            f"  {external_ids.get(result.item_id, str(result.item_id))} · "
+            f"{result.planet_name} · {result.parameter.value} · sigma ref={sigma_text} · "
+            f"candidato={candidate_text} · {planet_overview_url(result.planet_name)}"
+        )
+    return "\n".join(lines)
+
+
+async def _compute_tensions(
+    pairs: Sequence[tuple[Item, Reading]], config: PipelineConfig
+) -> tuple[TensionReport, int]:
+    async with httpx.AsyncClient(
+        timeout=config.sources.exoplanet_archive.request_timeout_s
+    ) as http:
+        catalog, client = exoplanet_catalog_from_config(http, config)
+        report = await ComputeTensions(catalog)(pairs)
+        return report, client.requests_made
+
+
+def _print_tension_section(config: PipelineConfig, settings: Settings) -> None:
+    """Calcula e imprime las tensiones de las lecturas con medidas. Lanza
+    `ExoplanetArchiveUnavailable` si el archivo falla."""
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    with unit_of_work(session_factory) as session:
+        readings = SqlAlchemyReadingRepository(session).with_measurements()
+        items = SqlAlchemyItemRepository(session)
+        pairs: list[tuple[Item, Reading]] = []
+        for reading in readings:
+            item = items.get(reading.item_id)
+            if item is not None:
+                pairs.append((item, reading))
+        runs_with_reader_v3 = SqlAlchemyAgentCallRepository(session).count_runs_with_prompt_version(
+            READER_V3_PROMPT_VERSION
+        )
+
+    report, requests_made = asyncio.run(_compute_tensions(pairs, config))
+    print(
+        _format_tension_section(
+            report,
+            external_ids={item.id: item.external_id for item, _ in pairs},
+            readings_count=len(pairs),
+            readings_with_measurements=sum(1 for _, reading in pairs if reading.measurements),
+            total_measurements=sum(len(reading.measurements or ()) for _, reading in pairs),
+            runs_with_reader_v3=runs_with_reader_v3,
+            threshold_sigma=config.tension.threshold_sigma,
+            requests_made=requests_made,
+        )
+    )
+
+
 def _current_or_new_run_night(
     session_factory: sessionmaker[Session], policy: BudgetPolicy, clock: SystemClock
 ) -> UUID:
@@ -867,7 +1006,9 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
     """Ingesta real de arXiv, persistida, más el plan de gasto -- sin llamar
     a ningún agente ni instanciar `RunNight`. Comportamiento sin cambios
     respecto a antes de T44 salvo la línea nueva de `_would_read_count` en
-    el plan de gasto (T44, paso 8)."""
+    el plan de gasto (T44, paso 8). Además (T74) calcula las tensiones de las
+    lecturas con medidas consultando el NASA Exoplanet Archive (cero tokens) y
+    sale con código 1 si el archivo no está disponible."""
     settings = Settings()
     config = load_pipeline_config()
     since = args.since if args.since is not None else _default_since(datetime.now(UTC))
@@ -887,6 +1028,12 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
     clock = system_clock_from_config(config)
     would_read = _would_read_count(config, settings)
     _print_budget_plan(policy, config.window.timezone, clock.now(), would_read=would_read)
+
+    try:
+        _print_tension_section(config, settings)
+    except ExoplanetArchiveUnavailable as exc:
+        print(f"error consultando el NASA Exoplanet Archive: {exc}", file=sys.stderr)
+        return 1
 
     return 0
 

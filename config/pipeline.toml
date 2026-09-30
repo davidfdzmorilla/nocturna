@@ -284,5 +284,35 @@ retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
 
+[sources.exoplanet_archive]
+# NASA Exoplanet Archive (T74, ADR 0012): fuente consumida solo por código
+# Python, sin servidor MCP. TAP sync para las soluciones publicadas de cada
+# planeta y servicio de alias para resolver nombres alternativos.
+tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+alias_url = "https://exoplanetarchive.ipac.caltech.edu/cgi-bin/Lookup/nph-aliaslookup.py"
+# min_request_interval_s: espaciado de cortesía entre peticiones (el archivo
+# no publica una cifra; 2 s es la decisión del autor para T74).
+min_request_interval_s = 2.0
+# request_timeout_s: duración TOTAL de una petición, acotada con
+# anyio.fail_after (httpx.Timeout solo acota cada operación por separado).
+request_timeout_s = 30.0
+# max_requests_per_night: techo duro, INTENTADAS, comprobado antes de enviar.
+# Peor caso: 40 x (30 + 2) = 1.280 s, que sumados al de arXiv (558 s) caben
+# en el 25 % de limits.run_timeout_s (4.050 s); PipelineConfig lo valida.
+# Cada nombre de planeta distinto cuesta como mucho 2 peticiones (alias y
+# ps) más 1 del índice. El peor caso del archivo se suma al presupuesto de
+# ingesta de la noche real aunque la noche aún no consulte el archivo
+# (conservador, a propósito). En `--dry-run` las peticiones crecen con el
+# histórico de lecturas con medidas utilizables, no con los nombres de una
+# sola noche; el techo se revisa en T76. Sin datos de campo: PROVISIONAL.
+max_requests_per_night = 40
+
+[tension]
+# threshold_sigma: una medida del paper es candidata si su σ frente a la
+# solución por defecto del archivo (TensionResult.reference_sigma) alcanza
+# este umbral. 3 sigma, decisión del autor (T74); a revisar con los datos
+# que devuelva el informe del dry-run.
+threshold_sigma = 3.0
+
 [llm]
 provider = "agent_sdk"

@@ -69,6 +69,16 @@ retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
 
+[sources.exoplanet_archive]
+tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+alias_url = "https://exoplanetarchive.ipac.caltech.edu/cgi-bin/Lookup/nph-aliaslookup.py"
+min_request_interval_s = 2.0
+request_timeout_s = 30.0
+max_requests_per_night = 40
+
+[tension]
+threshold_sigma = 3.0
+
 [llm]
 provider = "agent_sdk"
 """
@@ -724,3 +734,106 @@ def test_el_peor_caso_de_la_ingesta_se_calcula_con_los_techos_reales(tmp_path):
 
     assert _COURTESY_CEILING_S >= MIN_REQUEST_INTERVAL_S
     assert _HTTP_TIMEOUT_CEILING_S >= REQUEST_DEADLINE_S
+
+
+# --- T74: [sources.exoplanet_archive] y [tension] --------------------------
+
+_ARCHIVE_SECTION = BASE_TOML[
+    BASE_TOML.index("[sources.exoplanet_archive]") : BASE_TOML.index("[tension]")
+]
+_TENSION_SECTION = BASE_TOML[BASE_TOML.index("[tension]") : BASE_TOML.index("[llm]")]
+
+
+def test_el_pipeline_toml_real_carga_las_secciones_de_t74():
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+
+    assert config.sources.exoplanet_archive.max_requests_per_night > 0
+    assert config.sources.exoplanet_archive.min_request_interval_s > 0
+    assert config.tension.threshold_sigma == 3.0
+
+
+def test_falta_la_seccion_exoplanet_archive_falla(tmp_path):
+    path = _write_toml(tmp_path, BASE_TOML.replace(_ARCHIVE_SECTION, ""))
+
+    with pytest.raises(ValidationError, match="exoplanet_archive"):
+        load_pipeline_config(path)
+
+
+def test_falta_la_seccion_tension_falla(tmp_path):
+    path = _write_toml(tmp_path, BASE_TOML.replace(_TENSION_SECTION, ""))
+
+    with pytest.raises(ValidationError, match="tension"):
+        load_pipeline_config(path)
+
+
+def test_clave_extra_en_exoplanet_archive_falla(tmp_path):
+    content = BASE_TOML.replace(
+        "[sources.exoplanet_archive]\n", "[sources.exoplanet_archive]\nextra = 1\n"
+    )
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, content))
+
+
+def test_clave_extra_en_tension_falla(tmp_path):
+    content = BASE_TOML.replace("[tension]\n", "[tension]\nextra = 1\n")
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, content))
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("min_request_interval_s = 2.0", "min_request_interval_s = 0"),
+        ("min_request_interval_s = 2.0", "min_request_interval_s = -1.0"),
+        ("request_timeout_s = 30.0", "request_timeout_s = 0"),
+        ("request_timeout_s = 30.0", "request_timeout_s = -5.0"),
+        ("max_requests_per_night = 40", "max_requests_per_night = 0"),
+        ("max_requests_per_night = 40", "max_requests_per_night = -1"),
+        ("threshold_sigma = 3.0", "threshold_sigma = 0"),
+        ("threshold_sigma = 3.0", "threshold_sigma = -3.0"),
+        ('tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"', 'tap_url = ""'),
+    ],
+)
+def test_valores_no_positivos_de_t74_fallan(tmp_path, old, new):
+    assert old in BASE_TOML
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, BASE_TOML.replace(old, new)))
+
+
+def test_falta_una_clave_de_exoplanet_archive_falla(tmp_path):
+    content = BASE_TOML.replace("max_requests_per_night = 40\n", "")
+
+    with pytest.raises(ValidationError, match="max_requests_per_night"):
+        load_pipeline_config(_write_toml(tmp_path, content))
+
+
+# Con el TOML base: run_timeout_s = 16200 -> 25 % = 4050 s. arXiv: 6 x (60+30+3)
+# = 558 s. Archivo: N x (30 + 2) s. Caben N <= 109 (558 + 3488 = 4046).
+
+
+def test_ingesta_mas_archivo_dentro_del_25_por_ciento_es_valida(tmp_path):
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 109")
+
+    config = load_pipeline_config(_write_toml(tmp_path, content))
+
+    assert config.sources.exoplanet_archive.max_requests_per_night == 109
+
+
+def test_ingesta_mas_archivo_por_encima_del_25_por_ciento_falla(tmp_path):
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 110")
+
+    with pytest.raises(ValidationError, match="max_requests_per_night"):
+        load_pipeline_config(_write_toml(tmp_path, content))
+
+
+def test_el_archivo_solo_cabria_pero_junto_a_arxiv_no(tmp_path):
+    """110 x 32 = 3.520 s < 4.050 s: por separado cabe. El validador es
+    CONJUNTO: solo falla porque arXiv ya ocupa 558 s."""
+    archive_alone = 110 * (30.0 + 2.0)
+    assert archive_alone <= 16200 * 0.25
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 110")
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, content))

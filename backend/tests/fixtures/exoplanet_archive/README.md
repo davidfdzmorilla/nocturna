@@ -33,6 +33,18 @@ contando la fallida) para poder capturar `pscomppars_ids_sample30.csv`. Pendient
 para el siguiente paso: averiguar el nombre real de la columna de Gaia en el
 Exoplanet Archive (si existe) o confirmar que no está expuesta en estas tablas.
 
+## Capturas de T74 (2026-09-30)
+
+Cuatro peticiones reales al TAP sync (`format=csv`), `User-Agent:
+nocturna/0.1.0`, timeout 30 s, 2,5 s entre ellas. Respuestas guardadas tal cual.
+
+| Fichero | Consulta | Notas |
+|---|---|---|
+| `ps_refname_arxiv_top10.csv` | `select top 10 pl_name,pl_refname from ps where pl_refname like '%arXiv%'` | 10 filas, todas preprints. El bibcode del `href` lleva `arXiv`: `2011arXiv1102.1375F` (4+4 dígitos, con punto) y `2015arXiv150907750N` (sin punto, 4+5). Regex `abs/\d{4}arXiv(\d{4})\.?(\d{4,5})` -> `1102.1375` y `1509.07750` |
+| `ps_v1298tau.csv` | `select pl_name,hostname,default_flag,pl_refname,pl_bmassprov,pl_bmasse,pl_bmasseerr1,pl_bmasseerr2,pl_bmasselim,pl_rade,pl_radeerr1,pl_radeerr2,pl_radelim,pl_orbper,pl_orbpererr1,pl_orbpererr2,pl_orbperlim from ps where pl_name in ('V1298 Tau b','V1298 Tau e')` | 12 filas. Default (`default_flag=1`): Livingston et al. 2026 (`2026Natur.649..310L`, revista: sin id arXiv) para b y e. Incluye Suárez Mascareño et al. 2022 (`Mass`) y el nombre con entidades HTML (`Su&aacute;rez Mascare&ntilde;o`). No hay fila del paper 2609.30038 |
+| `ps_distinct_bmassprov.csv` | `select distinct pl_bmassprov from ps` | Valores: vacío, `Msini`, `Mass`, `Msin(i)/sin(i)`. Solo `Mass` es masa verdadera |
+| `pscomppars_names_full.csv` | `select pl_name from pscomppars` | **Completa, sin recortar**: 6372 filas / 91976 bytes |
+
 ## Regenerarlas
 
 Las consultas exactas están en la tabla. Respeta ≥2 s entre peticiones y el

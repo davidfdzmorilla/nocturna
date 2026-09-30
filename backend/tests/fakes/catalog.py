@@ -7,7 +7,6 @@ para poder afirmar que, por ejemplo, un `UNMATCHED` no consulta `solutions`.
 from collections.abc import Mapping, Sequence
 
 from nocturna.domain.catalog import CatalogSolution
-
 from nocturna.domain.entities import MeasuredParameter
 
 

@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from nocturna.domain.catalog import CatalogSolution
-
 from nocturna.domain.entities import (
     Item,
     MeasuredParameter,
