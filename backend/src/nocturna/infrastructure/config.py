@@ -279,6 +279,24 @@ _COURTESY_CEILING_S = 3.0
 _INGEST_TIME_SHARE = 0.25
 
 
+class ArchiveSnapshotConfig(BaseModel):
+    """Límites del snapshot del Exoplanet Archive (T81). Sin valores por
+    defecto: todo vive en `pipeline.toml`. No entra en el validador del
+    tiempo de ingesta: el snapshot corre aparte, no dentro de la noche."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # Techo duro de peticiones por ejecución; con 3 caben el incremental
+    # (desde releasedate + defaults) y el salto a completo.
+    max_requests: int = Field(ge=3)
+    request_timeout_s: float = Field(gt=0)
+    max_response_bytes: int = Field(gt=0)
+    # Planetas por consulta `pl_name in (...)`.
+    planet_batch_size: int = Field(ge=1, le=100)
+    # Fracción máxima de bajas o cambios de default admitida sin abortar.
+    max_change_fraction: float = Field(gt=0, le=1)
+
+
 class ExoplanetArchiveConfig(BaseModel):
     """NASA Exoplanet Archive: URLs y límites de cortesía (T74, ADR 0012)."""
 
@@ -292,6 +310,7 @@ class ExoplanetArchiveConfig(BaseModel):
     request_timeout_s: float = Field(gt=0)
     # Techo duro de peticiones por noche, INTENTADAS.
     max_requests_per_night: int = Field(gt=0)
+    snapshot: ArchiveSnapshotConfig
 
 
 class SourcesConfig(BaseModel):

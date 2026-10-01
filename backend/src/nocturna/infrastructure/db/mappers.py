@@ -22,6 +22,15 @@ Las guardas de `__setattr__` en `domain/entities.py` rechazan la
 resueltos al constructor es válido y no dispara ninguna guarda.
 """
 
+from datetime import datetime
+from uuid import UUID, uuid4
+
+from nocturna.domain.archive import (
+    ArchiveParameterValue,
+    ArchiveSnapshot,
+    ArchiveSolution,
+    DefaultChange,
+)
 from nocturna.domain.entities import (
     AgentCall,
     CatalogSolution,
@@ -39,6 +48,9 @@ from nocturna.domain.entities import (
 )
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
+    ArchiveDefaultChangeRow,
+    ArchiveSnapshotRow,
+    ArchiveSolutionRow,
     FindingRow,
     ItemRow,
     ReadingRow,
@@ -342,4 +354,143 @@ def agent_call_from_row(row: AgentCallRow) -> AgentCall:
         duration_ms=row.duration_ms,
         status=row.status,
         prompt_version=row.prompt_version,
+    )
+
+
+# --- Exoplanet Archive (T81) -------------------------------------------------
+
+# Parametros con columnas `<prefijo>_value/_err1/_err2[/_lim]`. Masa, radio y
+# periodo llevan `lim`; las magnitudes estelares no.
+_LIM_PARAMS = ("mass", "radius", "period")
+_STAR_PARAMS = ("st_rad", "st_mass")
+
+
+def archive_snapshot_to_row(snapshot: ArchiveSnapshot) -> ArchiveSnapshotRow:
+    return ArchiveSnapshotRow(
+        id=snapshot.id,
+        taken_at=snapshot.taken_at,
+        kind=snapshot.kind,
+        max_releasedate=snapshot.max_releasedate,
+        rows_total=snapshot.rows_total,
+        defaults_total=snapshot.defaults_total,
+        duplicate_rows=snapshot.duplicate_rows,
+        payload_sha256=snapshot.payload_sha256,
+        requests=snapshot.requests,
+        duration_ms=snapshot.duration_ms,
+    )
+
+
+def archive_snapshot_from_row(row: ArchiveSnapshotRow) -> ArchiveSnapshot:
+    return ArchiveSnapshot(
+        id=row.id,
+        taken_at=row.taken_at,
+        kind=row.kind,
+        max_releasedate=row.max_releasedate,
+        rows_total=row.rows_total,
+        defaults_total=row.defaults_total,
+        duplicate_rows=row.duplicate_rows,
+        payload_sha256=row.payload_sha256,
+        requests=row.requests,
+        duration_ms=row.duration_ms,
+    )
+
+
+def archive_solution_to_values(solution: ArchiveSolution, *, snapshot_id: UUID) -> dict:
+    """Valores de INSERT de una solucion tal como se ve por primera vez en `snapshot_id`.
+
+    Devuelve un dict (no una fila) porque el repositorio la escribe con
+    `INSERT ... ON CONFLICT` por bloques. `is_default_current` y `removed_at`
+    nacen en falso/nulo; el repositorio los fija despues segun el diff.
+    """
+    values: dict = {
+        "solution_key": solution.solution_key,
+        "pl_name": solution.pl_name,
+        "hostname": solution.hostname,
+        "pl_refname": solution.pl_refname,
+        "ref_key": solution.ref_key,
+        "ref_text": solution.ref_text,
+        "arxiv_id": solution.arxiv_id,
+        "soltype": solution.soltype or "",
+        "releasedate": solution.releasedate,
+        "pl_pubdate": solution.pl_pubdate,
+        "pl_bmassprov": solution.pl_bmassprov,
+        "discoverymethod": solution.discoverymethod,
+        "ttv_flag": solution.ttv_flag,
+        "pl_controv_flag": solution.pl_controv_flag,
+        "is_default": solution.is_default,
+        "first_seen_snapshot_id": snapshot_id,
+        "last_seen_snapshot_id": snapshot_id,
+        "is_default_current": False,
+        "removed_at": None,
+    }
+    for prefix in (*_LIM_PARAMS, *_STAR_PARAMS):
+        parameter: ArchiveParameterValue = getattr(solution, prefix)
+        values[f"{prefix}_value"] = parameter.value
+        values[f"{prefix}_err1"] = parameter.err1
+        values[f"{prefix}_err2"] = parameter.err2
+        if prefix in _LIM_PARAMS:
+            values[f"{prefix}_lim"] = parameter.lim
+    return values
+
+
+def archive_solution_from_row(row: ArchiveSolutionRow) -> ArchiveSolution:
+    """Reconstruye la solucion; `solution_key` se recalcula, no se lee de la fila."""
+
+    def lim_param(prefix: str) -> ArchiveParameterValue:
+        return ArchiveParameterValue(
+            value=getattr(row, f"{prefix}_value"),
+            err1=getattr(row, f"{prefix}_err1"),
+            err2=getattr(row, f"{prefix}_err2"),
+            lim=getattr(row, f"{prefix}_lim"),
+        )
+
+    def star_param(prefix: str) -> ArchiveParameterValue:
+        return ArchiveParameterValue(
+            value=getattr(row, f"{prefix}_value"),
+            err1=getattr(row, f"{prefix}_err1"),
+            err2=getattr(row, f"{prefix}_err2"),
+        )
+
+    return ArchiveSolution(
+        pl_name=row.pl_name,
+        hostname=row.hostname or "",
+        pl_refname=row.pl_refname,
+        ref_key=row.ref_key,
+        ref_text=row.ref_text or "",
+        arxiv_id=row.arxiv_id,
+        soltype=row.soltype or None,
+        releasedate=row.releasedate,
+        pl_pubdate=row.pl_pubdate,
+        is_default=row.is_default,
+        mass=lim_param("mass"),
+        radius=lim_param("radius"),
+        period=lim_param("period"),
+        pl_bmassprov=row.pl_bmassprov,
+        st_rad=star_param("st_rad"),
+        st_mass=star_param("st_mass"),
+        discoverymethod=row.discoverymethod,
+        ttv_flag=row.ttv_flag,
+        pl_controv_flag=row.pl_controv_flag,
+    )
+
+
+def archive_default_change_to_row(
+    change: DefaultChange, *, snapshot_id: UUID, detected_at: datetime
+) -> ArchiveDefaultChangeRow:
+    """El `id` de la fila lo genera el mapper: `DefaultChange` es un value object sin identidad."""
+    return ArchiveDefaultChangeRow(
+        id=uuid4(),
+        pl_name=change.pl_name,
+        old_solution_key=change.old_key,
+        new_solution_key=change.new_key,
+        snapshot_id=snapshot_id,
+        detected_at=detected_at,
+    )
+
+
+def archive_default_change_from_row(row: ArchiveDefaultChangeRow) -> DefaultChange:
+    return DefaultChange(
+        pl_name=row.pl_name,
+        old_key=row.old_solution_key,
+        new_key=row.new_solution_key,
     )

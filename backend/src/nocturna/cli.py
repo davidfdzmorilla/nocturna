@@ -229,9 +229,14 @@ from nocturna.application.use_cases.popularize_reading import (
 )
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
+from nocturna.application.use_cases.take_archive_snapshot import (
+    ArchiveSnapshotReport,
+    SnapshotAborted,
+    TakeArchiveSnapshot,
+)
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
-from nocturna.domain.errors import InvalidTransition
+from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.domain.sources import ArxivSource
@@ -248,6 +253,7 @@ from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
+    SqlAlchemyArchiveRepository,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
@@ -263,7 +269,8 @@ from nocturna.infrastructure.exoplanet_archive.client import (
     ArchiveHttpClient,
     ExoplanetArchiveUnavailable,
 )
-from nocturna.infrastructure.exoplanet_archive.mappers import planet_overview_url
+from nocturna.infrastructure.exoplanet_archive.mappers import planet_overview_url, reference_text
+from nocturna.infrastructure.exoplanet_archive.snapshot import ArchiveSnapshotSource
 from nocturna.infrastructure.logging import configure_json_logging
 
 # `AgentSDKProvider` (infrastructure/llm/agent_sdk_provider.py) NO se importa
@@ -533,6 +540,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="UUID del Item a leer. Un UUID mal formado es un error de argumentos (código 2).",
     )
 
+    archive_snapshot = subparsers.add_parser(
+        "archive-snapshot",
+        help="Toma una instantánea del NASA Exoplanet Archive (sin LLM).",
+        description=(
+            "Descarga las soluciones publicadas del NASA Exoplanet Archive (tabla ps), las "
+            "compara con la base y guarda el snapshot. Completo una vez al mes natural, "
+            "incremental el resto. No usa Claude ni gasta tokens."
+        ),
+    )
+    archive_snapshot.add_argument(
+        "--full",
+        action="store_true",
+        help="Fuerza un snapshot completo aunque ya haya uno este mes.",
+    )
+    archive_snapshot.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Consulta el archivo y calcula el diff, pero no escribe nada en la base de datos. "
+            "Sí hace las peticiones HTTP."
+        ),
+    )
+
     return parser
 
 
@@ -757,6 +787,94 @@ def exoplanet_catalog_from_config(
         max_requests=archive.max_requests_per_night,
     )
     return ExoplanetArchiveCatalog(client), client
+
+
+def archive_snapshot_source_from_config(
+    http: httpx.AsyncClient, config: PipelineConfig
+) -> ArchiveSnapshotSource:
+    """Fuente del snapshot con SU PROPIO cliente HTTP (techo, timeout y tope de
+    respuesta de `[sources.exoplanet_archive.snapshot]`); mismo espaciado y
+    User-Agent que el cliente de T74."""
+    archive = config.sources.exoplanet_archive
+    snap = archive.snapshot
+    client = ArchiveHttpClient(
+        http,
+        tap_url=archive.tap_url,
+        alias_url=archive.alias_url,
+        limiter=RateLimiter(archive.min_request_interval_s),
+        request_timeout_s=snap.request_timeout_s,
+        max_requests=snap.max_requests,
+        max_response_bytes=snap.max_response_bytes,
+    )
+    return ArchiveSnapshotSource(client, planet_batch_size=snap.planet_batch_size)
+
+
+def _format_archive_snapshot_report(report: ArchiveSnapshotReport, *, dry_run: bool) -> str:
+    """Informe del snapshot: puro y determinista."""
+    snap = report.snapshot
+    diff = report.diff
+    by_key = {s.solution_key: s for s in report.solutions}
+    mode = f"{snap.kind.value}{' (salto desde incremental)' if report.fell_back_to_full else ''}"
+    lines = [
+        f"Snapshot del NASA Exoplanet Archive: modo={mode}"
+        f"{' [dry-run: no se escribió nada]' if dry_run else ''}",
+        f"  peticiones: {snap.requests}",
+        f"  filas: {snap.rows_total}",
+        f"  defaults: {snap.defaults_total}",
+        f"  duplicados fusionados: {snap.duplicate_rows}",
+        f"  altas: {len(diff.added)}",
+        f"  bajas: {len(diff.removed)}",
+        f"  reactivadas: {len(diff.reactivated)}",
+        f"  cambios de default: {len(diff.default_changes)}",
+    ]
+    for change in diff.default_changes:
+        sol = by_key.get(change.new_key)
+        ref = reference_text(sol.pl_refname) if sol is not None else "-"
+        old = change.old_key[:8] if change.old_key else "(nuevo)"
+        lines.append(f"    {change.pl_name}: {old} -> {change.new_key[:8]} · {ref}")
+    lines.append(f"  planetas que pierden default: {len(diff.lost_defaults)}")
+    lines.extend(f"    {name}" for name in diff.lost_defaults)
+    return "\n".join(lines)
+
+
+async def _take_archive_snapshot(
+    config: PipelineConfig, session: Session, clock: SystemClock, *, full: bool, dry_run: bool
+) -> ArchiveSnapshotReport:
+    snap = config.sources.exoplanet_archive.snapshot
+    async with httpx.AsyncClient(timeout=snap.request_timeout_s) as http:
+        source = archive_snapshot_source_from_config(http, config)
+        use_case = TakeArchiveSnapshot(
+            source=source,
+            archive=SqlAlchemyArchiveRepository(session),
+            clock=clock,
+            max_requests=snap.max_requests,
+            planet_batch_size=snap.planet_batch_size,
+            max_change_fraction=snap.max_change_fraction,
+            timezone=ZoneInfo(config.window.timezone),
+        )
+        return await use_case(force_full=full, dry_run=dry_run)
+
+
+def _archive_snapshot(args: argparse.Namespace) -> int:
+    """`archive-snapshot`: `0` ok; `1` archivo no disponible, dato inválido o
+    guarda de cambios masivos (no se persiste nada); `2` argumentos (argparse).
+    Sin LLM: no importa `claude_agent_sdk`."""
+    if not args.dry_run:
+        configure_json_logging()
+    settings = Settings()
+    config = load_pipeline_config()
+    clock = system_clock_from_config(config)
+    session_factory = create_session_factory(create_db_engine(settings))
+    try:
+        with unit_of_work(session_factory) as session:
+            report = asyncio.run(
+                _take_archive_snapshot(config, session, clock, full=args.full, dry_run=args.dry_run)
+            )
+    except (ExoplanetArchiveUnavailable, SnapshotAborted, InvariantViolation) as exc:
+        print(f"archive-snapshot falló: {exc}", file=sys.stderr)
+        return 1
+    print(_format_archive_snapshot_report(report, dry_run=args.dry_run))
+    return 0
 
 
 def _format_tension_section(
@@ -1787,6 +1905,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run-item":
         return _run_item(args)
+    if args.command == "archive-snapshot":
+        return _archive_snapshot(args)
     return _run_night(args)
 
 

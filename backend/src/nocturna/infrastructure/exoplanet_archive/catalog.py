@@ -12,6 +12,7 @@ from nocturna.domain.entities import MeasuredParameter
 from nocturna.infrastructure.exoplanet_archive.client import (
     ArchiveHttpClient,
     ExoplanetArchiveUnavailable,
+    adql_string,
 )
 from nocturna.infrastructure.exoplanet_archive.mappers import solutions_from_ps_rows
 from nocturna.infrastructure.exoplanet_archive.names import clean_name, normalize_name
@@ -23,10 +24,6 @@ _PS_COLUMNS = (
     "pl_rade,pl_radeerr1,pl_radeerr2,pl_radelim,"
     "pl_orbper,pl_orbpererr1,pl_orbpererr2,pl_orbperlim"
 )
-
-
-def _adql_string(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 class ExoplanetArchiveCatalog:
@@ -67,7 +64,7 @@ class ExoplanetArchiveCatalog:
         rows = self._ps_rows.get(planet_name)
         if rows is None:
             rows = await self._client.query_csv(
-                f"select {_PS_COLUMNS} from ps where pl_name={_adql_string(planet_name)}"
+                f"select {_PS_COLUMNS} from ps where pl_name={adql_string(planet_name)}"
             )
             self._ps_rows[planet_name] = rows
         return solutions_from_ps_rows(rows, parameter)

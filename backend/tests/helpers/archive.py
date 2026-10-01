@@ -153,3 +153,45 @@ def load_t71c_measurements(filename: str) -> tuple[Measurement, ...]:
         )
         for raw in payload["measurements"]
     )
+
+
+def snapshot_handler(
+    rows: list[dict[str, str | None]] | None = None,
+) -> Callable[[httpx.Request], httpx.Response]:
+    """Servidor falso de las cuatro consultas del snapshot (T81) sobre `ps`.
+
+    Reconoce `select <cols> from ps` (todo), `... where releasedate >= 'D'`,
+    `... where default_flag=1` y `... where pl_name in ('a','b')`. Por defecto
+    sirve las filas de `ps_t81_planets.csv` y `ps_t81_released_since_7d.csv`.
+    """
+    header = fixture_text("ps_t81_planets.csv").splitlines()[0].split(",")
+    data = (
+        rows
+        if rows is not None
+        else fixture_rows("ps_t81_planets.csv") + fixture_rows("ps_t81_released_since_7d.csv")
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        adql = adql_of(request)
+        assert adql.startswith("select pl_name,hostname,default_flag") and " from ps" in adql, adql
+        _, _, where = adql.partition(" where ")
+        if not where:
+            chosen = data
+        elif where.startswith("releasedate >= '"):
+            day = where.split("'")[1]
+            chosen = [r for r in data if (r["releasedate"] or "") >= day]
+        elif where == "default_flag=1":
+            chosen = [r for r in data if r["default_flag"] == "1"]
+        else:
+            assert where.startswith("pl_name in ("), where
+            inner = where[len("pl_name in (") : -1]
+            names = {part.replace("''", "'") for part in inner[1:-1].split("','")}
+            chosen = [r for r in data if r["pl_name"] in names]
+        out = io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=header, lineterminator="\n")
+        writer.writeheader()
+        for row in chosen:
+            writer.writerow({k: (v or "") for k, v in row.items()})
+        return httpx.Response(200, text=out.getvalue())
+
+    return handler

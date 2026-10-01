@@ -48,6 +48,8 @@ La noche la lanza `launchd` a las 00:05 desde el árbol principal, en `main`, y 
 
 Si se mergea sin migrar, la noche falla: con T79, antes de gastar tokens; con T72 habría gastado el Popularizer sin poder guardar candidatos.
 
+En T81 (`archive-snapshot`), tras migrar: `uv run nocturna archive-snapshot --dry-run` y revisar el informe; `uv run nocturna archive-snapshot` (carga completa inicial); una segunda ejecución debe salir incremental con 0 cambios; después, instalar el agente de launchd desde `backend/scripts/com.nocturna.archive-snapshot.plist.template` (sustituir `__REPO_ROOT__` y `__HOME__`, copiar a `~/Library/LaunchAgents/` y cargarlo). Anotar las cifras en el cierre de T81.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

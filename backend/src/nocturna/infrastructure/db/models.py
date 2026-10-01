@@ -42,13 +42,14 @@ Decisiones deliberadas, no cosméticas:
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from nocturna.domain.archive import SnapshotKind
 from nocturna.domain.entities import (
     AgentCallStatus,
     FindingType,
@@ -263,3 +264,121 @@ class AgentCallRow(Base):
         # prefijo izquierdo (run_id solo).
         sa.Index("ix_agent_calls_run_id_agent", "run_id", "agent"),
     )
+
+
+class ArchiveSnapshotRow(Base):
+    """Una captura del Exoplanet Archive (T81). Solo metadatos del snapshot."""
+
+    __tablename__ = "archive_snapshot"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    taken_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    kind: Mapped[SnapshotKind] = mapped_column(
+        _str_enum(SnapshotKind, "archive_snapshot_kind"), nullable=False
+    )
+    max_releasedate: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    rows_total: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    defaults_total: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    duplicate_rows: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
+    requests: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("rows_total >= 0", name="rows_total_non_negative"),
+        sa.CheckConstraint("defaults_total >= 0", name="defaults_total_non_negative"),
+        sa.CheckConstraint("duplicate_rows >= 0", name="duplicate_rows_non_negative"),
+        sa.CheckConstraint("requests >= 0", name="requests_non_negative"),
+        sa.CheckConstraint("duration_ms >= 0", name="duration_ms_non_negative"),
+        # Sirve `last_snapshot` y `last_full_snapshot` (taken_at DESC LIMIT 1).
+        sa.Index("ix_archive_snapshot_taken_at", sa.text("taken_at DESC")),
+    )
+
+
+class ArchiveSolutionRow(Base):
+    """Una solucion publicada de un planeta; PK = `solution_key` (sha256, formato v1).
+
+    `first_seen_snapshot_id` solo se fija al insertar; `last_seen_snapshot_id`,
+    `removed_at` y los campos descriptivos se actualizan en cada snapshot. Los
+    errores conservan el signo del archivo (`err2` suele ser negativo).
+    """
+
+    __tablename__ = "archive_solution"
+
+    solution_key: Mapped[str] = mapped_column(sa.CHAR(64), primary_key=True)
+    pl_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    hostname: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    pl_refname: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    ref_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    ref_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    arxiv_id: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # El dominio admite `soltype` nulo; en la base se guarda "" (misma canonica
+    # que `solution_key`), de modo que la columna es NOT NULL.
+    soltype: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    releasedate: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    pl_pubdate: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    mass_value: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    mass_err1: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    mass_err2: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    mass_lim: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
+    radius_value: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    radius_err1: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    radius_err2: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    radius_lim: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
+    period_value: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    period_err1: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    period_err2: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    period_lim: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
+
+    pl_bmassprov: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    st_rad_value: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    st_rad_err1: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    st_rad_err2: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    st_mass_value: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    st_mass_err1: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    st_mass_err2: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    discoverymethod: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    ttv_flag: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    pl_controv_flag: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+
+    # `default_flag` visto en el ultimo snapshot que la vio. No es el estado
+    # vigente (ver `is_default_current`): en un incremental puede no verse.
+    is_default: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    first_seen_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("archive_snapshot.id"), nullable=False
+    )
+    last_seen_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("archive_snapshot.id"), nullable=False
+    )
+    is_default_current: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    removed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.Index("ix_archive_solution_pl_name", "pl_name"),
+        sa.Index("ix_archive_solution_releasedate", "releasedate"),
+        # A lo sumo una solucion por defecto vigente por planeta.
+        sa.Index(
+            "uq_archive_solution_pl_name_default_current",
+            "pl_name",
+            unique=True,
+            postgresql_where=sa.text("is_default_current"),
+        ),
+    )
+
+
+class ArchiveDefaultChangeRow(Base):
+    """Cambio de la solucion por defecto de un planeta detectado en un snapshot."""
+
+    __tablename__ = "archive_default_change"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    pl_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    old_solution_key: Mapped[str | None] = mapped_column(sa.CHAR(64), nullable=True)
+    new_solution_key: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("archive_snapshot.id"), nullable=False
+    )
+    detected_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (sa.Index("ix_archive_default_change_snapshot_id", "snapshot_id"),)

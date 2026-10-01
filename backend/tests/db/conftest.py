@@ -53,7 +53,16 @@ TEST_DB_NAME = "nocturna_test"
 
 # Orden hijas -> padres: mismo orden que el `downgrade()` de la migración
 # inicial, para que TRUNCATE no tropiece con las FK.
-_TABLES_IN_DEPENDENCY_ORDER = ("readings", "findings", "agent_calls", "runs", "items")
+_TABLES_IN_DEPENDENCY_ORDER = (
+    "readings",
+    "findings",
+    "agent_calls",
+    "runs",
+    "items",
+    "archive_default_change",
+    "archive_solution",
+    "archive_snapshot",
+)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

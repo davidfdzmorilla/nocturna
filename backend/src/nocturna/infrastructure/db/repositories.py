@@ -20,16 +20,28 @@ métodos que lo necesitan usan `flush()` (visibilidad dentro de la misma
 transacción, sin cerrarla), nunca confirman la transacción.
 """
 
+from collections.abc import Collection, Sequence
+from itertools import batched
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from nocturna.domain.archive import (
+    ArchiveSnapshot,
+    ArchiveSolution,
+    SnapshotDiff,
+    SnapshotKind,
+)
 from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.db.mappers import (
     agent_call_to_row,
+    archive_default_change_to_row,
+    archive_snapshot_from_row,
+    archive_snapshot_to_row,
+    archive_solution_to_values,
     finding_from_row,
     finding_to_row,
     item_from_row,
@@ -38,7 +50,15 @@ from nocturna.infrastructure.db.mappers import (
     run_from_row,
     run_to_row,
 )
-from nocturna.infrastructure.db.models import AgentCallRow, FindingRow, ItemRow, ReadingRow, RunRow
+from nocturna.infrastructure.db.models import (
+    AgentCallRow,
+    ArchiveSnapshotRow,
+    ArchiveSolutionRow,
+    FindingRow,
+    ItemRow,
+    ReadingRow,
+    RunRow,
+)
 
 
 class SqlAlchemyItemRepository:
@@ -346,3 +366,155 @@ class SqlAlchemyAgentCallRepository:
             AgentCallRow.prompt_version == prompt_version
         )
         return self._session.execute(stmt).scalar_one()
+
+
+_UPSERT_CHUNK = 1000
+
+# Campos que se refrescan en cada snapshot que ve la solucion. Los que entran
+# en `solution_key` (nombre, referencia, soltype, valores) no se tocan: si
+# cambiaran, seria otra solucion. `first_seen_snapshot_id` tampoco.
+_REFRESHED_ON_CONFLICT = (
+    "hostname",
+    "pl_refname",
+    "ref_text",
+    "arxiv_id",
+    "releasedate",
+    "pl_pubdate",
+    "pl_bmassprov",
+    "st_rad_value",
+    "st_rad_err1",
+    "st_rad_err2",
+    "st_mass_value",
+    "st_mass_err1",
+    "st_mass_err2",
+    "discoverymethod",
+    "ttv_flag",
+    "pl_controv_flag",
+    "is_default",
+    "last_seen_snapshot_id",
+    "removed_at",
+)
+
+
+class SqlAlchemyArchiveRepository:
+    """Persistencia del snapshot del Exoplanet Archive (T81).
+
+    Cumple `domain.repositories.ArchiveRepository`. Como el resto de
+    repositorios, no confirma ni deshace: `save_snapshot` es atomico porque
+    todas sus sentencias van en la transaccion de la sesion que le dan, y
+    `unit_of_work` la confirma o la deshace entera.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def last_snapshot(self) -> ArchiveSnapshot | None:
+        stmt = select(ArchiveSnapshotRow).order_by(ArchiveSnapshotRow.taken_at.desc()).limit(1)
+        row = self._session.execute(stmt).scalar_one_or_none()
+        return None if row is None else archive_snapshot_from_row(row)
+
+    def last_full_snapshot(self) -> ArchiveSnapshot | None:
+        stmt = (
+            select(ArchiveSnapshotRow)
+            .where(ArchiveSnapshotRow.kind == SnapshotKind.FULL)
+            .order_by(ArchiveSnapshotRow.taken_at.desc())
+            .limit(1)
+        )
+        row = self._session.execute(stmt).scalar_one_or_none()
+        return None if row is None else archive_snapshot_from_row(row)
+
+    def active_keys(self, planets: Collection[str] | None = None) -> dict[str, str]:
+        stmt = select(ArchiveSolutionRow.solution_key, ArchiveSolutionRow.pl_name).where(
+            ArchiveSolutionRow.removed_at.is_(None)
+        )
+        if planets is None:
+            return {key: name for key, name in self._session.execute(stmt)}
+        result: dict[str, str] = {}
+        for chunk in batched(sorted(set(planets)), _UPSERT_CHUNK):
+            chunk_stmt = stmt.where(ArchiveSolutionRow.pl_name.in_(chunk))
+            result.update({key: name for key, name in self._session.execute(chunk_stmt)})
+        return result
+
+    def removed_keys(self, keys: Collection[str]) -> frozenset[str]:
+        found: set[str] = set()
+        for chunk in batched(sorted(set(keys)), _UPSERT_CHUNK):
+            stmt = select(ArchiveSolutionRow.solution_key).where(
+                ArchiveSolutionRow.solution_key.in_(chunk),
+                ArchiveSolutionRow.removed_at.is_not(None),
+            )
+            found.update(self._session.execute(stmt).scalars())
+        return frozenset(found)
+
+    def current_defaults(self) -> dict[str, str]:
+        stmt = select(ArchiveSolutionRow.pl_name, ArchiveSolutionRow.solution_key).where(
+            ArchiveSolutionRow.is_default_current.is_(True)
+        )
+        return {name: key for name, key in self._session.execute(stmt)}
+
+    def save_snapshot(
+        self,
+        snapshot: ArchiveSnapshot,
+        solutions: Sequence[ArchiveSolution],
+        diff: SnapshotDiff,
+    ) -> None:
+        """Persiste snapshot, soluciones y diff.
+
+        `solutions` debe venir sin claves repetidas (`collapse_duplicates`):
+        dos filas con la misma clave en un mismo bloque harian fallar el
+        `ON CONFLICT`.
+
+        Estado `is_default_current` tras el snapshot, coherente con
+        `diff_snapshot`: se limpia para los planetas con cambio de default o
+        default perdido y para las claves dadas de baja, y se activa para las
+        soluciones vistas con `is_default`. Los planetas fuera del alcance de
+        un incremental conservan su default. Una clave reactivada vuelve con
+        `is_default_current` segun lo que se vea hoy, no con el que tenia.
+        """
+        self._session.add(archive_snapshot_to_row(snapshot))
+        # FK de las soluciones: el snapshot debe existir antes que ellas.
+        self._session.flush()
+
+        # Una sola sentencia compilada y ejecutada por bloques de parametros
+        # (insertmanyvalues): compilar un `VALUES` de 1.000 filas por bloque
+        # costaba ~0,3 s cada vez.
+        insert_stmt = pg_insert(ArchiveSolutionRow.__table__)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["solution_key"],
+            set_={name: insert_stmt.excluded[name] for name in _REFRESHED_ON_CONFLICT},
+        )
+        for chunk in batched(solutions, _UPSERT_CHUNK):
+            self._session.execute(
+                upsert_stmt,
+                [archive_solution_to_values(s, snapshot_id=snapshot.id) for s in chunk],
+            )
+
+        for chunk in batched(diff.removed, _UPSERT_CHUNK):
+            self._session.execute(
+                update(ArchiveSolutionRow)
+                .where(ArchiveSolutionRow.solution_key.in_(chunk))
+                .values(removed_at=snapshot.taken_at, is_default_current=False)
+            )
+
+        stale_planets = {c.pl_name for c in diff.default_changes} | set(diff.lost_defaults)
+        for chunk in batched(sorted(stale_planets), _UPSERT_CHUNK):
+            self._session.execute(
+                update(ArchiveSolutionRow)
+                .where(
+                    ArchiveSolutionRow.pl_name.in_(chunk),
+                    ArchiveSolutionRow.is_default_current.is_(True),
+                )
+                .values(is_default_current=False)
+            )
+        seen_default_keys = [s.solution_key for s in solutions if s.is_default]
+        for chunk in batched(seen_default_keys, _UPSERT_CHUNK):
+            self._session.execute(
+                update(ArchiveSolutionRow)
+                .where(ArchiveSolutionRow.solution_key.in_(chunk))
+                .values(is_default_current=True)
+            )
+
+        self._session.add_all(
+            archive_default_change_to_row(c, snapshot_id=snapshot.id, detected_at=snapshot.taken_at)
+            for c in diff.default_changes
+        )
+        self._session.flush()

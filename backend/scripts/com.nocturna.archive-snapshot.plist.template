@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    com.nocturna.archive-snapshot.plist.template — Plantilla del agente
+    launchd del snapshot del NASA Exoplanet Archive (T81). Se materializa con
+    `sed` sustituyendo __REPO_ROOT__ y __HOME__ por rutas absolutas, y se
+    instala fuera del repositorio, en
+    ~/Library/LaunchAgents/com.nocturna.archive-snapshot.plist.
+
+    Viernes (Weekday=5) a las 10:00. Sin LLM ni tokens. Deliberadamente sin
+    KeepAlive y con RunAtLoad=false: un fallo se anota y se espera a la
+    semana siguiente, no se reintenta en bucle.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nocturna.archive-snapshot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO_ROOT__/backend/scripts/archive-snapshot-scheduled.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>5</integer>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!--
+        Solo para fallos de arranque del propio agente launchd. Los logs de
+        la ejecución los escribe archive-snapshot-scheduled.sh en
+        NOCTURNA_LOG_DIR (por defecto __HOME__/nocturna-logs).
+    -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/nocturna-logs/launchd-archive.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/nocturna-logs/launchd-archive.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

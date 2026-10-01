@@ -45,6 +45,23 @@ nocturna/0.1.0`, timeout 30 s, 2,5 s entre ellas. Respuestas guardadas tal cual.
 | `ps_distinct_bmassprov.csv` | `select distinct pl_bmassprov from ps` | Valores: vacío, `Msini`, `Mass`, `Msin(i)/sin(i)`. Solo `Mass` es masa verdadera |
 | `pscomppars_names_full.csv` | `select pl_name from pscomppars` | **Completa, sin recortar**: 6372 filas / 91976 bytes |
 
+## Capturas de T81 (2026-10-01)
+
+Tres peticiones reales al TAP sync (`format=csv`), `User-Agent: nocturna/0.1.0`,
+timeout 30 s, 2,5 s entre ellas. Respuestas guardadas tal cual. Las dos primeras
+piden las 29 columnas del snapshot: `pl_name,hostname,default_flag,soltype,pl_refname,releasedate,pl_pubdate,pl_bmassprov,pl_bmasse,pl_bmasseerr1,pl_bmasseerr2,pl_bmasselim,pl_rade,pl_radeerr1,pl_radeerr2,pl_radelim,pl_orbper,pl_orbpererr1,pl_orbpererr2,pl_orbperlim,st_rad,st_raderr1,st_raderr2,st_mass,st_masserr1,st_masserr2,discoverymethod,ttv_flag,pl_controv_flag`.
+
+| Fichero | Consulta | Tamaño / notas |
+|---|---|---|
+| `ps_t81_planets.csv` | `select <29 columnas> from ps where pl_name in ('V1298 Tau b','V1298 Tau e','HD 202206 c')` | 5975 bytes, 15 filas (4 de HD 202206 c), 3 con `default_flag=1`, todas `soltype=Published Confirmed` |
+| `ps_t81_released_since_7d.csv` | `select <29 columnas> from ps where releasedate >= '2026-09-24'` | 11725 bytes, 32 filas (19 default). La comparación de fechas en ADQL con literal `'YYYY-MM-DD'` funciona |
+| `ps_t81_counts.csv` | `select count(*) as n, count(releasedate) as n_rel, count(soltype) as n_sol from ps` | 32 bytes: `n=n_rel=n_sol=40188`; `releasedate` y `soltype` nunca son nulos |
+
+Formatos observados: `releasedate` = `YYYY-MM-DD` (10 caracteres, sin hora);
+`pl_pubdate` = `YYYY-MM` (7 caracteres); `ttv_flag` y `pl_controv_flag` = `0`/`1`
+(nunca vacíos en estas capturas); números con ceros a la derecha
+(`10.22000000`); campos sin dato, vacíos.
+
 ## Regenerarlas
 
 Las consultas exactas están en la tabla. Respeta ≥2 s entre peticiones y el
