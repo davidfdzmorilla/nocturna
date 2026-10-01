@@ -219,35 +219,39 @@ keywords = ["exoplanet", "exoplanets"]
 # pasan a espacio; guiones unicode a "-"). La letra de planeta es minúscula
 # [b-i], así que "HD 189733 A" (componente estelar) no casa. Separadores
 # flexibles: espacio, guion o nada ("TOI-6981 b", "TOI 6981b", "WASP-12b").
+# Letras de planeta: una o varias en orden estrictamente ascendente y sin
+# separar ("b", "bc", "bcd", "ce"), para "HIP 67522 bc" (corrección del autor,
+# 2026-10-01). Se escribe como alternativas por primera letra
+# (`bc?d?…|cd?…|…|h`): al menos una letra; "bed" o "cb" no casan.
 designation_patterns = [
   # [0] Catálogos con número, letra de planeta opcional y \b final: TOI, KOI, K2,
   # Kepler, WASP, HAT-P, HATS, KELT, NGTS, CoRoT, XO, TrES, Qatar. "Kepler 2nd
   # law" no casa; HR, TWA y PDS van en [2] (letra obligatoria). Un número
   # seguido de unidad de tiempo no es designación ("Kepler 4-year baseline",
   # "NGTS 2 years"); "d" no se excluye porque es letra de planeta ("Kepler-90 d").
-  '\b(?:TOI|KOI|K2|Kepler|WASP|HAT-?P|HATS|KELT|NGTS|CoRoT|XO|TrES|Qatar)[ -]?\d+(?:\.\d+)?(?![ -]?(?:years?|yrs?|days?|campaigns?|quarters?)\b)(?:[ -]?[b-i])?\b',
+  '\b(?:TOI|KOI|K2|Kepler|WASP|HAT-?P|HATS|KELT|NGTS|CoRoT|XO|TrES|Qatar)[ -]?\d+(?:\.\d+)?(?![ -]?(?:years?|yrs?|days?|campaigns?|quarters?)\b)(?:[ -]?(?:bc?d?e?f?g?h?i?|cd?e?f?g?h?i?|de?f?g?h?i?|ef?g?h?i?|fg?h?i?|gh?i?|hi?|i))?\b',
   # [1] TRAPPIST-1 (con o sin letra).
   '\bTRAPPIST[ -]?1\b',
   # [2] Catálogos de estrella con letra de planeta obligatoria y componente
   # opcional: HD, HIP, GJ, Gliese, LHS, LTT, HR, Ross, Wolf, L, TWA, PDS
   # ("L 98-59 b", "LTT 1445A b", "TWA 7 b", "PDS 70 b"). "HD 189733 A",
   # "HR 4796A", "TWA 7 disk" y "PDS 110 dipper" no casan.
-  '\b(?:HD|HIP|GJ|Gliese|LHS|LTT|HR|Ross|Wolf|L|TWA|PDS)[ -]?\d+(?:-\d+)?(?:[ -]?[A-C])?[ -]?[b-h]\b',
+  '\b(?:HD|HIP|GJ|Gliese|LHS|LTT|HR|Ross|Wolf|L|TWA|PDS)[ -]?\d+(?:-\d+)?(?:[ -]?[A-C])?[ -]?(?:bc?d?e?f?g?h?|cd?e?f?g?h?|de?f?g?h?|ef?g?h?|fg?h?|gh?|h)\b',
   # [3] Genérico designación + abreviatura de constelación + letra: "V1298 Tau b",
   # "AU Mic b", "DS Tuc A b", "51 Peg b", "tau Boo b", "Proxima Cen b".
-  '\b(?:V\d{2,4}|[A-Z]{2}|\d{1,3}|(?i:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|alf|bet|gam|del|eps|zet|tet|iot|kap|lam|omi|sig|ups|ome)|Proxima)[ -](?:And|Ant|Aps|Aqr|Aql|Ara|Ari|Aur|Boo|Cae|Cam|Cnc|CVn|CMa|CMi|Cap|Car|Cas|Cen|Cep|Cet|Cha|Cir|Col|Com|CrA|CrB|Crv|Crt|Cru|Cyg|Del|Dor|Dra|Equ|Eri|For|Gem|Gru|Her|Hor|Hya|Hyi|Ind|Lac|Leo|LMi|Lep|Lib|Lup|Lyn|Lyr|Men|Mic|Mon|Mus|Nor|Oct|Oph|Ori|Pav|Peg|Per|Phe|Pic|PsA|Psc|Pup|Pyx|Ret|Sge|Sgr|Sco|Scl|Sct|Ser|Sex|Tau|Tel|Tri|TrA|Tuc|UMa|UMi|Vel|Vir|Vol|Vul)(?:[ -][A-C])?[ -][b-i]\b',
+  '\b(?:V\d{2,4}|[A-Z]{2}|\d{1,3}|(?i:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|alf|bet|gam|del|eps|zet|tet|iot|kap|lam|omi|sig|ups|ome)|Proxima)[ -](?:And|Ant|Aps|Aqr|Aql|Ara|Ari|Aur|Boo|Cae|Cam|Cnc|CVn|CMa|CMi|Cap|Car|Cas|Cen|Cep|Cet|Cha|Cir|Col|Com|CrA|CrB|Crv|Crt|Cru|Cyg|Del|Dor|Dra|Equ|Eri|For|Gem|Gru|Her|Hor|Hya|Hyi|Ind|Lac|Leo|LMi|Lep|Lib|Lup|Lyn|Lyr|Men|Mic|Mon|Mus|Nor|Oct|Oph|Ori|Pav|Peg|Per|Phe|Pic|PsA|Psc|Pup|Pyx|Ret|Sge|Sgr|Sco|Scl|Sct|Ser|Sex|Tau|Tel|Tri|TrA|Tuc|UMa|UMi|Vel|Vir|Vol|Vul)(?:[ -][A-C])?[ -](?:bc?d?e?f?g?h?i?|cd?e?f?g?h?i?|de?f?g?h?i?|ef?g?h?i?|fg?h?i?|gh?i?|hi?|i)\b',
   # [4] Anfitriona sin letra SOLO si es estrella variable V#### + constelación
   # ("the V1298 Tau system"). RR Lyr, BL Lac, TW Hya, FU Ori, AU Mic sin letra no casan.
   '\bV\d{2,4}[ -](?:And|Ant|Aps|Aqr|Aql|Ara|Ari|Aur|Boo|Cae|Cam|Cnc|CVn|CMa|CMi|Cap|Car|Cas|Cen|Cep|Cet|Cha|Cir|Col|Com|CrA|CrB|Crv|Crt|Cru|Cyg|Del|Dor|Dra|Equ|Eri|For|Gem|Gru|Her|Hor|Hya|Hyi|Ind|Lac|Leo|LMi|Lep|Lib|Lup|Lyn|Lyr|Men|Mic|Mon|Mus|Nor|Oct|Oph|Ori|Pav|Peg|Per|Phe|Pic|PsA|Psc|Pup|Pyx|Ret|Sge|Sgr|Sco|Scl|Sct|Ser|Sex|Tau|Tel|Tri|TrA|Tuc|UMa|UMi|Vel|Vir|Vol|Vul)\b',
   # [5] Coordenadas J...+/-... con letra de planeta: "RX J0534.0-0221 b".
-  '\bJ\d{4}(?:\.\d+)?[+-]\d{2,4}(?:\.\d+)?[ -]?[b-h]\b',
+  '\bJ\d{4}(?:\.\d+)?[+-]\d{2,4}(?:\.\d+)?[ -]?(?:bc?d?e?f?g?h?|cd?e?f?g?h?|de?f?g?h?|ef?g?h?|fg?h?|gh?|h)\b',
   # [6] Genitivo completo sin letra SOLO con número de Flamsteed:
   # "61 Cygni", "51 Pegasi".
   '\b\d{1,3}[ -](?:Andromedae|Antliae|Apodis|Aquarii|Aquilae|Arae|Arietis|Aurigae|Bootis|Caeli|Camelopardalis|Cancri|Canum Venaticorum|Canis Majoris|Canis Minoris|Capricorni|Carinae|Cassiopeiae|Centauri|Cephei|Ceti|Chamaeleontis|Circini|Columbae|Comae Berenices|Coronae Australis|Coronae Borealis|Corvi|Crateris|Crucis|Cygni|Delphini|Doradus|Draconis|Equulei|Eridani|Fornacis|Geminorum|Gruis|Herculis|Horologii|Hydrae|Hydri|Indi|Lacertae|Leonis|Leonis Minoris|Leporis|Librae|Lupi|Lyncis|Lyrae|Mensae|Microscopii|Monocerotis|Muscae|Normae|Octantis|Ophiuchi|Orionis|Pavonis|Pegasi|Persei|Phoenicis|Pictoris|Piscis Austrini|Piscium|Puppis|Pyxidis|Reticuli|Sagittae|Sagittarii|Scorpii|Sculptoris|Scuti|Serpentis|Sextantis|Tauri|Telescopii|Trianguli|Trianguli Australis|Tucanae|Ursae Majoris|Ursae Minoris|Velorum|Virginis|Volantis|Vulpeculae)\b',
   # [7] Genitivo completo con prefijo V####, dos mayúsculas, letra griega o Proxima
   # y letra de planeta obligatoria: "tau Bootis b", "Proxima Centauri b".
   # "eta Carinae", "delta Scuti", "RV Tauri" no casan.
-  '\b(?:V\d{2,4}|[A-Z]{2}|(?i:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega)|Proxima)[ -](?:Andromedae|Antliae|Apodis|Aquarii|Aquilae|Arae|Arietis|Aurigae|Bootis|Caeli|Camelopardalis|Cancri|Canum Venaticorum|Canis Majoris|Canis Minoris|Capricorni|Carinae|Cassiopeiae|Centauri|Cephei|Ceti|Chamaeleontis|Circini|Columbae|Comae Berenices|Coronae Australis|Coronae Borealis|Corvi|Crateris|Crucis|Cygni|Delphini|Doradus|Draconis|Equulei|Eridani|Fornacis|Geminorum|Gruis|Herculis|Horologii|Hydrae|Hydri|Indi|Lacertae|Leonis|Leonis Minoris|Leporis|Librae|Lupi|Lyncis|Lyrae|Mensae|Microscopii|Monocerotis|Muscae|Normae|Octantis|Ophiuchi|Orionis|Pavonis|Pegasi|Persei|Phoenicis|Pictoris|Piscis Austrini|Piscium|Puppis|Pyxidis|Reticuli|Sagittae|Sagittarii|Scorpii|Sculptoris|Scuti|Serpentis|Sextantis|Tauri|Telescopii|Trianguli|Trianguli Australis|Tucanae|Ursae Majoris|Ursae Minoris|Velorum|Virginis|Volantis|Vulpeculae)(?:[ -][A-C])?[ -][b-h]\b',
+  '\b(?:V\d{2,4}|[A-Z]{2}|(?i:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega)|Proxima)[ -](?:Andromedae|Antliae|Apodis|Aquarii|Aquilae|Arae|Arietis|Aurigae|Bootis|Caeli|Camelopardalis|Cancri|Canum Venaticorum|Canis Majoris|Canis Minoris|Capricorni|Carinae|Cassiopeiae|Centauri|Cephei|Ceti|Chamaeleontis|Circini|Columbae|Comae Berenices|Coronae Australis|Coronae Borealis|Corvi|Crateris|Crucis|Cygni|Delphini|Doradus|Draconis|Equulei|Eridani|Fornacis|Geminorum|Gruis|Herculis|Horologii|Hydrae|Hydri|Indi|Lacertae|Leonis|Leonis Minoris|Leporis|Librae|Lupi|Lyncis|Lyrae|Mensae|Microscopii|Monocerotis|Muscae|Normae|Octantis|Ophiuchi|Orionis|Pavonis|Pegasi|Persei|Phoenicis|Pictoris|Piscis Austrini|Piscium|Puppis|Pyxidis|Reticuli|Sagittae|Sagittarii|Scorpii|Sculptoris|Scuti|Serpentis|Sextantis|Tauri|Telescopii|Trianguli|Trianguli Australis|Tucanae|Ursae Majoris|Ursae Minoris|Velorum|Virginis|Volantis|Vulpeculae)(?:[ -][A-C])?[ -](?:bc?d?e?f?g?h?|cd?e?f?g?h?|de?f?g?h?|ef?g?h?|fg?h?|gh?|h)\b',
 ]
 
 [sources.arxiv]
