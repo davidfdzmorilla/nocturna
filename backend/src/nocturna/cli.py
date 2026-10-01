@@ -232,6 +232,7 @@ from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition
+from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.domain.sources import ArxivSource
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
@@ -574,6 +575,14 @@ def arxiv_source_from_config(
     )
 
 
+def exoplanet_filter_from_config(config: PipelineConfig) -> ExoplanetFilter:
+    """`ExoplanetFilter` con las listas de `[exoplanet_filter]` (T79)."""
+    return ExoplanetFilter(
+        keywords=tuple(config.exoplanet_filter.keywords),
+        designation_patterns=tuple(config.exoplanet_filter.designation_patterns),
+    )
+
+
 async def _run_ingest(
     *,
     since: datetime,
@@ -596,7 +605,11 @@ async def _run_ingest(
         factory = create_session_factory(engine)
         with unit_of_work(factory) as session:
             repo = SqlAlchemyItemRepository(session)
-            ingest = IngestArxiv(source=client, items=repo)
+            ingest = IngestArxiv(
+                source=client,
+                items=repo,
+                exoplanet_filter=exoplanet_filter_from_config(config),
+            )
             return await ingest(
                 since=since,
                 categories=categories,
@@ -622,8 +635,10 @@ def _print_dry_run_report(result: IngestResult) -> None:
     print(f"arXiv devolvió {result.fetched} ítems (incluye los que ya estaban en base):")
     for item in result.items:
         categories = ", ".join(item.categories)
+        exo_mark = " [exo]" if item.exoplanet_match else ""
         print(
-            f"  {item.external_id} · {item.published_at.isoformat()} · {item.title} · {categories}"
+            f"  {item.external_id} · {item.published_at.isoformat()} · {item.title} · "
+            f"{categories}{exo_mark}"
         )
         print(f"    {_abstract_preview(item.abstract)}")
     print()
@@ -644,8 +659,8 @@ def _print_dry_run_report(result: IngestResult) -> None:
         )
 
 
-def _would_read_count(config: PipelineConfig, settings: Settings) -> int:
-    """Cuántos ítems leería el Reader esta noche
+def _would_read_items(config: PipelineConfig, settings: Settings) -> list[Item]:
+    """Qué ítems leería el Reader esta noche
     (`ItemRepository.next_unread(limits.max_items_per_night)`), lectura pura
     y sin ningún agente: parte del plan de gasto de `--dry-run` (T44, paso
     8). Distinto de `IngestResult.new` -- que solo cuenta lo ingerido *esta*
@@ -658,11 +673,16 @@ def _would_read_count(config: PipelineConfig, settings: Settings) -> int:
     session_factory = create_session_factory(engine)
     with unit_of_work(session_factory) as session:
         items = SqlAlchemyItemRepository(session)
-        return len(items.next_unread(config.limits.max_items_per_night))
+        return items.next_unread(config.limits.max_items_per_night)
 
 
 def _print_budget_plan(
-    policy: BudgetPolicy, timezone: str, now: datetime, *, would_read: int
+    policy: BudgetPolicy,
+    timezone: str,
+    now: datetime,
+    *,
+    would_read: int,
+    would_read_v3: int | None = None,
 ) -> None:
     """Plan de gasto de la noche: lo que `CLAUDE.md` pide de `--dry-run`
     ("ingesta + plan de gasto, sin llamar a agentes"), sin instanciar el
@@ -673,7 +693,7 @@ def _print_budget_plan(
     `BudgetGuard.seconds_until_hard_stop`; no hay una segunda copia de ese
     cálculo en este módulo) y la hora del `SystemClock`. `would_read` es la
     única pieza que sí exige una lectura de base de datos
-    (`_would_read_count`, T44 paso 8): se calcula fuera y se recibe ya
+    (`_would_read_items`, T44 paso 8): se calcula fuera y se recibe ya
     resuelta para que esta función se mantenga pura y determinista.
     """
     effective_tokens = effective_nightly_tokens(policy, now)
@@ -695,6 +715,11 @@ def _print_budget_plan(
         f"  disponible para el Editor: {effective_tokens} tokens (presupuesto completo, sin restar)"
     )
     print(f"  ítems que se leerían esta noche: {would_read}")
+    if would_read_v3 is not None:
+        print(
+            f"  de los {would_read} a leer, {would_read_v3} con reader-v3 y "
+            f"{would_read - would_read_v3} con reader-v2"
+        )
     print(
         f"  ventana configurada: {policy.window_start.isoformat()}–"
         f"{policy.window_hard_stop.isoformat()} ({timezone})"
@@ -1005,7 +1030,7 @@ def _run_night(args: argparse.Namespace) -> int:
 def _run_night_dry_run(args: argparse.Namespace) -> int:
     """Ingesta real de arXiv, persistida, más el plan de gasto -- sin llamar
     a ningún agente ni instanciar `RunNight`. Comportamiento sin cambios
-    respecto a antes de T44 salvo la línea nueva de `_would_read_count` en
+    respecto a antes de T44 salvo la línea nueva de `_would_read_items` en
     el plan de gasto (T44, paso 8). Además (T74) calcula las tensiones de las
     lecturas con medidas consultando el NASA Exoplanet Archive (cero tokens) y
     sale con código 1 si el archivo no está disponible."""
@@ -1026,8 +1051,20 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
 
     policy = budget_policy_from_config(config)
     clock = system_clock_from_config(config)
-    would_read = _would_read_count(config, settings)
-    _print_budget_plan(policy, config.window.timezone, clock.now(), would_read=would_read)
+    to_read = _would_read_items(config, settings)
+    measures_categories = frozenset(config.reader.measurement_categories)
+    would_read_v3 = sum(
+        1
+        for item in to_read
+        if item.exoplanet_match and not measures_categories.isdisjoint(item.categories)
+    )
+    _print_budget_plan(
+        policy,
+        config.window.timezone,
+        clock.now(),
+        would_read=len(to_read),
+        would_read_v3=would_read_v3,
+    )
 
     try:
         _print_tension_section(config, settings)

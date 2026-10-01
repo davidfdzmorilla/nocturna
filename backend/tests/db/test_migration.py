@@ -62,6 +62,7 @@ def test_columnas_y_nulabilidad_de_items(scratch_database_url):
         "published_at",
         "fetched_at",
         "status",
+        "exoplanet_match",
     }
     assert set(columns) == expected_not_null
     for name in expected_not_null:

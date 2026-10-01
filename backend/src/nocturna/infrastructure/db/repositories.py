@@ -77,6 +77,7 @@ class SqlAlchemyItemRepository:
                 "published_at": item.published_at,
                 "fetched_at": item.fetched_at,
                 "status": item.status,
+                "exoplanet_match": item.exoplanet_match,
             }
             for item in deduplicated.values()
         ]
@@ -99,17 +100,24 @@ class SqlAlchemyItemRepository:
         return item_from_row(row) if row is not None else None
 
     def next_unread(self, limit: int) -> list[Item]:
-        # Orden de llegada: `fetched_at ASC` es la columna que refleja cuándo
-        # entró el ítem a la base. No basta como criterio único: dos ítems de
-        # la misma ingesta pueden compartir `fetched_at` al milisegundo, y sin
-        # desempate PostgreSQL puede devolverlos en cualquier orden entre
-        # ellos. `external_id ASC` desempata de forma determinista para que
-        # `run-item` y una re-ejecución de la noche vean siempre el mismo
-        # orden.
+        # T79: los ítems marcados `exoplanet_match` van primero, para que con
+        # `limit` (max_items_per_night) los candidatos a `reader-v3` no queden
+        # detrás de ítems de v2. Dentro de cada grupo, orden de llegada:
+        # `fetched_at ASC` refleja cuándo entró el ítem a la base. No basta
+        # como criterio único: dos ítems de la misma ingesta pueden compartir
+        # `fetched_at` al milisegundo, y sin desempate PostgreSQL puede
+        # devolverlos en cualquier orden entre ellos. `external_id ASC`
+        # desempata de forma determinista para que `run-item` y una
+        # re-ejecución de la noche vean siempre el mismo orden. El LIMIT se
+        # aplica después de ordenar.
         stmt = (
             select(ItemRow)
             .where(ItemRow.status == ItemStatus.NEW)
-            .order_by(ItemRow.fetched_at.asc(), ItemRow.external_id.asc())
+            .order_by(
+                ItemRow.exoplanet_match.desc(),
+                ItemRow.fetched_at.asc(),
+                ItemRow.external_id.asc(),
+            )
             .limit(limit)
         )
         rows = self._session.execute(stmt).scalars().all()

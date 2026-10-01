@@ -6,13 +6,14 @@ defecto, así que una clave ausente o mal escrita hace fallar la carga en
 lugar de degradar a un presupuesto "seguro" inventado.
 """
 
+import re
 import tomllib
 from datetime import time
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nocturna.infrastructure.arxiv.retry import MAX_JITTER_FACTOR
@@ -333,6 +334,36 @@ class ReaderConfig(BaseModel):
     measurement_categories: list[str]
 
 
+class ExoplanetFilterConfig(BaseModel):
+    """Filtro de exoplanetas de la ingesta (T79, `[exoplanet_filter]`).
+
+    Sin defaults en código. Listas vacías admitidas (el filtro nunca casa).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    keywords: list[str]
+    designation_patterns: list[str]
+
+    @field_validator("keywords", "designation_patterns")
+    @classmethod
+    def _non_empty_strings(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if not value.strip():
+                raise ValueError("las cadenas no pueden estar vacías")
+        return values
+
+    @field_validator("designation_patterns")
+    @classmethod
+    def _patterns_compile(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"regex que no compila: {value!r} ({exc})") from exc
+        return values
+
+
 class PipelineConfig(BaseModel):
     """Configuración completa del pipeline, agregando todas las secciones."""
 
@@ -346,6 +377,7 @@ class PipelineConfig(BaseModel):
     llm: LLMConfig
     reader: ReaderConfig
     tension: TensionConfig
+    exoplanet_filter: ExoplanetFilterConfig
 
     @model_validator(mode="after")
     def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":

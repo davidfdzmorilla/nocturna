@@ -2,24 +2,19 @@
 
 import re
 
-_DASH_VARIANTS = "‐‑‒–—−"
+from nocturna.domain.exoplanet_filter import normalize_text
+
 _DIGIT_LETTER_BOUNDARY = re.compile(r"(?<=[0-9])(?=[a-zA-Z])")
-_ALNUM_COMMA = re.compile(r"(?<=[0-9A-Za-z]),(?=[0-9A-Za-z])")
-_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def clean_name(name: str) -> str:
     """Limpieza legible de un nombre, sin pasar a minúsculas.
 
     Unifica variantes unicode del guion y convierte `\\,`, `~` y las comas
-    entre alfanuméricos en espacio (restos de LaTeX), colapsando espacios.
+    entre alfanuméricos en espacio (restos de LaTeX), colapsando espacios. La
+    lógica vive en `domain.exoplanet_filter.normalize_text` (única fuente).
     """
-    text = name.strip()
-    for ch in _DASH_VARIANTS:
-        text = text.replace(ch, "-")
-    text = text.replace("\\,", " ").replace("~", " ")
-    text = _ALNUM_COMMA.sub(" ", text)
-    return _WHITESPACE_RE.sub(" ", text).strip()
+    return normalize_text(name)
 
 
 def normalize_name(name: str) -> str:

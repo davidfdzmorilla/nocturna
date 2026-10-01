@@ -101,6 +101,9 @@ class Item:
     fetched_at: datetime
     status: ItemStatus = ItemStatus.NEW
     id: UUID = field(default_factory=uuid4)
+    # T79: marca de la ingesta (`ExoplanetFilter`); decide la variante del
+    # Reader (v3 solo si True y categoría de medidas). Default False = v2.
+    exoplanet_match: bool = False
 
     _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"status"})
 

@@ -49,82 +49,29 @@ en memoria -- ningún test llama a Claude
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, time
-from uuid import uuid4
 
 import pytest
-from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
-from fakes.work import (
-    InMemoryAgentCallRepository,
-    InMemoryFindingRepository,
-    InMemoryItemRepository,
-    InMemoryReadingRepository,
-    InMemoryRunRepository,
-    make_work_factory,
+from helpers.run_night import (
+    WITHIN_WINDOW,
+    Environment,
+    make_item,
+    make_policy,
+    make_run_night,
+    valid_reading_json,
 )
 
-from nocturna.application.budget import BudgetGuard, BudgetPolicy
-from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.application.use_cases.edit_night import EditNight
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
-from nocturna.domain.entities import AgentCall, AgentCallStatus, Item, ItemStatus, Run, RunStatus
+from nocturna.domain.entities import AgentCall, AgentCallStatus, ItemStatus, RunStatus
 from nocturna.domain.errors import LLMError, LLMRateLimited
 from nocturna.domain.llm import AgentRequest, AgentResult, AgentRole
 
 pytestmark = pytest.mark.anyio
-
-_WITHIN_WINDOW = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
-
-
-def _policy(**overrides: object) -> BudgetPolicy:
-    defaults: dict[str, object] = {
-        "nightly_tokens": 100_000,
-        "editor_reserve_tokens": 10_000,
-        "max_items_per_night": 10,
-        "max_turns_per_agent": 3,
-        "max_editor_calls_per_night": 2,
-        "max_calls_per_item": 5,
-        "item_timeout_s": 180,
-        "editor_timeout_s": 300,
-        "run_timeout_s": 16_200,
-        "window_start": time(0, 0),
-        "window_hard_stop": time(4, 45),
-        "weekly_reset_weekday": 0,
-        "weekly_reset_hour": 0,
-        "reset_day_multiplier": 1.0,
-    }
-    defaults.update(overrides)
-    return BudgetPolicy(**defaults)
-
-
-def _make_item(**overrides: object) -> Item:
-    defaults: dict[str, object] = {
-        "source": "arxiv",
-        "external_id": f"2501.{uuid4().hex[:5]}",
-        "title": "Un título de prueba",
-        "abstract": "Un abstract de prueba con contenido suficiente para el Reader.",
-        "categories": ["astro-ph.GA"],
-        "published_at": _WITHIN_WINDOW,
-        "fetched_at": _WITHIN_WINDOW,
-    }
-    defaults.update(overrides)
-    return Item(**defaults)
-
-
-def _valid_reading_json(**overrides: object) -> dict:
-    defaults: dict[str, object] = {
-        "summary": "Resumen de prueba",
-        "objects": ["NGC 1234"],
-        "claims": ["Una afirmación de prueba"],
-        "interest_score": 5,
-    }
-    defaults.update(overrides)
-    return defaults
 
 
 def _valid_popularizer_json(**overrides: object) -> dict:
@@ -138,106 +85,14 @@ def _valid_popularizer_json(**overrides: object) -> dict:
     return defaults
 
 
-class _Environment:
-    def __init__(self, *, items: list[Item], policy: BudgetPolicy, now: datetime) -> None:
-        self.run = Run(started_at=now, budget_tokens=policy.nightly_tokens)
-        self.runs = InMemoryRunRepository(self.run)
-        self.items = InMemoryItemRepository(*items)
-        self.readings = InMemoryReadingRepository()
-        self.findings = InMemoryFindingRepository()
-        self.agent_calls = InMemoryAgentCallRepository()
-        self.clock = FakeClock(now)
-        self.guard = BudgetGuard(
-            run_id=self.run.id,
-            policy=policy,
-            runs=self.runs,
-            agent_calls=self.agent_calls,
-            clock=self.clock,
-        )
-        self.work: AgentWorkFactory = make_work_factory(
-            guard=self.guard,
-            runs=self.runs,
-            items=self.items,
-            readings=self.readings,
-            findings=self.findings,
-            agent_calls=self.agent_calls,
-        )
-
-
-def _make_run_night(
-    *,
-    env: _Environment,
-    provider: FakeLLMProvider,
-    ingest_result: IngestResult,
-    max_items: int = 10,
-    max_consecutive_failures: int = 5,
-    deadline_s: int = 16_200,
-) -> RunNight:
-    read_item = ReadItem(
-        work=env.work,
-        provider=provider,
-        model="claude-sonnet-test",
-        max_turns=3,
-        max_attempts=2,
-        base=ReaderPrompt(
-            system_prompt="prompt del Reader", prompt_version="reader-v1", estimated_tokens=500
-        ),
-        measures=ReaderPrompt(
-            system_prompt="prompt del Reader v3 (no usado en este test)",
-            prompt_version="reader-v1-v3",
-            estimated_tokens=500,
-        ),
-        measures_categories=frozenset(),
-    )
-    popularize = PopularizeReading(
-        work=env.work,
-        provider=provider,
-        system_prompt="prompt del Popularizer",
-        prompt_version="popularizer-v1",
-        model="claude-sonnet-test",
-        max_turns=3,
-        estimated_tokens=500,
-        max_attempts=2,
-        min_interest_score=4,
-    )
-    edit_night = EditNight(
-        work=env.work,
-        provider=provider,
-        clock=env.clock,
-        system_prompt="prompt del Editor",
-        prompt_version="editor-v1",
-        model="claude-opus-test",
-        max_turns=3,
-        max_attempts=2,
-        base_tokens=1_000,
-        tokens_per_candidate=200,
-    )
-
-    async def _ingest() -> IngestResult:
-        return ingest_result
-
-    return RunNight(
-        work=env.work,
-        clock=env.clock,
-        ingest=_ingest,
-        read_item=read_item,
-        popularize=popularize,
-        edit_night=edit_night,
-        run_id=env.run.id,
-        max_items=max_items,
-        max_consecutive_failures=max_consecutive_failures,
-        deadline_s=deadline_s,
-    )
-
-
 # --- 1. Camino feliz: ingesta, Reader, Popularizer, Editor, en orden ------
 
 
 async def test_camino_feliz_encadena_las_tres_fases_en_orden_y_cierra_completed():
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=1000, tokens_out=200)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=1000, tokens_out=200)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=800, tokens_out=150
     )
@@ -252,7 +107,7 @@ async def test_camino_feliz_encadena_las_tres_fases_en_orden_y_cierra_completed(
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -279,12 +134,12 @@ async def test_camino_feliz_encadena_las_tres_fases_en_orden_y_cierra_completed(
 
 
 async def test_sin_candidatos_cierra_completed_sin_llamar_al_proveedor():
-    env = _Environment(items=[], policy=_policy(), now=_WITHIN_WINDOW)
+    env = Environment(items=[], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     ingest_result = IngestResult(
         fetched=0, new=0, duplicates=0, skipped=0, truncated=False, items=[]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -318,13 +173,13 @@ class _SlowLLMProvider:
 
 
 async def test_hard_stop_cancela_la_llamada_en_vuelo_y_cierra_killed():
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     provider = _SlowLLMProvider()
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(
+    run_night = make_run_night(
         env=env, provider=provider, ingest_result=ingest_result, deadline_s=0.05
     )
 
@@ -349,17 +204,17 @@ async def test_orden_de_gasto_reader_todos_luego_popularizer_candidatos_luego_ed
     reader) pero nunca llega a llamar al Popularizer: su `interest_score`
     bajo lo descarta dentro de `PopularizeReading`, antes de cualquier
     `authorize` (test de umbral aparte, más abajo)."""
-    item_a, item_b, item_c = _make_item(), _make_item(), _make_item()
-    env = _Environment(items=[item_a, item_b, item_c], policy=_policy(), now=_WITHIN_WINDOW)
+    item_a, item_b, item_c = make_item(), make_item(), make_item()
+    env = Environment(items=[item_a, item_b, item_c], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
     )
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
     )
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
     )
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
@@ -371,7 +226,7 @@ async def test_orden_de_gasto_reader_todos_luego_popularizer_candidatos_luego_ed
     ingest_result = IngestResult(
         fetched=3, new=3, duplicates=0, skipped=0, truncated=False, items=[item_a, item_b, item_c]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -393,11 +248,11 @@ async def test_orden_de_gasto_reader_todos_luego_popularizer_candidatos_luego_ed
 
 
 async def test_el_editor_se_llama_exactamente_una_vez_contando_por_rol():
-    item_a, item_b = _make_item(), _make_item()
-    env = _Environment(items=[item_a, item_b], policy=_policy(), now=_WITHIN_WINDOW)
+    item_a, item_b = make_item(), make_item()
+    env = Environment(items=[item_a, item_b], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -413,7 +268,7 @@ async def test_el_editor_se_llama_exactamente_una_vez_contando_por_rol():
     ingest_result = IngestResult(
         fetched=2, new=2, duplicates=0, skipped=0, truncated=False, items=[item_a, item_b]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -426,20 +281,20 @@ async def test_el_editor_se_llama_exactamente_una_vez_contando_por_rol():
 
 
 async def test_max_items_limita_las_llamadas_al_reader_sin_una_mas():
-    items = [_make_item() for _ in range(10)]
-    env = _Environment(items=items, policy=_policy(), now=_WITHIN_WINDOW)
+    items = [make_item() for _ in range(10)]
+    env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     for _ in range(3):
         fake.respond(
             AgentRole.READER,
-            json=_valid_reading_json(interest_score=1),
+            json=valid_reading_json(interest_score=1),
             tokens_in=100,
             tokens_out=10,
         )
     ingest_result = IngestResult(
         fetched=10, new=10, duplicates=0, skipped=0, truncated=False, items=items
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result, max_items=3)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result, max_items=3)
 
     result = await run_night()
 
@@ -457,16 +312,16 @@ async def test_interest_score_bajo_no_llama_al_popularizer_y_descarta_el_item():
     `popularize_reading.py`): este test verifica que `RunNight` no lo
     reimplementa ni lo comprueba una segunda vez antes de llamar a
     `self._popularize` -- llama siempre, y es el caso de uso quien decide."""
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
     )
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -488,11 +343,11 @@ async def test_agent_error_aislado_en_el_reader_no_impide_leer_los_siguientes():
     dispara el cortacircuitos no está en la lista de sucesos que degradan
     (ver la nota del docstring de este fichero, verificada contra el código
     antes de escribir este test)."""
-    item_a, item_b = _make_item(), _make_item()
-    env = _Environment(items=[item_a, item_b], policy=_policy(), now=_WITHIN_WINDOW)
+    item_a, item_b = make_item(), make_item()
+    env = Environment(items=[item_a, item_b], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     fake.fail(AgentRole.READER, error=LLMError("fallo del agente", tokens_in=100, tokens_out=10))
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -500,7 +355,7 @@ async def test_agent_error_aislado_en_el_reader_no_impide_leer_los_siguientes():
     ingest_result = IngestResult(
         fetched=2, new=2, duplicates=0, skipped=0, truncated=False, items=[item_a, item_b]
     )
-    run_night = _make_run_night(
+    run_night = make_run_night(
         env=env, provider=fake, ingest_result=ingest_result, max_consecutive_failures=5
     )
 
@@ -536,11 +391,11 @@ async def test_excepcion_inesperada_en_un_item_queda_aislada_y_la_noche_continua
     parche, que `test_agent_runner.py`/`test_read_item.py`/
     `test_json_repair.py`."""
     monkeypatch.setattr(run_night_module._logger, "disabled", False)
-    item_a, item_b = _make_item(), _make_item()
-    env = _Environment(items=[item_a, item_b], policy=_policy(), now=_WITHIN_WINDOW)
+    item_a, item_b = make_item(), make_item()
+    env = Environment(items=[item_a, item_b], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     fake.fail(AgentRole.READER, error=ValueError("bug inesperado, no un LLMError"))
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -548,7 +403,7 @@ async def test_excepcion_inesperada_en_un_item_queda_aislada_y_la_noche_continua
     ingest_result = IngestResult(
         fetched=2, new=2, duplicates=0, skipped=0, truncated=False, items=[item_a, item_b]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     with caplog.at_level("ERROR"):
         result = await run_night()
@@ -571,14 +426,16 @@ async def test_cortacircuitos_aborta_fase_a_pero_llama_al_editor_con_los_candida
     toca (a diferencia de `RATE_LIMITED`/`OUTSIDE_WINDOW`), así que el
     Editor sí se llama, con el único candidato que ya había."""
     item_a, item_b, item_c, item_d = (
-        _make_item(),
-        _make_item(),
-        _make_item(),
-        _make_item(),
+        make_item(),
+        make_item(),
+        make_item(),
+        make_item(),
     )
-    env = _Environment(items=[item_a, item_b, item_c, item_d], policy=_policy(), now=_WITHIN_WINDOW)
+    env = Environment(
+        items=[item_a, item_b, item_c, item_d], policy=make_policy(), now=WITHIN_WINDOW
+    )
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.fail(AgentRole.READER, error=LLMError("fallo 1", tokens_in=50, tokens_out=5))
     fake.fail(AgentRole.READER, error=LLMError("fallo 2", tokens_in=50, tokens_out=5))
     fake.respond(
@@ -598,7 +455,7 @@ async def test_cortacircuitos_aborta_fase_a_pero_llama_al_editor_con_los_candida
         truncated=False,
         items=[item_a, item_b, item_c, item_d],
     )
-    run_night = _make_run_night(
+    run_night = make_run_night(
         env=env, provider=fake, ingest_result=ingest_result, max_consecutive_failures=2
     )
 
@@ -634,24 +491,26 @@ async def test_skipped_low_score_no_reinicia_el_cortacircuitos_del_popularizer()
     de antes de esta revisión, `item_c` habría reseteado el contador a 0 y
     el cortacircuitos nunca habría disparado dentro de esta noche."""
     item_b, item_c, item_d, item_e = (
-        _make_item(),
-        _make_item(),
-        _make_item(),
-        _make_item(),
+        make_item(),
+        make_item(),
+        make_item(),
+        make_item(),
     )
-    env = _Environment(items=[item_b, item_c, item_d, item_e], policy=_policy(), now=_WITHIN_WINDOW)
+    env = Environment(
+        items=[item_b, item_c, item_d, item_e], policy=make_policy(), now=WITHIN_WINDOW
+    )
     fake = FakeLLMProvider()
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
     )
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=2), tokens_in=100, tokens_out=10
     )
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
     )
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=5), tokens_in=100, tokens_out=10
     )
     fake.fail(AgentRole.POPULARIZER, error=LLMError("fallo 1", tokens_in=50, tokens_out=5))
     fake.fail(AgentRole.POPULARIZER, error=LLMError("fallo 2", tokens_in=50, tokens_out=5))
@@ -663,7 +522,7 @@ async def test_skipped_low_score_no_reinicia_el_cortacircuitos_del_popularizer()
         truncated=False,
         items=[item_b, item_c, item_d, item_e],
     )
-    run_night = _make_run_night(
+    run_night = make_run_night(
         env=env, provider=fake, ingest_result=ingest_result, max_consecutive_failures=2
     )
 
@@ -687,10 +546,10 @@ async def test_skipped_low_score_no_reinicia_el_cortacircuitos_del_popularizer()
 
 
 async def test_rate_limited_en_fase_b_aborta_y_no_llama_al_editor():
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.fail(
         AgentRole.POPULARIZER,
         error=LLMRateLimited("límite alcanzado", tokens_in=50, tokens_out=5),
@@ -698,7 +557,7 @@ async def test_rate_limited_en_fase_b_aborta_y_no_llama_al_editor():
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -721,18 +580,18 @@ async def test_budget_exhausted_en_fase_b_no_toca_la_reserva_y_el_editor_se_llam
     degradación a `PARTIAL` ocurre en el momento de la denegación de fase B
     y `_degrade` es monótono, así que el éxito posterior del Editor no la
     revierte."""
-    item_a, item_b = _make_item(), _make_item()
+    item_a, item_b = make_item(), make_item()
     # disponible para Reader/Popularizer = 2500 - 1000 = 1500. Dos Reader
     # (110 cada uno, con estimated_tokens=200 más abajo) dejan spent=220;
     # el primer Popularizer (estimated_tokens=1000, autorizado contra los
     # 1500 disponibles) deja spent=220+1000=1220 tras registrarse -- el
     # segundo Popularizer, con la misma estimación, no cabe ya (1220+1000 >
     # 1500): BUDGET_EXHAUSTED, sin tocar la reserva del Editor.
-    policy = _policy(nightly_tokens=2_500, editor_reserve_tokens=1_000)
-    env = _Environment(items=[item_a, item_b], policy=policy, now=_WITHIN_WINDOW)
+    policy = make_policy(nightly_tokens=2_500, editor_reserve_tokens=1_000)
+    env = Environment(items=[item_a, item_b], policy=policy, now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=900, tokens_out=100
     )
@@ -825,18 +684,18 @@ async def test_editor_denegado_por_budget_exhausted_no_publica_nada():
     COMPLETO que ve el Editor, sin resta de reserva (`_available_tokens`,
     regla 4 de `application/budget.py`): `BUDGET_EXHAUSTED` en la fase C, no
     en la A ni la B."""
-    item = _make_item()
-    policy = _policy(nightly_tokens=1_000, editor_reserve_tokens=100)
-    env = _Environment(items=[item], policy=policy, now=_WITHIN_WINDOW)
+    item = make_item()
+    policy = make_policy(nightly_tokens=1_000, editor_reserve_tokens=100)
+    env = Environment(items=[item], policy=policy, now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(
+    run_night = make_run_night(
         env=env,
         provider=fake,
         ingest_result=ingest_result,
@@ -867,9 +726,9 @@ async def test_editor_already_called_con_candidatos_cierra_partial_sin_terminal_
     propósito para él, ver su docstring): si este test llamara a esa
     función con este motivo, la propia función reventaría -- este test pasa
     en verde precisamente porque `RunNight` no la invoca en esta rama."""
-    item = _make_item()
-    policy = _policy(max_editor_calls_per_night=2)
-    env = _Environment(items=[item], policy=policy, now=_WITHIN_WINDOW)
+    item = make_item()
+    policy = make_policy(max_editor_calls_per_night=2)
+    env = Environment(items=[item], policy=policy, now=WITHIN_WINDOW)
     for _ in range(2):
         env.agent_calls.add(
             AgentCall(
@@ -885,14 +744,14 @@ async def test_editor_already_called_con_candidatos_cierra_partial_sin_terminal_
             )
         )
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -906,10 +765,10 @@ async def test_editor_already_called_con_candidatos_cierra_partial_sin_terminal_
 
 
 async def test_editor_con_json_invalido_agotados_los_intentos_no_publica_nada():
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -918,7 +777,7 @@ async def test_editor_con_json_invalido_agotados_los_intentos_no_publica_nada():
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 
@@ -939,10 +798,10 @@ async def test_ingesta_fallida_continua_con_los_new_existentes_y_no_supera_parti
     `ingest_error`, pero sigue leyendo lo que ya hubiera en base
     (`ItemRepository.next_unread` no depende de que la ingesta de esta
     noche haya añadido nada)."""
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -1022,10 +881,10 @@ async def test_el_log_de_ingesta_fallida_incluye_error_detail(caplog, monkeypatc
     parche de logger deshabilitado que
     `test_excepcion_inesperada_en_un_item_queda_aislada_y_la_noche_continua`."""
     monkeypatch.setattr(run_night_module._logger, "disabled", False)
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
-    fake.respond(AgentRole.READER, json=_valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
@@ -1107,16 +966,16 @@ async def test_no_candidates_tras_descartar_todo_cierra_completed_con_coste_cero
     lo descarta por umbral: cero candidatos llegan a la fase C igual, y el
     Editor nunca llama al proveedor (`EditOutcome.NO_CANDIDATES`, coste
     cero, docstring de `edit_night.py`)."""
-    item = _make_item()
-    env = _Environment(items=[item], policy=_policy(), now=_WITHIN_WINDOW)
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
     fake = FakeLLMProvider()
     fake.respond(
-        AgentRole.READER, json=_valid_reading_json(interest_score=1), tokens_in=100, tokens_out=10
+        AgentRole.READER, json=valid_reading_json(interest_score=1), tokens_in=100, tokens_out=10
     )
     ingest_result = IngestResult(
         fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
     )
-    run_night = _make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
 
     result = await run_night()
 

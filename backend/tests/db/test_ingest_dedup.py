@@ -18,6 +18,7 @@ import pytest
 
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv
 from nocturna.domain.entities import ItemStatus
+from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.infrastructure.arxiv.client import ArxivClient
 from nocturna.infrastructure.arxiv.oai_client import ArxivOaiClient
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
@@ -29,6 +30,8 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "arxiv"
 _FETCHED_AT = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 _VERY_OLD_SINCE = datetime(2000, 1, 1, tzinfo=UTC)
 _CATEGORIES = ("astro-ph.EP", "astro-ph.GA")
+
+_NO_FILTER = ExoplanetFilter(keywords=(), designation_patterns=())
 
 
 class _IncreasingClock:
@@ -73,12 +76,12 @@ async def test_ingerir_feed_three_entries_dos_veces_deja_tres_filas_en_items(
 
     async with http:
         with unit_of_work(db_session_factory) as session:
-            first = await IngestArxiv(client, SqlAlchemyItemRepository(session))(
+            first = await IngestArxiv(client, SqlAlchemyItemRepository(session), _NO_FILTER)(
                 since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100
             )
 
         with unit_of_work(db_session_factory) as session:
-            second = await IngestArxiv(client, SqlAlchemyItemRepository(session))(
+            second = await IngestArxiv(client, SqlAlchemyItemRepository(session), _NO_FILTER)(
                 since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100
             )
 
@@ -135,13 +138,13 @@ async def test_cambiar_de_via_de_ingesta_no_reingiere_lo_que_ya_estaba(
 
     async with atom_http:
         with unit_of_work(db_session_factory) as session:
-            por_atom = await IngestArxiv(atom_client, SqlAlchemyItemRepository(session))(
-                since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100
-            )
+            por_atom = await IngestArxiv(
+                atom_client, SqlAlchemyItemRepository(session), _NO_FILTER
+            )(since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100)
 
     async with oai_http:
         with unit_of_work(db_session_factory) as session:
-            por_oai = await IngestArxiv(oai_client, SqlAlchemyItemRepository(session))(
+            por_oai = await IngestArxiv(oai_client, SqlAlchemyItemRepository(session), _NO_FILTER)(
                 since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100
             )
 
@@ -162,7 +165,7 @@ async def test_la_via_oai_ingiere_en_una_base_vacia(db_session_factory) -> None:
 
     async with http:
         with unit_of_work(db_session_factory) as session:
-            result = await IngestArxiv(client, SqlAlchemyItemRepository(session))(
+            result = await IngestArxiv(client, SqlAlchemyItemRepository(session), _NO_FILTER)(
                 since=_VERY_OLD_SINCE, categories=_CATEGORIES, max_results=100
             )
 
