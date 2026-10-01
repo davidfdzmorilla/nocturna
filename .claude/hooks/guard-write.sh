@@ -10,9 +10,24 @@ case "$path" in
   *.env|*.env.*)
     echo "BLOQUEADO: no se escriben ficheros .env desde Claude Code. El autor los gestiona a mano." >&2; exit 2;;
   */docs/adr/*)
-    if [ -f "$path" ]; then
-      echo "BLOQUEADO: los ADR existentes no se editan; se supersede con uno nuevo." >&2; exit 2
-    fi;;
+    # Un ADR es inmutable cuando está en git (índice o commit) en el repo del
+    # propio fichero; un borrador sin rastrear se puede editar (T80). Falla
+    # cerrado si no se puede comprobar.
+    # Un symlink podría apuntar a un ADR publicado: falla cerrado. El pathspec
+    # es literal (sin globs) e insensible a mayúsculas, porque en APFS
+    # "0001-A.md" es el mismo fichero que "0001-a.md".
+    if [ -L "$path" ]; then
+      echo "BLOQUEADO: no se escribe en un ADR a través de un symlink. Falla cerrado." >&2; exit 2
+    fi
+    dir=$(dirname "$path"); name=$(basename "$path")
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+      git -C "$dir" ls-files --error-unmatch -- ":(literal,icase)$name" >/dev/null 2>&1
+    rc=$?
+    case $rc in
+      0) echo "BLOQUEADO: este ADR ya está en git (commit o índice); se supersede con uno nuevo." >&2; exit 2;;
+      1) ;;
+      *) echo "BLOQUEADO: no se pudo comprobar con git si el ADR está publicado (rc=$rc). Falla cerrado." >&2; exit 2;;
+    esac;;
 esac
 
 if printf '%s' "$content" | grep -qE 'ANTHROPIC_API_KEY\s*='; then

@@ -214,7 +214,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 
 Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md). Objetivo: publicar como `catalog_tension` las tensiones entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia la calcula Python; Claude solo redacta a partir de números ya calculados. Local, sin despliegue.
 
-**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74 y T79 cerradas; siguiente: T80, después T81–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
+**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74, T79 y T80 cerradas; siguiente: T81, después T82–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
 
 ### T70 · `page` sin tope en `GET /findings`
 - **Estado**: done
@@ -324,12 +324,13 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-10-01)**: implementada según ADR 0018 (commit fc38462, PR #32). Dos pasadas de revisión con `budget-guard-review`, la segunda aprobada. Arreglo posterior del mismo día (commit 0b67bf6, PR #33): letras de planeta múltiples y ascendentes ("HIP 67522 bc"), por un falso negativo real (2609.35979) detectado en el relleno. Secuencia de merge de `DEVELOPMENT_WORKFLOW.md` ejecutada el 2026-10-01 por la mañana: base real en `a79e3c5d8f12`; relleno de 385 ítems, 45 marcados; `run-night --dry-run` con 17 de los 30 a leer con `reader-v3`; 2609.35979 en el puesto 2 y TOI-6981 b (2609.37597) en el puesto 9, ambos con v3. Suite: 1791 passed.
 
 ### T80 · Guard de ADR: bloquear solo ficheros ya en git
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: —
 - **Toca agentes y gasto**: no.
 - **Origen**: tres veces (ADR 0011, 0012, 0018) el hook bloqueó editar un borrador de ADR sin commit y hubo que borrarlo y recrearlo. La inmutabilidad protege lo publicado, no el borrador (Decisiones del autor del 2026-10-01).
 - **Alcance**: `.claude/hooks/guard-write.sh` bloquea la edición de un ADR solo si el fichero ya está en git (`git ls-files --error-unmatch`); los ficheros nuevos sin commit se pueden editar. Commit propio `chore(hooks): ...`, sin mezclar con otra tarea.
-- **Hecho cuando**: lo fija el plan.
+- **Hecho cuando**: `backend/tests/hooks/test_guard_write.py` en verde con los casos del plan (borrador sin rastrear permitido; ADR commiteado, modificado, borrado del disco, en el índice o renombrado bloqueado; fuera de repo, sin git o con directorio inexistente bloqueado; consulta contra el repo o worktree del propio fichero, inmune a `GIT_DIR` y a nombres con glob; resto de reglas del hook sin cambios).
+- **Cierre (2026-10-01)**: la rama `*/docs/adr/*` de `guard-write.sh` consulta `git ls-files --error-unmatch` en el repo del fichero: pathspec `:(literal,icase)` (sin globs e insensible a mayúsculas, por APFS); un symlink en `docs/adr/` se bloquea; rc 0 (índice o commit) bloquea, rc 1 (sin rastrear) permite, cualquier otro rc bloquea (falla cerrado). "Publicado" = en el índice de git. 30 tests nuevos (suite: 1821 passed); la revisión encontró una regresión frente a `main` (mayúsculas en el nombre y symlinks), corregida con tres tests más; mutaciones comprobadas (volver a `[ -f "$path" ]`, quitar `-C`, quitar `icase`, quitar el bloqueo de symlinks o el `-u GIT_INDEX_FILE` ponen tests en rojo). Surte efecto en la sesión tras el merge y `git pull` del árbol principal (el hook se carga desde `$CLAUDE_PROJECT_DIR`).
 
 ### T81 · Snapshot semanal del NASA Exoplanet Archive
 - **Estado**: pending

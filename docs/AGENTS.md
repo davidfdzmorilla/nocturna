@@ -41,7 +41,7 @@ Elección de modelos: Opus donde el juicio importa (diseño, revisión), Sonnet 
 | Evento | Script | Qué impone |
 |---|---|---|
 | `PreToolUse` Bash | `guard-bash.sh` | Sin `ANTHROPIC_API_KEY` ni llamadas a `/v1/messages`; commits sin atribución a IA, sin `--no-verify` y solo con aprobación (`.claude/.commit-approved`); nada de Traefik/Hetzner en fase 1; sin comandos destructivos |
-| `PreToolUse` Edit/Write | `guard-write.sh` | Sin escribir `.env`; ADR existentes inmutables; sin `ANTHROPIC_API_KEY` en contenido; sin atribución a IA; `domain/` sin imports de infraestructura |
+| `PreToolUse` Edit/Write | `guard-write.sh` | Sin escribir `.env`; ADR ya en git (índice o commit) inmutables, el borrador sin rastrear es editable y, si no se puede comprobar con git, bloquea (T80); sin `ANTHROPIC_API_KEY` en contenido; sin atribución a IA; `domain/` sin imports de infraestructura |
 | `PostToolUse` Edit/Write | `post-edit-format.sh` | `ruff` / `prettier` sobre el fichero tocado |
 | `SubagentStop` | `subagent-stop.sh` | Traza en `.claude/logs/subagents.log` |
 | `Stop` | `stop-check.sh` | Avisa si hay cambios sin reflejar en `PLAN_TAREAS.md`; borra `.commit-approved` |
