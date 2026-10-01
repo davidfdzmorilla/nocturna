@@ -36,6 +36,11 @@ class ArchiveRequestCapReached(ExoplanetArchiveUnavailable):
     """Se alcanzó `max_requests_per_night`; la petición no se envió."""
 
 
+def adql_string(value: str) -> str:
+    """Literal de cadena ADQL: comillas simples duplicadas."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _looks_like_votable_error(text: str) -> bool:
     # El TAP responde HTTP 200 con un VOTABLE de error aunque se pida CSV
     # (fixture `pscomppars_error_gaia_id.xml`). Solo se mira el principio: un
@@ -53,6 +58,7 @@ class ArchiveHttpClient:
         limiter: RateLimiter,
         request_timeout_s: float,
         max_requests: int,
+        max_response_bytes: int | None = None,
     ) -> None:
         self._http = http
         self._tap_url = tap_url
@@ -60,6 +66,7 @@ class ArchiveHttpClient:
         self._limiter = limiter
         self._request_timeout_s = request_timeout_s
         self._max_requests = max_requests
+        self._max_response_bytes = max_response_bytes
         self._requests_made = 0
 
     @property
@@ -92,10 +99,10 @@ class ArchiveHttpClient:
                 f"el Exoplanet Archive respondió {response.status_code} para {url}"
             )
         content = response.content
-        if len(content) > MAX_RESPONSE_BYTES:
+        limit = MAX_RESPONSE_BYTES if self._max_response_bytes is None else self._max_response_bytes
+        if len(content) > limit:
             raise ExoplanetArchiveUnavailable(
-                f"respuesta del Exoplanet Archive de {len(content)} bytes supera el tope "
-                f"de {MAX_RESPONSE_BYTES}"
+                f"respuesta del Exoplanet Archive de {len(content)} bytes supera el tope de {limit}"
             )
         _logger.info(
             "exoplanet_archive.request",

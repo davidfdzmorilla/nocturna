@@ -23,6 +23,7 @@ from typing import Protocol, get_type_hints
 
 from nocturna.domain.repositories import (
     AgentCallRepository,
+    ArchiveRepository,
     FindingRepository,
     ItemRepository,
     ReadingRepository,
@@ -30,6 +31,7 @@ from nocturna.domain.repositories import (
 )
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
+    SqlAlchemyArchiveRepository,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
@@ -109,3 +111,15 @@ def test_sqlalchemy_run_repository_cumple_run_repository() -> None:
 def test_sqlalchemy_agent_call_repository_cumple_agent_call_repository() -> None:
     repo: AgentCallRepository = SqlAlchemyAgentCallRepository(None)
     _assert_conforms(AgentCallRepository, type(repo))
+
+
+def test_sqlalchemy_archive_repository_cumple_archive_repository() -> None:
+    repo: ArchiveRepository = SqlAlchemyArchiveRepository(None)
+    _assert_conforms(ArchiveRepository, type(repo))
+
+
+def test_in_memory_archive_repository_cumple_archive_repository() -> None:
+    from fakes.archive import InMemoryArchiveRepository
+
+    repo: ArchiveRepository = InMemoryArchiveRepository()
+    _assert_conforms(ArchiveRepository, type(repo))

@@ -18,7 +18,16 @@ from sqlalchemy import inspect
 
 from nocturna.infrastructure.db.models import Base
 
-EXPECTED_TABLES = {"items", "readings", "findings", "runs", "agent_calls"}
+EXPECTED_TABLES = {
+    "items",
+    "readings",
+    "findings",
+    "runs",
+    "agent_calls",
+    "archive_snapshot",
+    "archive_solution",
+    "archive_default_change",
+}
 
 # Revisión anterior a "950738867fb9" (item failed status and agent call
 # prompt version): el `down_revision` declarado en esa migración.
@@ -29,7 +38,7 @@ _REVISION_BEFORE_FAILED_STATUS = "a318e7fd86a9"
 _REVISION_BEFORE_MEASUREMENTS = "950738867fb9"
 
 
-def test_upgrade_head_crea_las_cinco_tablas(scratch_database_url):
+def test_upgrade_head_crea_todas_las_tablas(scratch_database_url):
     run_alembic_upgrade(scratch_database_url, "head")
 
     engine = sa.create_engine(scratch_database_url)

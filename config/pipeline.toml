@@ -355,6 +355,23 @@ request_timeout_s = 30.0
 # sola noche; el techo se revisa en T76. Sin datos de campo: PROVISIONAL.
 max_requests_per_night = 40
 
+[sources.exoplanet_archive.snapshot]
+# Snapshot del archivo (T81): `nocturna archive-snapshot`, aparte de la noche,
+# sin LLM. Completo una vez al mes natural, incremental el resto.
+# max_requests: techo duro de peticiones por ejecución (mínimo 3).
+max_requests = 6
+# request_timeout_s: duración TOTAL de una petición; la descarga completa de
+# `ps` (~40.000 filas) tarda más que una consulta de planeta.
+request_timeout_s = 120.0
+# max_response_bytes: tope de tamaño de una respuesta (64 MiB).
+max_response_bytes = 67108864
+# planet_batch_size: planetas por consulta `pl_name in (...)` (1-100).
+planet_batch_size = 75
+# max_change_fraction: si las bajas o los cambios de default superan esta
+# fracción de lo ya guardado, el snapshot aborta sin persistir (respuesta
+# truncada, casi seguro).
+max_change_fraction = 0.10
+
 [tension]
 # threshold_sigma: una medida del paper es candidata si su σ frente a la
 # solución por defecto del archivo (TensionResult.reference_sigma) alcanza

@@ -333,7 +333,7 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-10-01)**: la rama `*/docs/adr/*` de `guard-write.sh` consulta `git ls-files --error-unmatch` en el repo del fichero: pathspec `:(literal,icase)` (sin globs e insensible a mayúsculas, por APFS); un symlink en `docs/adr/` se bloquea; rc 0 (índice o commit) bloquea, rc 1 (sin rastrear) permite, cualquier otro rc bloquea (falla cerrado). "Publicado" = en el índice de git. 30 tests nuevos (suite: 1821 passed); la revisión encontró una regresión frente a `main` (mayúsculas en el nombre y symlinks), corregida con tres tests más; mutaciones comprobadas (volver a `[ -f "$path" ]`, quitar `-C`, quitar `icase`, quitar el bloqueo de symlinks o el `-u GIT_INDEX_FILE` ponen tests en rojo). Surte efecto en la sesión tras el merge y `git pull` del árbol principal (el hook se carga desde `$CLAUDE_PROJECT_DIR`).
 
 ### T81 · Snapshot semanal del NASA Exoplanet Archive
-- **Estado**: pending
+- **Estado**: in_progress
 - **Depende de**: T74
 - **Toca agentes y gasto**: no. Cero tokens.
 - **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b): la opción 3(b) entra como segunda vía de la fase 2, unida a la de arXiv por `arxiv_id`.
@@ -372,13 +372,13 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Alcance**: tensiones entre soluciones del archivo con las reglas deterministas 1–3 y 5 del estudio como filtro (solo `Published Confirmed`, distinta referencia, sin papers antiguos incorporados ahora, reglas de periodo); la 6 ("depende del modelo") y la 7 (`pl_controv_flag`) como etiquetas visibles para el Editor, no como descarte. Un `Finding` de esta vía cuelga de un `Item` con `source = 'exoplanet_archive'` y `external_id = solution_key`.
 - **Hecho cuando**: lo fija el plan.
 
-### T86 · ADR 0019: criterio de cierre de fase 2 (supersede a ADR 0012)
+### T86 · ADR 0020: criterio de cierre de fase 2 (supersede a ADR 0012)
 - **Estado**: pending
 - **Depende de**: T83, T84, T85 y datos de las dos vías
 - **Toca agentes y gasto**: no.
 - **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b); ADR 0012 queda obsoleto en su criterio de cierre (no se edita).
-- **Alcance**: ADR 0019 con tres criterios: (a) la cadena funciona de extremo a extremo con un caso real por vía (V1298 Tau b por arXiv, HD 202206 c por el archivo); (b) N = 2 candidatos publicables según el Editor en 4 semanas, sumando las dos vías; (c) snapshot semanal con al menos 4 semanas de histórico y filas en `archive_default_change`. Si (b) falla con (a) y (c) cumplidos, la fase cierra igualmente con el resumen semanal como producto principal. Se redacta al final, con datos de las dos vías.
-- **Hecho cuando**: ADR 0019 escrito con los datos medidos.
+- **Alcance**: ADR 0020 (renumerado desde 0019 al aprobar T81, que tomó el 0019) con tres criterios: (a) la cadena funciona de extremo a extremo con un caso real por vía (V1298 Tau b por arXiv, HD 202206 c por el archivo); (b) N = 2 candidatos publicables según el Editor en 4 semanas, sumando las dos vías; (c) snapshot semanal con al menos 4 semanas de histórico y filas en `archive_default_change`. Si (b) falla con (a) y (c) cumplidos, la fase cierra igualmente con el resumen semanal como producto principal. Se redacta al final, con datos de las dos vías.
+- **Hecho cuando**: ADR 0020 escrito con los datos medidos.
 
 ---
 

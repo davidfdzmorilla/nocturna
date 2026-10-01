@@ -8,9 +8,11 @@ al terminar) es cosa de `infrastructure/` y `application/`, no de esta
 interfaz.
 """
 
+from collections.abc import Collection, Sequence
 from typing import Protocol
 from uuid import UUID
 
+from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
 from nocturna.domain.entities import AgentCall, Finding, Item, Reading, Run
 from nocturna.domain.llm import AgentRole
 
@@ -121,4 +123,37 @@ class AgentCallRepository(Protocol):
 
     def count_runs_with_prompt_version(self, prompt_version: str) -> int:
         """Número de Runs distintos con al menos una llamada de esa `prompt_version` (T74)."""
+        ...
+
+
+class ArchiveRepository(Protocol):
+    """Persistencia del snapshot del Exoplanet Archive (T81)."""
+
+    def last_snapshot(self) -> ArchiveSnapshot | None:
+        """Último snapshot, completo o incremental."""
+        ...
+
+    def last_full_snapshot(self) -> ArchiveSnapshot | None:
+        """Último snapshot completo."""
+        ...
+
+    def active_keys(self, planets: Collection[str] | None = None) -> dict[str, str]:
+        """clave -> pl_name de las activas (sin `removed_at`); filtra por planetas si se pasan."""
+        ...
+
+    def removed_keys(self, keys: Collection[str]) -> frozenset[str]:
+        """Subconjunto de `keys` que existe en la base con `removed_at`."""
+        ...
+
+    def current_defaults(self) -> dict[str, str]:
+        """pl_name -> clave de la solución por defecto vigente."""
+        ...
+
+    def save_snapshot(
+        self,
+        snapshot: ArchiveSnapshot,
+        solutions: Sequence[ArchiveSolution],
+        diff: SnapshotDiff,
+    ) -> None:
+        """Persiste snapshot, soluciones y diff en una sola transacción."""
         ...
