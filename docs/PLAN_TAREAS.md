@@ -214,7 +214,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 
 Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md). Objetivo: publicar como `catalog_tension` las tensiones entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia la calcula Python; Claude solo redacta a partir de números ya calculados. Local, sin despliegue.
 
-**Estado del bloque**: T71, T71.b, T71.c, T72, T73 y T74 cerradas; siguiente: T75. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
+**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74 y T79 cerradas; siguiente: T80, después T81–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
 
 ### T70 · `page` sin tope en `GET /findings`
 - **Estado**: done
@@ -315,12 +315,69 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: el autor ha fijado el criterio, este se cumple, y la decisión final queda en un ADR.
 
 ### T79 · Filtro de exoplanetas en la ingesta y prioridad en la cola de lectura
-- **Estado**: in_progress
+- **Estado**: done
 - **Depende de**: T75 en el enunciado del autor; se adelanta a T75 (decisión del autor al aprobar el plan, 2026-10-01): T75 calibra el coste de v3 y debe hacerlo con la población que v3 va a leer. Las noches con v3 anteriores a T79 cuentan para las 7 de T75.
 - **Toca agentes y gasto**: sí, indirectamente: decide qué ítems pasan por `reader-v3` (más caro) y el orden de la cola de lectura. No toca `budget.py`. Dos pasadas de revisión con `budget-guard-review`.
 - **Origen**: informe sobre `reader-v3` del 2026-10-01 (dos noches, 25 ítems astro-ph.EP, 0 medidas; 14 de 25 de sistema solar o física espacial); opción 1 aceptada por el autor.
 - **Alcance**: marca `Item.exoplanet_match` calculada en la **ingesta** con palabras clave y patrones de designación en `[exoplanet_filter]` de `pipeline.toml` (lista B del autor con correcciones, ADR 0018); `reader-v3` solo si casa y la categoría está en `measurement_categories`; los EP que no casan van a `reader-v2`; `next_unread` prioriza los marcados y después `fetched_at`; columna y migración; script de relleno; marca `[exo]` y reparto v3/v2 en `--dry-run`.
 - **Hecho cuando**: fixture real con cero falsos negativos en los planetas concretos (V1298 Tau b, TOI-6981 b, los de T71.b) y cero falsos positivos en sistema solar y negativos sintéticos; tests de dominio, configuración, ingesta, `ReadItem` (variante y estimación), orden de la cola y migración en verde; dos pasadas de revisión; tras el merge, base real migrada y rellenada con TOI-6981 b en cabeza de la cola, según la secuencia de `docs/DEVELOPMENT_WORKFLOW.md`.
+- **Cierre (2026-10-01)**: implementada según ADR 0018 (commit fc38462, PR #32). Dos pasadas de revisión con `budget-guard-review`, la segunda aprobada. Arreglo posterior del mismo día (commit 0b67bf6, PR #33): letras de planeta múltiples y ascendentes ("HIP 67522 bc"), por un falso negativo real (2609.35979) detectado en el relleno. Secuencia de merge de `DEVELOPMENT_WORKFLOW.md` ejecutada el 2026-10-01 por la mañana: base real en `a79e3c5d8f12`; relleno de 385 ítems, 45 marcados; `run-night --dry-run` con 17 de los 30 a leer con `reader-v3`; 2609.35979 en el puesto 2 y TOI-6981 b (2609.37597) en el puesto 9, ambos con v3. Suite: 1791 passed.
+
+### T80 · Guard de ADR: bloquear solo ficheros ya en git
+- **Estado**: pending
+- **Depende de**: —
+- **Toca agentes y gasto**: no.
+- **Origen**: tres veces (ADR 0011, 0012, 0018) el hook bloqueó editar un borrador de ADR sin commit y hubo que borrarlo y recrearlo. La inmutabilidad protege lo publicado, no el borrador (Decisiones del autor del 2026-10-01).
+- **Alcance**: `.claude/hooks/guard-write.sh` bloquea la edición de un ADR solo si el fichero ya está en git (`git ls-files --error-unmatch`); los ficheros nuevos sin commit se pueden editar. Commit propio `chore(hooks): ...`, sin mezclar con otra tarea.
+- **Hecho cuando**: lo fija el plan.
+
+### T81 · Snapshot semanal del NASA Exoplanet Archive
+- **Estado**: pending
+- **Depende de**: T74
+- **Toca agentes y gasto**: no. Cero tokens.
+- **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b): la opción 3(b) entra como segunda vía de la fase 2, unida a la de arXiv por `arxiv_id`.
+- **Alcance**: opción B incremental del estudio de viabilidad, los viernes (filas nuevas por `releasedate`, soluciones por defecto y filas de los planetas afectados), más volcado completo mensual. Tablas `archive_snapshot`, `archive_solution` (clave natural `solution_key`) y `archive_default_change`, como propone el estudio. Reutiliza el cliente y los mapeos de `infrastructure/exoplanet_archive/`.
+- **Hecho cuando**: lo fija el plan.
+
+### T82 · `run-item --reader v3 --force`: releer un ítem ya leído
+- **Estado**: pending
+- **Depende de**: T79
+- **Toca agentes y gasto**: sí. Dos pasadas de revisión con `budget-guard-review`.
+- **Origen**: autor, 2026-10-01 (caso de 2609.35979, HIP 67522 b y c, que estuvo a punto de leerse con v2). Prioridad alta tras T81.
+- **Alcance**: releer con `reader-v3` un ítem en estado `read`; pasa por `BudgetGuard` como cualquier llamada; conserva la `Reading` anterior con su `prompt_version`.
+- **Hecho cuando**: lo fija el plan.
+
+### T83 · Enlace entre vías por `arxiv_id`
+- **Estado**: pending
+- **Depende de**: T81
+- **Toca agentes y gasto**: no.
+- **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b): arXiv detecta antes, el archivo confirma o resuelve después.
+- **Alcance**: unir `arxiv_id_from_refname` de las soluciones del archivo con el `Item` de arXiv correspondiente. Incluye la medición pendiente, sin tokens: de las 130 filas nuevas de las 8 semanas del estudio, cuántos `pl_refname` con `arxiv_id` corresponden a ítems ya presentes en la base.
+- **Hecho cuando**: lo fija el plan.
+
+### T84 · Resumen semanal de cambios de solución por defecto
+- **Estado**: pending
+- **Depende de**: T81; el texto del redactor, de T75/T76
+- **Toca agentes y gasto**: solo a través del redactor.
+- **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b): producto semanal nuevo; es la sección fija del producto y las tensiones son la sección rara.
+- **Alcance**: resumen determinista de los cambios de solución por defecto del archivo (planeta, paper, parámetros que cambian), sin LLM salvo el redactor.
+- **Hecho cuando**: lo fija el plan.
+
+### T85 · Tensiones solución contra solución
+- **Estado**: pending
+- **Depende de**: T81, T73, T72
+- **Toca agentes y gasto**: solo a través del redactor y el Editor.
+- **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b).
+- **Alcance**: tensiones entre soluciones del archivo con las reglas deterministas 1–3 y 5 del estudio como filtro (solo `Published Confirmed`, distinta referencia, sin papers antiguos incorporados ahora, reglas de periodo); la 6 ("depende del modelo") y la 7 (`pl_controv_flag`) como etiquetas visibles para el Editor, no como descarte. Un `Finding` de esta vía cuelga de un `Item` con `source = 'exoplanet_archive'` y `external_id = solution_key`.
+- **Hecho cuando**: lo fija el plan.
+
+### T86 · ADR 0019: criterio de cierre de fase 2 (supersede a ADR 0012)
+- **Estado**: pending
+- **Depende de**: T83, T84, T85 y datos de las dos vías
+- **Toca agentes y gasto**: no.
+- **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b); ADR 0012 queda obsoleto en su criterio de cierre (no se edita).
+- **Alcance**: ADR 0019 con tres criterios: (a) la cadena funciona de extremo a extremo con un caso real por vía (V1298 Tau b por arXiv, HD 202206 c por el archivo); (b) N = 2 candidatos publicables según el Editor en 4 semanas, sumando las dos vías; (c) snapshot semanal con al menos 4 semanas de histórico y filas en `archive_default_change`. Si (b) falla con (a) y (c) cumplidos, la fase cierra igualmente con el resumen semanal como producto principal. Se redacta al final, con datos de las dos vías.
+- **Hecho cuando**: ADR 0019 escrito con los datos medidos.
 
 ---
 
