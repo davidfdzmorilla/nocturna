@@ -115,7 +115,9 @@ class InMemoryItemRepository:
         return self._items.get(item_id)
 
     def next_unread(self, limit: int) -> list[Item]:
-        return [item for item in self._items.values() if item.status is ItemStatus.NEW][:limit]
+        new = [item for item in self._items.values() if item.status is ItemStatus.NEW]
+        new.sort(key=lambda i: (not i.exoplanet_match, i.fetched_at, i.external_id))
+        return new[:limit]
 
     def save(self, item: Item) -> None:
         self._items[item.id] = item

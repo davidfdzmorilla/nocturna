@@ -199,6 +199,7 @@ def item_to_row(item: Item) -> ItemRow:
         published_at=item.published_at,
         fetched_at=item.fetched_at,
         status=item.status,
+        exoplanet_match=item.exoplanet_match,
     )
 
 
@@ -215,6 +216,7 @@ def item_from_row(row: ItemRow) -> Item:
         published_at=row.published_at,
         fetched_at=row.fetched_at,
         status=row.status,
+        exoplanet_match=row.exoplanet_match,
     )
 
 

@@ -107,6 +107,7 @@ def test_downgrade_con_fila_catalog_tension_falla_y_deja_fila_y_columna_intactas
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
         assert [tuple(r) for r in rows] == [("catalog_tension", "1")]
-        assert version == "7c1e4a9b2d35"
+        # El head actual: el downgrade entero se revierte (a79e3c5d8f12 incluido).
+        assert version == "a79e3c5d8f12"
     finally:
         engine.dispose()

@@ -76,6 +76,10 @@ min_request_interval_s = 2.0
 request_timeout_s = 30.0
 max_requests_per_night = 40
 
+[exoplanet_filter]
+keywords = ["exoplanet"]
+designation_patterns = ["TOI-[0-9]+"]
+
 [tension]
 threshold_sigma = 3.0
 

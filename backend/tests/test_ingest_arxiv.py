@@ -16,6 +16,7 @@ import pytest
 
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv
 from nocturna.domain.entities import Item, ItemStatus
+from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.repositories import ItemRepository
 from nocturna.domain.sources import SourceFetch
 from nocturna.infrastructure.config import load_pipeline_config
@@ -23,6 +24,8 @@ from nocturna.infrastructure.config import load_pipeline_config
 _SINCE = datetime(2026, 9, 1, tzinfo=UTC)
 _CATEGORIES = ("astro-ph.EP", "astro-ph.GA")
 _FETCHED_AT = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+
+_NO_FILTER = ExoplanetFilter(keywords=(), designation_patterns=())
 
 
 def _make_item(external_id: str, *, source: str = "arxiv") -> Item:
@@ -73,7 +76,11 @@ class _InMemoryItemRepository:
         raise NotImplementedError
 
     def next_unread(self, limit: int) -> list[Item]:
-        return list(self._items.values())[:limit]
+        ordered = sorted(
+            self._items.values(),
+            key=lambda i: (not i.exoplanet_match, i.fetched_at, i.external_id),
+        )
+        return ordered[:limit]
 
     def save(self, item: Item) -> None:  # pragma: no cover - no usado por IngestArxiv
         raise NotImplementedError
@@ -85,7 +92,7 @@ async def test_persiste_los_items_con_status_new() -> None:
     assert all(item.status == ItemStatus.NEW for item in items)
     source = _FakeArxivSource(SourceFetch(items=items, truncated=False, skipped=0))
     repo = _InMemoryItemRepository()
-    use_case = IngestArxiv(source, repo)
+    use_case = IngestArxiv(source, repo, _NO_FILTER)
 
     await use_case(since=_SINCE, categories=_CATEGORIES, max_results=100)
 
@@ -99,7 +106,7 @@ async def test_segunda_ejecucion_con_las_mismas_entradas_da_new_cero_y_duplicate
     items = [_make_item("2609.00001"), _make_item("2609.00002"), _make_item("2609.00003")]
     source = _FakeArxivSource(SourceFetch(items=items, truncated=False, skipped=0))
     repo = _InMemoryItemRepository()
-    use_case = IngestArxiv(source, repo)
+    use_case = IngestArxiv(source, repo, _NO_FILTER)
 
     first = await use_case(since=_SINCE, categories=_CATEGORIES, max_results=100)
     second = await use_case(since=_SINCE, categories=_CATEGORIES, max_results=100)
@@ -118,7 +125,7 @@ async def test_los_contadores_de_ingestresult_cuadran() -> None:
     source = _FakeArxivSource(SourceFetch(items=fresh_items, truncated=True, skipped=2))
     repo = _InMemoryItemRepository()
     repo.add_many([already_stored])
-    use_case = IngestArxiv(source, repo)
+    use_case = IngestArxiv(source, repo, _NO_FILTER)
 
     result = await use_case(since=_SINCE, categories=_CATEGORIES, max_results=100)
 
@@ -145,7 +152,7 @@ async def test_con_50_entradas_y_max_items_per_night_en_40_se_persisten_las_50()
     fifty_items = [_make_item(f"2609.{i:05d}") for i in range(50)]
     source = _FakeArxivSource(SourceFetch(items=fifty_items, truncated=False, skipped=0))
     repo = _InMemoryItemRepository()
-    use_case = IngestArxiv(source, repo)
+    use_case = IngestArxiv(source, repo, _NO_FILTER)
 
     result = await use_case(since=_SINCE, categories=_CATEGORIES, max_results=1000)
 
@@ -162,7 +169,7 @@ async def test_ingest_arxiv_no_abre_ni_cierra_transaccion_solo_llama_a_add_many(
     source = _FakeArxivSource(SourceFetch(items=items, truncated=False, skipped=0))
     repo = Mock(spec=ItemRepository)
     repo.add_many.return_value = 1
-    use_case = IngestArxiv(source, repo)
+    use_case = IngestArxiv(source, repo, _NO_FILTER)
 
     await use_case(since=_SINCE, categories=_CATEGORIES, max_results=100)
 

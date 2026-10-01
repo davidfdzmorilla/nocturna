@@ -112,6 +112,10 @@ class ItemRow(Base):
     published_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     status: Mapped[ItemStatus] = mapped_column(_str_enum(ItemStatus, "item_status"), nullable=False)
+    # T79: marca de la ingesta (`ExoplanetFilter`); decide la variante del Reader.
+    exoplanet_match: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.false()
+    )
 
     __table_args__ = (
         sa.UniqueConstraint("source", "external_id", name="uq_items_source_external_id"),

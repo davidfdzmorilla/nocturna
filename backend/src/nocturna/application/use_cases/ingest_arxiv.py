@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from nocturna.domain.entities import Item
+from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.repositories import ItemRepository
 from nocturna.domain.sources import ArxivSource
 
@@ -49,9 +50,12 @@ class IngestArxiv:
     el tope ya vive donde debe, en la selección.
     """
 
-    def __init__(self, source: ArxivSource, items: ItemRepository) -> None:
+    def __init__(
+        self, source: ArxivSource, items: ItemRepository, exoplanet_filter: ExoplanetFilter
+    ) -> None:
         self._source = source
         self._items = items
+        self._exoplanet_filter = exoplanet_filter
 
     async def __call__(
         self, *, since: datetime, categories: Sequence[str], max_results: int
@@ -59,6 +63,9 @@ class IngestArxiv:
         fetch = await self._source.fetch_new(
             since=since, categories=categories, max_results=max_results
         )
+        # T79: marca persistida en la ingesta (decide reader-v3 vs v2 después).
+        for item in fetch.items:
+            item.exoplanet_match = self._exoplanet_filter.matches(item.title, item.abstract)
         new = self._items.add_many(fetch.items)
         duplicates = len(fetch.items) - new
         return IngestResult(

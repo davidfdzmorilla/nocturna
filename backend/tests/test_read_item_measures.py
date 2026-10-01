@@ -74,6 +74,9 @@ def _make_item(**overrides: object) -> Item:
         "categories": ["astro-ph.EP"],
         "published_at": _WITHIN_WINDOW,
         "fetched_at": _WITHIN_WINDOW,
+        # T79: el abstract por defecto trata de un exoplaneta, así que la
+        # ingesta lo habría marcado.
+        "exoplanet_match": True,
     }
     defaults.update(overrides)
     return Item(**defaults)

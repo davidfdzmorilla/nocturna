@@ -314,6 +314,14 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Pregunta abierta en la tarea (bloquea el arranque de T78, no las anteriores)**: criterio de cierre. ADR 0012 §9 pedía al menos 10 candidatos en dos semanas; ADR 0013 §3 lo dejó en revisión (una tensión real en cinco noches en T71). Propuesta hecha en conversación, **no aprobada**: ≥ 3 candidatos en 4 semanas. El informe de T74 dará el ritmo real. Decide el autor.
 - **Hecho cuando**: el autor ha fijado el criterio, este se cumple, y la decisión final queda en un ADR.
 
+### T79 · Filtro de exoplanetas en la ingesta y prioridad en la cola de lectura
+- **Estado**: in_progress
+- **Depende de**: T75 en el enunciado del autor; se adelanta a T75 (decisión del autor al aprobar el plan, 2026-10-01): T75 calibra el coste de v3 y debe hacerlo con la población que v3 va a leer. Las noches con v3 anteriores a T79 cuentan para las 7 de T75.
+- **Toca agentes y gasto**: sí, indirectamente: decide qué ítems pasan por `reader-v3` (más caro) y el orden de la cola de lectura. No toca `budget.py`. Dos pasadas de revisión con `budget-guard-review`.
+- **Origen**: informe sobre `reader-v3` del 2026-10-01 (dos noches, 25 ítems astro-ph.EP, 0 medidas; 14 de 25 de sistema solar o física espacial); opción 1 aceptada por el autor.
+- **Alcance**: marca `Item.exoplanet_match` calculada en la **ingesta** con palabras clave y patrones de designación en `[exoplanet_filter]` de `pipeline.toml` (lista B del autor con correcciones, ADR 0018); `reader-v3` solo si casa y la categoría está en `measurement_categories`; los EP que no casan van a `reader-v2`; `next_unread` prioriza los marcados y después `fetched_at`; columna y migración; script de relleno; marca `[exo]` y reparto v3/v2 en `--dry-run`.
+- **Hecho cuando**: fixture real con cero falsos negativos en los planetas concretos (V1298 Tau b, TOI-6981 b, los de T71.b) y cero falsos positivos en sistema solar y negativos sintéticos; tests de dominio, configuración, ingesta, `ReadItem` (variante y estimación), orden de la cola y migración en verde; dos pasadas de revisión; tras el merge, base real migrada y rellenada con TOI-6981 b en cabeza de la cola, según la secuencia de `docs/DEVELOPMENT_WORKFLOW.md`.
+
 ---
 
 ## Decisiones abiertas al arrancar

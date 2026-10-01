@@ -1,0 +1,351 @@
+[
+  {
+    "external_id": "2609.32097",
+    "title": "The NEID Earth Twin Survey. VI. Discovery of a Low-Mass Planet Orbiting HD 126053 and RV Signals Near the Rotation Periods of HD 168009 and HD 10780",
+    "abstract": "Extreme precision radial velocity (EPRV) spectrographs are making strides in extending the limits of radial velocity exoplanet detection. Perhaps the best evidence for this is how readily EPRV instruments are facilitating the discovery and detailed characterization of small-amplitude planetary signals around stars that have already been intensively monitored for decades with less stable instruments. In this paper, we use data from the ongoing NEID Earth Twin Survey (NETS) to detect and confirm the planet HD 126053 b (P=10.91 d), which is among the least massive planets (m sin i = 3.60 m M_\\oplus) around solar-type stars within 25 pc. We then jointly characterize the known planet HD 168009 b (P=15.14 d; m sin i = 8.64 M_\\oplus) orbiting a solar analog along with a previously unreported signal at 27.8 d which we tentatively attribute to rotational modulation of stellar activity (P_rot = 30.1 d). We also analyze and discuss periodic RV variations in HD 10780 arising from a combination of rotationally-modulated activity and a long-term activity cycle. We discuss HD 126053 b and HD 168009 b in the context of the broader small planet population and our sensitivity to long-period planets in these systems, and we comment on our capacity to disambiguate planet-induced and activity-induced radial velocity signals. HD 126053 is exceptionally RV-quiet, making it a promising target for continued RV monitoring in search of low-mass exoplanets in the habitable zone.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.32110",
+    "title": "COSINE (Cometary Object Study Investigating their Nature and Evolution) II: Colors and Sizes of Comet Nuclei",
+    "abstract": "Comet nuclei preserve a record of planetesimal formation, but their sizes are difficult to measure because the nucleus is usually blended with its coma. We present a catalog of nucleus sizes for 523 comets (235 long-period and 288 short-period comets; LPCs and SPCs) from the 14.5-year WISE/NEOWISE archive, supplemented by Spitzer photometry. A coma-nucleus decomposition of the radial profiles yields conservative upper limits for all 523 comets and diameters with uncertainties for 301 (107 LPCs and 194 SPCs), with median diameters of 5.3 and 2.5 km, respectively. Nucleus colors across the four WISE bands follow the heliocentric trend expected from the transition between reflected and thermal emission, with no measurable difference between the two dynamical classes. The cumulative size-frequency distribution of the SPCs has a slope of $\\gamma = 1.45_{-0.13}^{+0.15}$ (68% confidence interval) over $D = 2$--15 km, steepening to $2.05_{-0.38}^{+0.47}$ for the perihelion $q < 2$ au subset. The LPC distribution is smoothly concave down: a broken power law places a break near 35 km, with slopes of $0.92_{-0.12}^{+0.13}$ below and $3.68_{-1.24}^{+1.96}$ above, while the $q < 2$ au subset gives $1.39_{-0.28}^{+0.35}$ over $D = 4$--20 km. All distributions flatten below the fitted ranges and level off near 1 km. We discuss the implications of our results and their connection with models of the destabilized trans-Neptunian population.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.32468",
+    "title": "Application and Evaluation of the Material Point Method for Low-Velocity Asteroid Collisions Involving Large Deformations",
+    "abstract": "The collisional lifetimes of asteroids larger than $\\sim 10$ km in the present-day main belt are estimated to exceed the age of the solar system, suggesting that their shapes may preserve memories of the collisional environment in the primordial solar system. Recent studies performed systematic simulations of equal-mass and low-velocity ($50$--$400\\,\\mathrm{ms}^{-1}$) collisions between 50-km-radius asteroids using Smoothed Particle Hydrodynamics (SPH), identifying the impact conditions that produce irregular shapes. As an alternative approach, we here employ the Material Point Method (MPM), a particle-grid method well suited to large deformation of solids and free from tensile instability, and we assess its applicability to such systems by direct comparison with the established SPH results. We integrate a previously established rock model combined with a fracture model, the Tillotson equation of state, and Drucker-Prager friction, with the efficient non-associative Drucker-Prager plasticity solver originally developed for granular flows. We perform 135 collision simulations of equal-mass rocky asteroids spanning 15 impact velocities ($50$--$400\\,\\mathrm{ms}^{-1}$) and 9 impact angles ($5$--$45^\\circ$), following the setup of the previous SPH simulations. The mass, axis ratio, and shape classification of the largest remnants closely reproduce the trends of the previous SPH simulations. Since most material transitions into a granular state early in the collision, this agreement appears to depend primarily on the validity of the frictional treatment of the granular material, rather than on the details of the fracture model. These results demonstrate the applicability of MPM to low-velocity asteroid collision simulations and support cross-validation between MPM- and SPH-based approaches.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.IM"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.32724",
+    "title": "Pre-accretional irradiation of comet 67P/Churyumov-Gerasimenko constituents",
+    "abstract": "Comets are thought to have largely preserved the primordial material from which they formed. Therefore, cometary studies provide important clues about the processes involved in the formation of the Solar System. During the last weeks of ESA's Rosetta mission, the COSIMA (COmetary Secondary Ion Mass Analyser) instrument performed a series of measurements, which involved long-term sputtering of dust particles captured from comet 67P/Churyumov-Gerasimenko. These post-sputtering analyses revealed the subsurface composition of 8 particles, which we compare here with surfaces composition measured on 59 un-sputtered particle fragments for 9 elements. We found that the analysed surfaces are strongly depleted in metals, such as Mg and Fe, compared to solar abundances, while the subsurface material is consistent with solar values. Because the dust captured by COSIMA fragmented upon impact with the collection targets, this metal depletion cannot reside exclusively on the outer surface of the bulk particles. Instead, these depletion layers must coat the surface of smaller, unfragmented mineral subunits. Such depletion layers, which are often called 'rims', are common at the surface of small regolith dust particles found on airless bodies in our solar system and are attributed to space weathering. We suggest that these mineral cometary subunits experienced pre-accretional solar wind irradiation in the inner regions of the solar nebula during the early stages of Solar System formation. The small irradiated dust constituents must then have been transported to the outer regions of the solar nebula, where they mixed with ices to form the nucleus of the comet.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.32893",
+    "title": "Worlds Next Door. V. A Candidate Solar System Scale Super-Jupiter in the 61 Cygni Binary System",
+    "abstract": "We present new constraints on a candidate third companion in the 61 Cygni binary system-one of the closest neighbors to our solar system (3.5 pc), the first stars to have a measured parallax, and two of the most favorable targets for habitable zone exo-Earth searches with future direct imaging missions. Kervella et al. (2022) first identified the candidate based on a 4.4$\\sigma$ tangential velocity anomaly in the system determined using Hipparcos and Gaia DR3 astrometry of the A and B components. We combine this astrometric evidence with constraints from Gaia DR3 RUWE, MMT/Clio Lp imaging, nearly four decades of radial velocity (RV) measurements (including $\\sim$2 years of new NEID RVs presented here), and N-body dynamical stability calculations of both stars in a Monte Carlo framework to estimate the candidate companion's mass and semi-major axis. Our analysis reveals that all of the available data are compatible with an $\\approx(8 \\pm 3)\\;M_{\\rm Jup}$ super-Jupiter in an $\\approx(8 \\pm 3)$ au orbit, with a broad range of allowed eccentricities and mutual inclinations. Using the Sonora Flame Skimmer evolutionary models, given the system's mature age of $(6.0 \\pm 1.0)$ Gyr, we estimate a companion effective temperature of $(282 \\pm 55)$ K and radius of $(1.02 \\pm 0.02)\\;R_{\\rm Jup}$. Finally, we evaluate the stability of terrestrial planets in the habitable zone (HZ) of 61 Cygni AB in the presence of the giant planet candidate using N-body simulations. A companion semi-major axis $\\lesssim$5 au, irrespective of the planet-planet mutual inclination, and between $\\approx$5 au and 10 au, for misaligned orbits ($40^o \\lesssim i_{\\rm mut} \\lesssim 140^o$), severely disrupts the HZ. Our results highlight the need to confirm the planet candidate and characterize its orbit to inform future exo-Earth searches with missions such as SHERA, HWO, and LIFE.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.33080",
+    "title": "On the Secular Evolution of Inclinations Among the Classical Belt TNOs",
+    "abstract": "Proper orbital elements have been used in diverse ways to study the dynamical architecture of transneptunian objects (TNOs), providing insights into Solar System evolution and migration theories. In this paper, we present the numerically-computed proper elements of all known TNOs. We then compare their distribution with the distribution of proper elements of a large synthetic sample generated to study the secular behavior of TNOs in the Classical belt region in an effort to better understand certain observed features, particularly features appearing in the inclination distribution of these TNOs. Our analysis indicates the presence of an inclination-dependent instability in the Classical belt from 42 < a < 45 au, which we find is caused by the g+s-g8-s8 = 0 secular resonance. The coincidence of this instability with the previously-noted inclination boundary of the Cold Classical belt near proper inclination of Ifree = 4 (deg) could suggest that the primordial Classical belt may have originally been more continuous between 4 < Ifree (deg) < 6 than we observe today. However, our analysis to account for the impact of secular resonant instabilities finds a best-estimate of the inclination width of the primordial Cold Classical belt near 1.5(deg), well below 4(deg), and slightly thinner than previous works have suggested. We conclude that the inclination boundary of the Cold Classical belt is not set directly by secular resonance or instability, and that this belt is generally unaltered by resonance or instability since the end of planetary migration.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.33170",
+    "title": "The July 2023 Outburst of Comet 12P/Pons-Brooks: Observations and Modeling of Dust Coma and Arc Structure",
+    "abstract": "We conducted continuous imaging observations of comet 12P/Pons-Brooks, which has experienced multiple outbursts since 2023 July. Among these, we determined the dust coma expansion velocities and the occurrence times for three outbursts. The outburst on 2023 July 20.39$\\pm$0.05 had an expansion velocity of 207.5$\\pm$0.1 [unit]. The outburst on 2023 November 14.52$\\pm$0.10 had an expansion velocity of 305.8$\\pm$13.7 [unit], and the outburst on April 2.23$\\pm$0.06, 2024 had an expansion velocity of 408.9$\\pm$14.3 [unit]. During the July outburst, in addition to the isotropically expanding dust coma, a semicircular structure (arc structure) was observed. This structure expanded without changing shape over two months, until mid-September, at a slower velocity of 52.0$\\pm$1.7 [unit] compared to the outer coma. We hypothesize that this arc structure consists of dust ejected over a certain period during the outburst from an active region at mid-latitudes on the comet's nucleus, with a rotation axis near the line of sight. We performed model calculations to reproduce the structure. As a result, we found that the observations were well reproduced by assuming a rotation axis direction of RA = [value], Dec = [value] to [value] and an active region latitude of [value] during the July outburst. The active period of the outburst was shorter than the rotation period, approximately 0.7 times the rotation period. Since the dust particles comprising the arc structure escaped dissipation due to solar radiation pressure, we infer that they are dust with a ratio of radiation pressure to gravity of [value], which corresponds to a dust particle size of about 10 [unit].",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.33317",
+    "title": "Modeling of the variability of D-region ionospheric electron density during solar cycle-24",
+    "abstract": "Solar cycle variation of earth's atmosphere, particularly the ionosphere is of particular interest in the field of space science and space weather studies. In this article, we present the outcome of our detailed quantitative study on solar cycle variation of lower ionospheric properties using numerical investigation. First, we seek to model and compare the collective D-region ionization rates (q's) due to the individual contributions from the ionizing sources, namely, (a) solar extreme ultraviolet (EUV) radiation including the Lyman-alpha irradiation and (b) solar X-ray irradiation throughout the 24th solar cycle (C24). Then, we compute the electron density (Ne) profiles using the ionization rates. We report significant solar cycle variation in ionization rate and electron density profiles for the entire span of C24. We use the sunspot number (SPN) profile to substantiate the finer details of Ne profile during C24. For the segments of the D-region above two different geographic coordinates, we report that Ne profiles show a consistent \"dual peak\" nature. It is very similar to the SPN profile during C24. As a next-order validation, we compare our modeled Ne profiles with their IRI-2020 counterpart (Ne,iris). Their overall trends are found to be in agreement. Finally, we discuss the response of the D-region in terms of Ne due to C24. The work lays the foundation for our upcoming studies on D-region response to solar cycle variation with Very Low Frequency (VLF) observation.",
+    "categories": [
+      "astro-ph.SR",
+      "astro-ph.EP",
+      "physics.space-ph"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.33657",
+    "title": "Synthesis of organo-phosphorous species in space: the reaction of P$^+$ with C$_2$H$_2$",
+    "abstract": "Despite its low cosmic abundance, phosphorus is a bioessential element whose prebiotic availability and incorporation into biomolecules remain open questions. Only a few phosphorous containing molecules with P to C bonds have been detected in astronomical environments (CP, CCP, HCP). More complex species have been proposed, but their formation and destruction pathways remain poorly constrained. Gas-phase ion molecule chemistry involving P cations may contribute to organophosphorus formation, particularly in protostellar shocks and outflows, while reactions of ground state P cations with closed-shell neutrals provide benchmarks for spin-forbidden mechanisms. We investigate the reaction of P+ with C$_2$H$_2$ through a joint experimental and theoretical study aimed at revising astrochemical database rate coefficients. Absolute cross sections and branching ratios were measured as a function of collision energy and complemented by high-level electronic structure calculations and a refined capture model accounting for higher-order long-range interactions and intermediate complex formation. Channel-specific rate coefficients were derived in the range from 10 to 5000 K. The reaction produces predominantly HCCP$^+$ + H (branching ratio 99%), while CCP$^+$ + H$_2$ is a minor channel (branching ratio 1%) arising from intersystem crossing from the triplet to the singlet potential energy surfaces. The total rate coefficient at 300 K agrees well with the SIFT value, but it increases with decreasing temperature, deviating from a pure Langevin trend. The reaction should be included in astrochemical models where phosphorus is released as P+, such as during energetic processing of icy grains in shocks. It provides a pathway to linear HCCP$^+$, a potentially relevant precursor to the observed CP and CCP species through dissociative recombination",
+    "categories": [
+      "astro-ph.SR",
+      "astro-ph.EP",
+      "astro-ph.GA",
+      "astro-ph.IM"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34107",
+    "title": "Dynamical Impacts of Accretion Streamers on Protoplanetary Disks",
+    "abstract": "Recent observations suggest that accretion streamers are common in protoplanetary disks, yet their dynamical impact on disk evolution remains poorly understood. Using three-dimensional hydrodynamic simulations with mass infall rates of $10^{-8}$--$10^{-6} \\ M_{\\odot}\\ \\mathrm{yr}^{-1}$, we investigate how streamer accretion influences the structure and evolution of protoplanetary disks. We find that a prograde streamer can excite disk eccentricity globally to values as high as $\\sim0.4$. The resulting eccentric disk develops prominent spiral arms and crescent-shaped overdensities whose spatial structures agree remarkably well with analytic eccentric-disk theory. It also undergoes significant warping, and exhibits enhanced and variable stellar accretion. In contrast, retrograde streamer accretion efficiently removes disk angular momentum, producing a compact disk and, in extreme cases, triggering disk breaking. Using synthetic ALMA molecular-line observations, we show that streamer-driven perturbations generate observable kinematic signatures, including Doppler flips in moment maps and wiggles in position--velocity diagrams. Remarkably, these signatures can persist for up to $100\\ \\mathrm{kyr}$ after infall has ceased, suggesting that some kinematic disturbances observed in disks without currently detected streamers may be relics of past infall events. Finally, we discuss the implications of streamer-driven disk evolution for planet formation and planet--disk interactions.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.34116",
+    "title": "A JWST Study of Stardust. II. Polycyclic Aromatic Hydrocarbons in Comet 81P/Wild 2 and Implications for Primitive Solar System Carbon",
+    "abstract": "We report observations of comet 81P/Wild 2, target of the Stardust sample return mission, on UT 2023 March 20 and 24 at a heliocentric distance ($r_H$) of 1.85 au using the NIRSpec and MIRI integral field unit spectrographs on board the James Webb Space Telescope (JWST). This study is the first compositional comparison between JWST remote-sensing spectroscopy of a solar system object against terrestrial analysis of its returned samples. Recent work determined contributions of molecular emission from coma volatiles and thermal emission from the nucleus and coma dust grains to these spectra. Subtracting the molecular and thermal emission models produces a residual spectrum with a clear resonance near 3.37 $\\mu$m and multiple others spanning the $6 - 12$ $\\mu$m region. Analysis of these residuals provides strong evidence for the presence of polycyclic aromatic hydrocarbons (PAHs) in the coma of 81P/Wild 2. The resulting PAH populations reflect material incorporated into the nucleus of 81P/Wild 2 that was inherited from the diffuse interstellar medium, the interstellar medium, and the protoplanetary disk. The PAHs sensed by JWST are compared to those detected in laboratory analyses of the Stardust mission returned samples.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34361",
+    "title": "Numerical analysis of electron density and response time delay during solar flares in mid-latitudinal lower ionosphere",
+    "abstract": "Impacts of solar flare vary at different parts of the lower ionosphere depending on its proximity to the direct exposure of incoming solar radiation. The quantitative analysis of this phenomenon can be attributed to the solar zenith angle (chi(t)) profile over the ionosphere. We numerically solve the electron continuity equation to obtain the lower ionospheric electron density profile (Ne(t)). The electron production rate (q(t)) is governed by the (i) X-ray profile (phi(t)) of the flare, (ii) chi(t)-values during the flare occurrence, etc. For analyzing the X-ray profile during flares, we use the GOES-15 satellite observations. Since we are working on an electron continuity equation based simplified ionospheric model, we confined our analysis to the comparatively stable mid-latitude ionosphere only. We choose three flares each from C, M, and X-classes for Ne(t)-profile computation. We observe that temporal Ne(t)-profiles differ when computed for the lower ionosphere over different discrete latitudes. Further, we compute the spatial Ne(t)-profile across the mid-latitude region at the time when phi(t) = phi_max. Now we assume that these flares repeat themselves every day of a year (DoY) at the same time of a day and we compute Ne(t)-profiles for each day. We found a seasonal effect on the Ne(t)-profile due to solar flare. Further, we investigate the response time delay (Delta t) of the lower ionosphere, which is the time difference between incidence of X-ray and the respective change in Ne(t)-profiles during solar flares. Strong seasonal effects on Ne(t)-profile and Delta t are the unique results of this work.",
+    "categories": [
+      "astro-ph.SR",
+      "astro-ph.EP",
+      "physics.space-ph"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34417",
+    "title": "Planets Around Solar Twins/Analogs (PASTA) III: Chemical Clock Relations in Planet-Hosting Solar Analogs",
+    "abstract": "Context. Abundance ratios between elements synthesized on different nucleosynthetic timescales provide empirical chemical clocks for estimating stellar ages, but robust calibrations require homogeneous samples with precise stellar parameters and elemental abundances. Aims. We aim to investigate whether the presence of planets modifies empirical chemical clock relations. Methods. We present high-precision stellar parameters and elemental abundances for 52 new planet-hosting targets observed with Keck/HIRES, LBT/PEPSI, and Subaru/HDS. Combined with PASTA I and II, the full sample comprises 94 stars, of which 81 are identified as planet-hosting solar twins and analogs, and is used to characterize Galactic chemical evolution and derive empirical chemical clock relations. Results. We recover the expected Galactic chemical evolution trends, with $\\alpha$-elements such as Mg and S increasing with stellar age, while s-process elements such as Y, Ba, and Sr show negative age correlations. In contrast, Fe-peak elements and the r-process element Eu show little or no significant age dependence. These trends give rise to tight chemical clock relations based on [Y/Mg], [Y/Al], [Ba/Mg], [Ba/Al], and [Sr/Mg], with [Y/Mg] and [Y/Al] providing the strongest correlations. [Ba/Al] shows the steepest age dependence, and the Ba-based ratios are generally more sensitive to age than their Y-based counterparts. Conclusions. Planet-hosting solar analogs follow chemical-clock relations consistent with those of nearby solar twins, with no evidence for a significant planet-related effect. The derived relations are primarily applicable to local solar twins and analogs in the Galactic thin disk.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.34523",
+    "title": "Resolved Structure and Orbital Motion of a Localized 1 au-scale Dust Accumulation in the Protoplanetary Disk around TW Hya",
+    "abstract": "We present the results of high-resolution ($\\sim1$~au) Atacama Large Millimeter/submillimeter Array (ALMA) observations of the TW~Hya protoplanetary disk in the Band 6 dust continuum, as well as the \\ce{^13CO} and \\ce{C^18O} J=2--1 emission lines. The primary focus of this study is to investigate the kinematics, internal morphology, and local gas environment of the prominent dust blob at a radius of 52~au. By comparing our 2021 data with archival observations from 2017, we detect the proper motion of the blob. The measured azimuthal velocity of 3.3$\\pm$0.9~km~s$^{-1}$ is fully consistent with local Keplerian rotation. Combined with the lack of significant radial migration over the four-year baseline, this confirms that the structure is robustly co-moving with the disk system. Crucially, our high-resolution continuum map resolves the blob into a distinct double-peaked morphology separated by $\\sim$1.7~au azimuthally. We robustly validate this double-peaked substructure by reproducing it in the independent 2017 dataset using a sparse-modeling image reconstruction technique. We discuss potential physical origins for this double-peaked morphology, including an inclined circumplanetary disk with an inner dust cavity, the roots of planet-induced spiral arms, or alternative hydrodynamic scenarios that do not involve an actively accreting planet such as the U-turn trajectory of secondary dust or a short-lived hydrodynamic gas vortex. We detect no compact gas emission counterparts associated with the continuum blob. Since these CO lines likely trace optically thick upper atmospheric layers, the absence of localized vertical gas perturbations suggests that if an embedded planet is responsible for the dust structure, its mass must be exceptionally low.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.34635",
+    "title": "Hybrid worlds are the commonest outcome among the M-dwarf sub-Neptunes characterised with JWST",
+    "abstract": "The sub-Neptunes orbiting M dwarfs are usually assigned to one of two classes: rocky cores beneath primordial hydrogen, or volatile-rich bodies formed beyond the water-ice line. Bulk density cannot distinguish them, the two being degenerate in mass and radius once envelope evolution is modelled self-consistently (Rogers et al. 2023); the atmospheric mean molecular weight {\\mu} is the route past it. We compile the eight M-dwarf sub-Neptunes with published JWST spectra and a constrained {\\mu}, and combine it, graded by quality of evidence, with the restricted Jeans parameter and with energy-limited escape integrated over the system lifetime. The XUV history is taken from M-dwarf activity-age relations at each host's spectral type rather than parameterised, and converted to the 1-912 Angstrom band explicitly. Four of the eight satisfy neither class, carrying envelopes of 3.8 < {\\mu} <= 18 amu that are neither primordial hydrogen nor the signature of a 50 per cent ice interior. One is a strict-sense water world. Not one has a {\\mu} retrieved from detected molecular features that places it in the gas-dwarf class. We term these intermediate objects hybrid worlds; they are the commonest outcome in the sample, and the selection function works against that result, since targets chosen for transmission-spectroscopy favourability should over-represent extended, low-{\\mu} envelopes. The evidence is asymmetric in the same direction: the hybrid assignments rest on positive molecular detections, while both end-members are populated by provisional ones. The debate is not binary, and its two models do not describe the bulk of the population they were framed to explain.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null,
+    "note": "Reetiquetado por el autor (2026-10-01): estudio de población sin planeta concreto; va a reader-v2 por diseño."
+  },
+  {
+    "external_id": "2609.34685",
+    "title": "P2D - A Two-Dimensional Multi-Spacecraft Solar Wind Persistence Model",
+    "abstract": "The background solar wind is a key component in space weather forecasting, as it contains geoeffective high-speed streams and provides the medium through which coronal mass ejections propagate and evolve in interplanetary space. Due to the solar rotation and the slow evolution of large-scale solar wind structures, solar wind properties exhibit an autocorrelation with a period of roughly 27 days, particularly at solar minimum. We made use of this property to develop a solar wind persistence model with input from multiple spacecraft (Solar Orbiter, Parker Solar Probe, STEREO-A, STEREO-B and the OMNI database). The model ballistically propagates in-situ data from the position of their measurement radially away from the Sun, as well as longitudinally with the solar rotation rate, producing 2D maps of solar wind parameters. These can be extracted at any point in the heliosphere for a solar wind reconstruction. From Earth's perspective, the reconstruction performs with an MAE of 65.41 km/s and 3.51/cm^3 for speed and density, respectively. During high-speed streams, the peak hit rate is 50% and 48% for speed and density. It performs best during times when there are spacecraft located between Earth and Lagrange point L5. During these times, the mean absolute error of the predicted solar wind speed decreases by roughly 35% in comparison to the benchmark 27-day persistence model. Therefore, future L5 missions like Vigil are expected to provide a robust basis for reliable persistence forecasts.",
+    "categories": [
+      "physics.space-ph",
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34693",
+    "title": "Energy distributions of precipitating electrons in Jupiter's auroral regions from combined Juno/JADE and Juno/JEDI measurements",
+    "abstract": "Jupiter's auroras are produced by magnetospheric electrons precipitating into its atmosphere. Juno/JADE and Juno/JEDI together measure these electrons from 100 eV to 1 MeV. However, their auroral spectra are poorly reproduced by the widely used kappa distribution, hereafter the classical single-kappa distribution. We aim to statistically characterize the energy flux distributions of precipitating auroral electrons and to derive a new phenomenological 4-kappa distribution better suited to JADE+JEDI data. We build mean energy flux distributions in six auroral sub-regions (polar, main, and outer emissions in both hemispheres), combining JADE and JEDI data from PJ3 to PJ35, mapped to the SIII frame with the JRM33 model including the current sheet. We fit them using MCMC with the classical single-kappa and 4-kappa distributions. The mean distributions show a monotonic power-law decay with an energy cutoff beyond ~500 keV in most sub-regions, although some individual spectra depart from it at intermediate energies. Mean energies range from ~21 to ~119 keV, and energy fluxes from ~9.5 to ~28.7 mW/m$^2$. The classical single-kappa fit fails in all sub-regions, with $\\kappa$ converging to the lower bound of its prior range. We therefore introduce the 4-kappa distribution, a linear combination of four classical single-kappa distributions modulated by an exponential high-energy cutoff, which accurately fits all six sub-regions. At equal energy flux and mean energy, transport simulations show that the 4-kappa distribution deposits energy at lower altitude than the classical one and distributes it differently along the vertical, with implications for the UV color ratio, atmospheric chemistry and thermal structure, and ionospheric conductances. This distribution provides an analytical framework for realistic modeling of electron precipitation and UV auroral emissions at Jupiter.",
+    "categories": [
+      "astro-ph.EP",
+      "physics.space-ph"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34758",
+    "title": "The precipitation of protons and electrons in Jupiter's auroral regions: a statistical comparison based on Juno/JEDI data",
+    "abstract": "Energetic electrons dominate the energy precipitated into Jupiter's auroral regions, but protons precipitate along the same field lines, with a contribution that remains poorly constrained. We statistically compare the precipitating energy flux of protons and electrons in two of Jupiter's auroral sub-regions, the polar (PE) and main (ME) emission regions. We use Juno/JEDI data from PJ3 to PJ66. The magnetic footprint of the spacecraft, computed with the JRM33 and CON2020 field models, is assigned to one of the two sub-regions, and the precipitating energy flux of each species is obtained by integrating over the loss cone the mean differential intensity measured within it. In both sub-regions, the median proton energy flux is 52 to 223 times lower than that of the electrons, and the total precipitated proton power is less than 2% of the electron power. Proton fluxes are broadly distributed across the sub-regions, with higher values in the ME than in the PE. Protons play a secondary role in Jupiter's auroral energy budget, radiating an estimated 5 to 9 GW in the UV per sub-region, pending a dedicated proton transport modelling. Their Doppler signature in the red wing of the Lyman-$\\alpha$ line, undetected by HST and difficult to access with Juno/UVS, is a key observable for the upcoming Juice and Europa Clipper missions.",
+    "categories": [
+      "astro-ph.EP",
+      "physics.space-ph"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.34868",
+    "title": "Activity in White Dwarf Debris Disks II: WISE Mission Traces a Decade of Disk Evolution and Persistence",
+    "abstract": "This study presents multi-epoch photometry from the Wide-field Infrared Survey Explorer to investigate variability in white dwarf debris disks, utilizing the full 14.5 yr mission datasets pre- and post-cryogen. Unambiguous variations are detected across the bulk of the 52 confirmed dusty white dwarfs and are consistent with universal variability after correcting for the sensitivity of WISE relative to Spitzer. Some disk light curves exhibit trends such as possible oscillations, sudden brightening, and steadily decaying fluxes, but all infrared excesses persist utterly. On baselines longer than 0.5 yr, flux changes are significantly skewed toward decreases, in contrast to the symmetric distribution found at shorter baselines with Spitzer, consistent with gradual dust depletion over time. Disk emission generally becomes redder when dimmer and bluer when brighter, consistent with changes in the grain size distribution following collisions, although five disks exhibit the opposite trend possibly due to dust production near apastron. A moderate positive correlation is observed between disk luminosity and photospheric Ca abundance, consistent with the accretion of disk material in an optically thin configuration. Taken together with the Spitzer legacy of dusty white dwarfs, these results provide a comprehensive view of debris disk variability and provide empirical constraints on models of disk structure and evolution.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.34932",
+    "title": "Planetesimal formation facilitated by streaming instability in weak pressure bumps",
+    "abstract": "Planetesimal formation via the streaming instability of small pebbles in protoplanetary discs requires enhanced solid concentrations relative to the solar metallicity, $Z\\simeq 0.01$. We investigate here whether pile-ups in weak axisymmetric pressure bumps are sufficient to trigger strong particle concentrations via the streaming instability. Using high-resolution 2D shearing box simulations with millimetre-to-centimetre pebbles, we explore the behaviour of the streaming instability in the presence of a non-reinforced pressure bump. We find that even very weak bumps, with gas density amplitudes as low as $A = 0.04$ relative to the background, produce dense particle filaments via the streaming instability for all tested Stokes numbers at solar metallicity in the inner disc. Outer disc regions require slightly stronger bumps ($A \\geq 0.14$) to form filaments at a solar metallicity, though the necessary bump amplitude is substantially lowered when the metallicity is increased to $Z = 0.02$. Our results suggest that weak, non-reinforced pressure bumps can act as focal points for planetesimal formation via the streaming instability in small pebbles, in contrast to previous studies which used reinforcement to maintain the pressure bump. Additionally, we introduce a pressure-bump-dependent clumping criterion, $(Z/\\chi)_\\mathrm{crit} \\approx 0.3$, where $\\chi = \\Pi_\\mathrm{min}^2/\\Pi_0$ reduces to the background pressure gradient $\\Pi_0$ in the absence of a pressure bump. This criterion encapsulates the scale of solid pile-ups at lower pressure gradients and accurately predicts the onset of strong clumping based on the results of our simulations. With pressure bump signatures being common features of observed young discs and magnetohydrodynamical simulations, the results of our 2D simulations imply that weak pressure bumps may be major cradles for planetesimal formation in protoplanetary discs.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.34943",
+    "title": "Surveying exogenous species in Saturn with ALMA. II. Detecting and Mapping HCN",
+    "abstract": "Several external sources (the rings, the satellites, cometary impacts, interplanetary dust particles) supply material to the upper atmosphere of Saturn. The signature of this external influx has been documented on the ionospheric electronic and ionic densities, and in the stratosphere on oxygenated molecules (CO, CO2, H2O). We search for the chemical signature of the external sources in nitrogen-bearing species in Saturn's stratosphere. We have targeted the HCN(4-3) rotational line and mapped its emission line at the planet limb with ALMA in 2018 with configuration C43-3, providing a synthetic beam of 0.61\"x0.50\". HCN was detected at all observable latitudes from 20{\\deg}S to 60{\\deg}N. The HCN abundance was measured at two independent pressure levels, 0.1 and 1 hPa. The measured volume mixing ratios are latitudinally uniform within uncertainties at both pressure levels. The mean vmr is $(7\\pm 2)\\times 10^{-11}$ and $(4\\pm 1)\\times 10^{-12}$ at 0.1 and 1 hPa respectively. This corresponds to a mean column-density of $(4\\pm 1)\\times 10^{12}$ cm$^{-2}$, and a total nitrogen mass of $(3.7 \\pm 0.9)\\times 10^{10}$ g. The steep vertical profile suggests that another loss mechanism, possibly sticking or heterogeneous chemistry on aerosols, is active besides photodissociation. The huge influx of material detected in the ring plane by Cassini left no detectable chemical signature on HCN. The detected HCN mass seems compatible with several sources: the ring rain at mid-latitudes, Enceladus, or an old cometary impact. The detected HCN could also be a chemical product of internal N2 transported from the deep atmosphere up to the stratosphere.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.35098",
+    "title": "Spectral Properties of Solar Wind Charge Exchange from Earth's Magnetospheric Boundaries: MHD and Test Particle Simulations",
+    "abstract": "The Solar Wind Charge Exchange (SWCX) mechanism, where X-rays can be generated through interactions between heavy, highly charged solar wind ions and neutral atoms, offers an opportunity to observe the large-scale transfers of energy and momentum through the Sun-Earth system. In this study, we simulate SWCX signatures from Earth's outer boundaries using Gorgon global magnetohydrodynamic (MHD) simulations combined with kinetic particle-based simulations which we call the X-ray Imaging of the Magnetosphere (XIM) framework. The XIM-predicted emissivities agree with the predictions of the MHD model, producing enhanced emissions from the magnetosheath and cusp regions, but several differences are apparent. Compared with MHD, XIM shows enhanced structuring in the magnetosheath and notable enhanced emissions along the magnetopause associated with betatron acceleration. The results also evidence species-specific spatial variations, which are shown to vary compared to anticipated relative abundances in the solar wind and ion-specific properties. These simulations provide new insights into the underlying dynamics of SWCX at the Earth's outer boundaries, which can be used to understand what might be observed using X-ray observatories in space, such as the recently launched SMILE mission.",
+    "categories": [
+      "physics.space-ph",
+      "astro-ph.EP",
+      "astro-ph.SR",
+      "physics.comp-ph",
+      "physics.plasm-ph"
+    ],
+    "label": "solar_system",
+    "expected_match": false
+  },
+  {
+    "external_id": "2609.35607",
+    "title": "JWST NIRSpec G395H Transmission Spectra of Two Similar Sub-Neptunes in the TOI-125 System",
+    "abstract": "The James Webb Space Telescope (JWST) has enabled the first in-depth characterisations of sub-Neptune atmospheres, revealing a diversity of chemical compositions and cloud properties that challenge current models. Multi-planet systems provide an opportunity to compare planetary atmospheres while controlling for formation conditions within the same protoplanetary disk. We present JWST NIRSpec G395H 3-5 um observations of two similarly-sized sub-Neptunes orbiting a sun-like star within the TOI-125 system: TOI-125 b ($P=4.65$ d, $R_p=2.7~R_\\oplus$, $M_p=10~M_\\oplus$, $T_\\mathrm{eq}=1100$ K) and TOI-125 c ($P=9.15$ d, $R_p=2.85~R_\\oplus$, $M_p=6.8~M_\\oplus$, $T_\\mathrm{eq}=825$ K), comprising of one full transit of TOI-125 b but only 70% of TOI-125 c's transit due to larger than predicted TTVs. We obtain precise R~100 transmission spectra for both planets, with median errorbars of 50 ppm for TOI-125 b and 85 ppm for TOI-125 c. Atmospheric retrievals are compatible with a ~150x solar metallicity atmosphere or clouds above ~3 mbar for TOI-125 b, and a ~100x solar metallicity atmosphere or clouds above ~10 mbar for TOI-125 c. Our results may support recent evidence for metal enrichment in sub-Neptunes, while also further complicating the proposed trend in atmospheric feature size with planet temperature. However, shorter wavelength follow-up observations of both planets are needed to establish whether their spectra are truly muted or feature-rich, with implications for the nature of sub-Neptunes around sun-like stars.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.35676",
+    "title": "K-dwarf starspot hunters: how to directly characterize spot and faculae properties with UV-IR panchromatic transit spectra",
+    "abstract": "Transmission spectroscopy of exoplanets provides an important window into their atmospheric composition, structure and dynamics, especially in the JWST era. As the quality of the observational data and therefore the precision of our constraints improves, we become increasingly sensitive to sources of systematic bias in our models and observations. One significant example of this is the Transit Light Source Effect, in which heterogeneous features in the stellar photosphere - spots and faculae - imprint additional spectral signatures onto exoplanet transmission spectra. The effects of this stellar contamination must be accounted for or removed in order to accurately recover the planet's atmospheric properties. Including parameterized models of spots and faculae within spectral retrieval analysis is increasingly adopted as a solution to this problem, but is limited by the accuracy of models of stellar spectra. In this paper, we outline an observational strategy combining simultaneous data from JWST and the Hubble Space Telescope that would enable us to further constrain these models. We perform synthetic retrievals to demonstrate how we could constrain starspot and faculae parameters; we test the impact of using different model spectra in the retrieval; and we consider the impact of variable stellar activity on coadding transits to achieve the desired signal-to-noise. We find that ultraviolet and optical wavelengths are key for breaking degeneracies between stellar contamination and planetary parameters.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.IM",
+      "astro-ph.SR"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.35721",
+    "title": "Correcting stellar contamination in transmission spectroscopy with contemporaneous monitoring: Application to GJ 1214 b",
+    "abstract": "Transmission spectroscopy has emerged as an essential tool for characterising the atmospheres of transiting exoplanets. However, stellar surface inhomogeneities contaminate transmission spectra, posing a major challenge to high-precision observations such as those from the James Webb Space Telescope (JWST). We develop and apply methods to correct for stellar contamination, improving the accuracy of exoplanet atmospheric characterisation. We obtained coordinated multi-band photometry and high-resolution spectroscopy around JWST observations of GJ 1214 b and applied two frameworks: (i) a StarSim inversion, which infers stellar activity parameters from the monitoring data and propagates them to corrections; and (ii) UnSPOTTER, in which neural networks trained on StarSim simulations learn the mapping from monitoring data to corrections. Both frameworks agree within uncertainties and indicate that the JWST observations of GJ 1214 occurred at a favourable rotation phase with low stellar contamination. For UnSPOTTER, the inferred corrections can be constrained at approximately 15 ppm across the JWST wavelength range, implying post-correction residuals of the same order. If the same system were observed near activity maximum, the predicted contamination would be strongly chromatic and affect atmospheric retrievals, highlighting the importance of coordinated monitoring and robust activity correction techniques. The two approaches are complementary but serve different roles. The inversion yields physically interpretable parameters and surface maps, whereas UnSPOTTER marginalises over surface-configuration degeneracies and provides tighter predictive corrections within its validated simulation domain. Our pipeline can be generalised to other active stars: with multi-band and multi-technique monitoring around JWST visits, it can provide activity forecasts for scheduling and activity corrections.",
+    "categories": [
+      "astro-ph.EP",
+      "astro-ph.IM"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null
+  },
+  {
+    "external_id": "2609.37597",
+    "title": "TOI-6981 b: a transiting sub-Neptune at the water ice line",
+    "abstract": "We present TOI-6981 b, a cold (Teq= 170.0 +/-4.5 K, assuming an Earth-like albedo) sub-Neptune (Rb=2.40+/-0.10 R_oplus) on a 60.8 day orbit around around its M4-type host star (R*=0.304 +/- 0.012 R_odot, M*=0.296 +/- 0.026 M_odot, Teff = 3215+/-58K), part of the SPECULOOS TEMPOS program. We validate the planetary nature of TOI-6981 b using ground-based follow-up photometry, statistical validation and high-resolution spectroscopy. At such cold temperatures, TOI-6981 b sits roughly at the location of the water ice line (approx 170 K). Given its orbital period and high transmission spectroscopy metric (TSM=51 +/- 9), it is one of the only planets in the sparsely populated cold planet regime amenable for atmospheric studies with JWST. Therefore, TOI-6981 b could. possibly become a crucial benchmark in cold chemistry studies, tests of Hycean world hypotheses, and drawling parallels to the Solar System's ice giants. Additionally, given its current orbit, it may provide insight into planetary formation and migration at or beyond the water ice line.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.17025",
+    "title": "Saturns Are Not Large Neptunes: The effect of removing inflated giants from empirical mass-radius relations",
+    "abstract": "Empirical mass-radius relations have long been used in exoplanetology to study planet demographics and to predict masses and radii for objects where only one of these is known. Inferred transitions between planet classes can also provide empirical evidence in support of theory. However, mass-radius relations fitted in two-dimensions can be complicated when additional factors influence the planetary parameters, as is the case with the radius inflation of giant planets. In this work, we present an empirical mass-radius relation derived by fitting a broken power-law to a cleaned PlanetS sample from which inflated giants have been removed. We find that when inflated giants are excluded, the preferred model contains three breakpoints and four segments, showing the emergence of a distinct Saturnian regime between $54\\pm3~{\\rm M_\\oplus} <M< 258\\pm11~{\\rm M_\\oplus}$. In this regime, planets are still growing but at a lower rate than the Neptunian regime, consistent with the onset of gravitational self-compression. We also update the irradiation threshold for giant planet inflation, $S_{\\rm thr}=99~\\rm S_\\oplus$ ($1.3~\\rm ergs\\,s^{-1}\\,cm^{-2}$); below $S_{\\rm thr}$, 90% of giant planets have a radius excess $Δ\\log{R}<2σ$.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_general",
+    "expected_match": null,
+    "note": "Reetiquetado por el autor (2026-10-01): estudio de población sin planeta concreto; va a reader-v2 por diseño."
+  },
+  {
+    "external_id": "2609.20748",
+    "title": "The JWST Sub-Jupiters Survey: Direct Imaging Discovery of a Giant Planet and a Debris Disk Around the Young M-dwarf RX J0534.0-0221",
+    "abstract": "We present the discovery of RX J0534.0-0221 b, a giant planet orbiting an M-dwarf star in the $β$ Pictoris moving group. RX J0534 was originally observed with JWST/NIRCam in the F444W and F200W filters. Observations in F444W reveal a point source at signal-to-noise ratio $\\sim17.5$ at $\\sim0.41$ arcsec ($\\sim14$ au) from the host star, with no detection of the source in F200W. A follow-up observation with LBTI/LMIRCam in $L'$ band re-detects the source 16 months after the JWST epoch, providing evidence for common proper motion over a chance alignment with a background interloper at the $6-7σ$ level. Atmospheric grid model fits to the available photometry yield bolometric luminosity log$_{10}(L/L_\\odot) = -5.48^{+0.10}_{-0.19}$ dex. At an age of $18-26$ Myr, hot-start evolutionary models predict $M=2.8^{+0.5}_{-0.5}$ M$_{\\text{Jup}}$ and $T_{\\text{eff}}=674^{+57}_{-49}$ K. From the $L'-F444W$ color and magnitudes we find evidence for disequilibrium chemistry or enhanced metallicity in the planet atmosphere. Additionally, an extended structure is detected in the JWST F200W observation, consistent with a resolved debris disk with peak density radius of $79^{+3}_{-3}$ au and an inclination of $56.5^{+1.5}_{-1.5}$ deg. RX J0534 b is one of the lowest-mass planets imaged to date. After TWA 7 b, it is the second imaged planet around an M-dwarf orbiting at Solar System scales (the first within 50 au), and the first to be confirmed via common proper motion. Future orbital monitoring and atmospheric characterization will shed light on its formation history, a particularly interesting question given the challenging nature of giant planet formation around M-dwarfs.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.26894",
+    "title": "JWST and HST Confirm Transit Timing Variations for the Ultra-Hot Jupiter TOI-2109 b",
+    "abstract": "Ultra-hot Jupiters are a rare yet valuable subset of exoplanets that can help elucidate both the internal properties of their host stars as well as the orbital evolution of close-in planets. An extreme among extremes, TOI-2109 b is a super-Jupiter ($1.347 \\pm 0.047 R_{\\rm Jup}$, $5.02 \\pm 0.75 M_{\\rm Jup}$) with the shortest orbital period (0.67247479 $\\pm$ 0.00000028 days) and the fastest predicted orbital decay rate of any known giant planet. Previous observations hinted at a quadratic long-term trend in the transit timing variations (TTVs) consistent with orbital decay, as well as short-term sinusoidal TTVs consistent with a near-resonant planetary companion that would indicate a dynamically quiescent migration pathway. Here, we combine archival ground-based, TESS, and CHEOPS photometry with new transit and eclipse data from HST and JWST to update the TTV analysis. We find very strong evidence for sinusoidal TTVs over a linear ephemeris ($\\Delta$BIC of 33.6), consistent with a nearby planetary companion as suggested by J.-V. Harre et al. 2024, and rule out several non-planetary scenarios that could explain the sinusoidal TTVs. We also find strong evidence of a quadratic TTV trend ($\\Delta$BIC of 6.75) consistent with an orbital decay rate of -3.46 $\\pm$ 1.17 ms/yr and a stellar tidal quality factor of 2.13$^{+1.18}_{-0.61} \\times10^7$, though we cannot rule out line-of-sight acceleration as the cause of the quadratic trend. If our results are confirmed, TOI-2109 b would be the only known exoplanet besides WASP-12 b with a decaying orbit and the most extreme of an ultra-rare class of close-in giant planets with nearby companions.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "2609.30038",
+    "title": "The GAPS programme at TNG LXXIX. New mass constraints for the infant planets in the V1298 Tau system through a long-term radial velocity monitoring with HARPS-N",
+    "abstract": "We aim to constrain the dynamical masses of the four confirmed transiting planets orbiting the infant ($20\\pm10$ Myr) star V1298,Tau (orbital periods $P_b\\sim$24.1 d, $P_c\\sim$8.2 d, $P_d\\sim$12.4 d, and $P_e\\sim$48.7 d), through a new analysis of a homogeneous radial velocity dataset. This system is a key benchmark for testing formation and early-stage evolutionary models of planets. We analysed more than 380 high-resolution spectra collected with the HARPS-N spectrograph over a time span of 4.5,yr. To account for dominant stellar activity and transit-timing-derived planet-planet interactions, we analysed radial velocities extracted using two different approaches, and combined N-body simulations with multi-dimensional Gaussian process regression. We tested a set of spectroscopic and photometric activity diagnostics to mitigate the variability due to the stellar magnetic activity in the radial velocity time series. The mass determinations are sensitive to the choice of the radial velocity extraction method and activity diagnostics. For some specific models, we measured masses with a significance of 3.5--4$\\sigma$ for planets b ($0.52^{+0.12}{-0.14}$, $0.65^{+0.21}{-0.18}$, $0.67\\pm0.16$, and $0.78^{+0.19}{-0.20}$ $M_{\\rm Jup}$) and e (0.40$^{+0.14}{-0.13}$, 0.66$^{+0.17}{-0.18}$, and $0.71\\pm0.20$ $M_{\\rm Jup}$). These values are compatible with masses of giant planets, and are notably higher than those recently derived from transit timing variations alone, which indicate that these are low-density ``super-puffy'' planets. Injection-and-recovery simulations moderately support this conclusion for planet b. For planets c and d, we primarily provide updated mass upper limits. Our analysis represents an exploratory study to address the complex issue of mass measurement in a multi-planetary system characterised by high levels of stellar activity.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "exoplanet_specific",
+    "expected_match": true
+  },
+  {
+    "external_id": "synthetic-star-001",
+    "title": "Chromospheric activity cycles of the K dwarf HD 189733 A",
+    "abstract": "We present a multi-year spectroscopic monitoring of the chromospheric activity of the K dwarf HD 189733 A. Using Ca II H and K emission we measure a rotation period and detect a magnetic activity cycle. The star shows flaring and spot modulation consistent with a young, active K dwarf.",
+    "categories": [
+      "astro-ph.SR"
+    ],
+    "label": "stellar_component",
+    "expected_match": false,
+    "synthetic": true
+  },
+  {
+    "external_id": "synthetic-formation-001",
+    "title": "Planetesimal growth in protoplanetary disks and the onset of planet formation",
+    "abstract": "We model planet formation in a protoplanetary disk through the streaming instability and pebble accretion. Planetesimals form in dust-rich filaments and grow to protoplanets over a few Myr. We discuss how disk structure and substructures regulate planetesimal sizes and the timescale of planet formation.",
+    "categories": [
+      "astro-ph.EP"
+    ],
+    "label": "planet_formation",
+    "expected_match": false,
+    "synthetic": true
+  }
+]

@@ -847,7 +847,7 @@ def test_item_astro_ph_ep_usa_reader_v3_y_el_agentcall_registra_esa_prompt_versi
         tokens_in=1200,
         tokens_out=300,
     )
-    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"])
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"], exoplanet_match=True)
 
     code = main(["run-item", str(item_id)])
 
@@ -916,7 +916,7 @@ def test_item_astro_ph_ep_con_presupuesto_entre_v2_y_v3_se_deniega_sin_llamar_al
     )
     budget_tokens = config.budget.editor_reserve_tokens + 10_000
     _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=budget_tokens)
-    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"])
+    item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"], exoplanet_match=True)
 
     code = main(["run-item", str(item_id)])
 

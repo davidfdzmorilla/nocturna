@@ -212,7 +212,8 @@ class ReadItem:
 
         La variante (`reader-v2`/`reader-v3`) se decide aquí, una sola vez,
         antes de tocar `AgentRunner.run` (T71.c, ver el docstring del
-        módulo): `not self._measures_categories.isdisjoint(item.categories)`.
+        módulo): `item.exoplanet_match` (T79, marca de la ingesta) y
+        `not self._measures_categories.isdisjoint(item.categories)`.
 
         El resto -- autorizar, llamar al proveedor, reintentar la salida
         inválida, registrar cada intento -- lo hace `AgentRunner.run`
@@ -228,7 +229,9 @@ class ReadItem:
         if item.status is not ItemStatus.NEW:
             raise InvalidTransition(item.status.value, ItemStatus.READ.value, entity="Item")
 
-        use_measures = not self._measures_categories.isdisjoint(item.categories)
+        use_measures = item.exoplanet_match and not self._measures_categories.isdisjoint(
+            item.categories
+        )
         discards_by_attempt: list[DiscardedMeasurement] = []
 
         if use_measures:
