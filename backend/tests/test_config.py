@@ -90,6 +90,12 @@ designation_patterns = ["TOI-[0-9]+"]
 [tension]
 threshold_sigma = 3.0
 
+[tension.period]
+min_relative_difference = 1e-4
+min_absolute_difference_hours = 1.0
+alias_tolerance = 0.01
+alias_max_harmonic = 5
+
 [llm]
 provider = "agent_sdk"
 """
@@ -811,6 +817,39 @@ def test_valores_no_positivos_de_t74_fallan(tmp_path, old, new):
     assert old in BASE_TOML
     with pytest.raises(ValidationError):
         load_pipeline_config(_write_toml(tmp_path, BASE_TOML.replace(old, new)))
+
+
+def test_el_pipeline_toml_real_carga_la_regla_del_periodo_de_t88():
+    period = load_pipeline_config(REAL_PIPELINE_TOML).tension.period
+
+    assert period.min_relative_difference == 1e-4
+    assert period.min_absolute_difference_hours == 1.0
+    assert period.alias_tolerance == 0.01
+    assert period.alias_max_harmonic == 5
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("min_relative_difference = 1e-4", "min_relative_difference = 0"),
+        ("min_absolute_difference_hours = 1.0", "min_absolute_difference_hours = -1.0"),
+        ("alias_tolerance = 0.01", "alias_tolerance = 0"),
+        ("alias_tolerance = 0.01", "alias_tolerance = 0.5"),
+        ("alias_max_harmonic = 5", "alias_max_harmonic = 1"),
+    ],
+)
+def test_valores_invalidos_de_tension_period_fallan(tmp_path, old, new):
+    assert old in BASE_TOML
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, BASE_TOML.replace(old, new)))
+
+
+def test_falta_tension_period_falla(tmp_path):
+    start = BASE_TOML.index("[tension.period]")
+    content = BASE_TOML[:start] + BASE_TOML[BASE_TOML.index("[llm]") :]
+
+    with pytest.raises(ValidationError, match="period"):
+        load_pipeline_config(_write_toml(tmp_path, content))
 
 
 def test_falta_una_clave_de_exoplanet_archive_falla(tmp_path):

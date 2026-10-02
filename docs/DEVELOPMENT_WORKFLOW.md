@@ -50,6 +50,8 @@ Si se mergea sin migrar, la noche falla: con T79, antes de gastar tokens; con T7
 
 En T81 (`archive-snapshot`), tras migrar: `uv run nocturna archive-snapshot --dry-run` y revisar el informe; `uv run nocturna archive-snapshot` (carga completa inicial); una segunda ejecución debe salir incremental con 0 cambios; después, instalar el agente de launchd desde `backend/scripts/com.nocturna.archive-snapshot.plist.template` (sustituir `__REPO_ROOT__` y `__HOME__`, copiar a `~/Library/LaunchAgents/` y cargarlo). Anotar las cifras en el cierre de T81.
 
+En T88 (`tension_evaluation`), tras migrar y antes del viernes a las 10:00: `uv run nocturna evaluate-tensions --dry-run` y revisar los estados (HIP 67522 b `evaluated` frente a Chakraborty 2026; c `consistent_with_limit`; TOI-6981 b y TOI-210 b `awaiting_reference`); después `uv run nocturna evaluate-tensions` y una segunda ejecución que no debe cambiar nada.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

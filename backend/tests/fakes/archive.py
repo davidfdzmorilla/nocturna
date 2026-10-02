@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from nocturna.domain.archive import (
     ArchiveSnapshot,
@@ -35,6 +35,15 @@ class InMemoryArchiveRepository:
         self.snapshots: list[ArchiveSnapshot] = []
         self.stored: dict[str, _Stored] = {}
         self.default_changes: list[tuple[UUID, datetime, DefaultChange]] = []
+
+    def seed(self, solutions: Sequence[ArchiveSolution]) -> None:
+        """Carga soluciones activas sin pasar por un snapshot (para tests de
+        consumo): cada una queda `is_default_current` si su `is_default` es True."""
+        snapshot_id = uuid4()
+        for sol in solutions:
+            self.stored[sol.solution_key] = _Stored(
+                sol, snapshot_id, snapshot_id, is_default_current=sol.is_default
+            )
 
     def last_snapshot(self) -> ArchiveSnapshot | None:
         return max(self.snapshots, key=lambda s: s.taken_at, default=None)
@@ -92,3 +101,15 @@ class InMemoryArchiveRepository:
                 self.stored[sol.solution_key].is_default_current = True
         for change in diff.default_changes:
             self.default_changes.append((snapshot.id, snapshot.taken_at, change))
+
+    def planet_names(self) -> frozenset[str]:
+        return frozenset(
+            st.solution.pl_name for st in self.stored.values() if st.removed_at is None
+        )
+
+    def active_solutions(self, pl_name: str) -> list[tuple[ArchiveSolution, bool]]:
+        return [
+            (st.solution, st.is_default_current)
+            for st in self.stored.values()
+            if st.removed_at is None and st.solution.pl_name == pl_name
+        ]

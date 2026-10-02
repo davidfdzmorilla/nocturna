@@ -16,7 +16,9 @@
 #                        $HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 #
 # Códigos de salida:
-#     0-2   Los de `nocturna archive-snapshot`, propagados sin modificar.
+#     0-3   Los de `nocturna archive-snapshot`, propagados sin modificar. El 3
+#           (T88) significa: snapshot guardado, pero la evaluación de
+#           tensiones posterior falló; se registra en el log de salida.
 #     75    Precondiciones no listas (Docker o postgres) dentro de NOCTURNA_WAIT_S.
 #     77    Entorno inválido: `uv` no resoluble en PATH, o NOCTURNA_WAIT_S /
 #           NOCTURNA_LOG_DIR con un valor inválido.
@@ -102,6 +104,9 @@ exit_code=$?
 set -e
 
 {
+    if [[ "$exit_code" -eq 3 ]]; then
+        echo "aviso: snapshot guardado, pero la evaluación de tensiones falló (código 3); ver $err_log"
+    fi
     echo "fin: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "código de salida: $exit_code"
 } >>"$out_log"

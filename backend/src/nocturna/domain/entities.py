@@ -30,7 +30,7 @@ es cosa de `infrastructure/`.
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import ClassVar
 from uuid import UUID, uuid4
@@ -297,6 +297,12 @@ class CatalogSolution:
     reference: str
     is_default: bool
     arxiv_id: str | None
+    # T88: metadatos del archivo para elegir la referencia (`select_reference`).
+    solution_key: str | None = None
+    soltype: str | None = None
+    pl_pubdate: str | None = None
+    releasedate: date | None = None
+    ttv_flag: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.planet_name.strip():

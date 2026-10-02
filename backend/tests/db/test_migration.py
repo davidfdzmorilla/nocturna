@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "archive_snapshot",
     "archive_solution",
     "archive_default_change",
+    "tension_evaluation",
 }
 
 # Revisión anterior a "950738867fb9" (item failed status and agent call

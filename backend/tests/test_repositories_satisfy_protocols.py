@@ -28,6 +28,7 @@ from nocturna.domain.repositories import (
     ItemRepository,
     ReadingRepository,
     RunRepository,
+    TensionEvaluationRepository,
 )
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
@@ -36,6 +37,7 @@ from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
+    SqlAlchemyTensionEvaluationRepository,
 )
 
 
@@ -123,3 +125,15 @@ def test_in_memory_archive_repository_cumple_archive_repository() -> None:
 
     repo: ArchiveRepository = InMemoryArchiveRepository()
     _assert_conforms(ArchiveRepository, type(repo))
+
+
+def test_sqlalchemy_tension_evaluation_repository_cumple_el_protocol() -> None:
+    repo: TensionEvaluationRepository = SqlAlchemyTensionEvaluationRepository(None)
+    _assert_conforms(TensionEvaluationRepository, type(repo))
+
+
+def test_in_memory_tension_evaluation_repository_cumple_el_protocol() -> None:
+    from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
+
+    repo: TensionEvaluationRepository = InMemoryTensionEvaluationRepository()
+    _assert_conforms(TensionEvaluationRepository, type(repo))

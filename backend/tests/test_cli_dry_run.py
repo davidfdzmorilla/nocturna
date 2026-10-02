@@ -119,6 +119,12 @@ designation_patterns = ["TOI-[0-9]+"]
 [tension]
 threshold_sigma = 3.0
 
+[tension.period]
+min_relative_difference = 1e-4
+min_absolute_difference_hours = 1.0
+alias_tolerance = 0.01
+alias_max_harmonic = 5
+
 [llm]
 provider = "agent_sdk"
 """

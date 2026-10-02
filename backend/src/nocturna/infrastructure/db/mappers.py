@@ -22,7 +22,8 @@ Las guardas de `__setattr__` en `domain/entities.py` rechazan la
 resueltos al constructor es válido y no dispara ninguna guarda.
 """
 
-from datetime import datetime
+from dataclasses import replace
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from nocturna.domain.archive import (
@@ -46,6 +47,15 @@ from nocturna.domain.entities import (
     Reading,
     Run,
 )
+from nocturna.domain.tension import (
+    EvaluationStatus,
+    LimitComparison,
+    LimitOutcome,
+    PeriodCheck,
+    TensionEvaluation,
+    TensionResult,
+    compare,
+)
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
     ArchiveDefaultChangeRow,
@@ -55,6 +65,7 @@ from nocturna.infrastructure.db.models import (
     ItemRow,
     ReadingRow,
     RunRow,
+    TensionEvaluationRow,
 )
 
 
@@ -133,6 +144,12 @@ def _solution_to_dict(solution: CatalogSolution) -> dict:
         "reference": solution.reference,
         "is_default": solution.is_default,
         "arxiv_id": solution.arxiv_id,
+        # T88: claves aditivas y opcionales (schema_version sigue en 1).
+        "solution_key": solution.solution_key,
+        "soltype": solution.soltype,
+        "pl_pubdate": solution.pl_pubdate,
+        "releasedate": None if solution.releasedate is None else solution.releasedate.isoformat(),
+        "ttv_flag": solution.ttv_flag,
     }
 
 
@@ -148,6 +165,13 @@ def _solution_from_dict(entry: dict) -> CatalogSolution:
         reference=entry["reference"],
         is_default=entry["is_default"],
         arxiv_id=entry["arxiv_id"],
+        solution_key=entry.get("solution_key"),
+        soltype=entry.get("soltype"),
+        pl_pubdate=entry.get("pl_pubdate"),
+        releasedate=(
+            None if entry.get("releasedate") is None else date.fromisoformat(entry["releasedate"])
+        ),
+        ttv_flag=entry.get("ttv_flag"),
     )
 
 
@@ -493,4 +517,171 @@ def archive_default_change_from_row(row: ArchiveDefaultChangeRow) -> DefaultChan
         pl_name=row.pl_name,
         old_key=row.old_solution_key,
         new_key=row.new_solution_key,
+    )
+
+
+# Versión del JSON de `tension_evaluation.detail`. Solo existe en infraestructura.
+TENSION_EVALUATION_SCHEMA_VERSION = 1
+
+
+def _tension_result_to_dict(result: TensionResult | None) -> dict | None:
+    if result is None:
+        return None
+    return {
+        "planet_name": result.planet_name,
+        "item_id": str(result.item_id),
+        "reading_id": None if result.reading_id is None else str(result.reading_id),
+        "comparisons": [
+            {
+                "paper": _measurement_to_dict(c.paper),
+                "prior": _solution_to_dict(c.prior),
+                "sigma": c.sigma,
+            }
+            for c in result.comparisons
+        ],
+    }
+
+
+def _tension_result_from_dict(
+    raw: dict | None, parameter: MeasuredParameter
+) -> TensionResult | None:
+    """Rehidrata las comparaciones con `compare` (valores y errores canónicos) y
+    conserva el `sigma` guardado; la referencia se vuelve a derivar."""
+    if raw is None:
+        return None
+    comparisons = tuple(
+        replace(
+            compare(_measurement_from_dict(entry["paper"]), _solution_from_dict(entry["prior"])),
+            sigma=entry["sigma"],
+        )
+        for entry in raw["comparisons"]
+    )
+    return TensionResult(
+        item_id=UUID(raw["item_id"]),
+        planet_name=raw["planet_name"],
+        parameter=parameter,
+        comparisons=comparisons,
+        reading_id=None if raw["reading_id"] is None else UUID(raw["reading_id"]),
+    )
+
+
+def _limit_to_dict(limit: LimitComparison | None) -> dict | None:
+    if limit is None:
+        return None
+    return {
+        "paper": [_measurement_to_dict(m) for m in limit.paper],
+        "limit": _solution_to_dict(limit.limit),
+        "margins": list(limit.margins),
+        "outcome": limit.outcome.value,
+    }
+
+
+def _limit_from_dict(raw: dict | None) -> LimitComparison | None:
+    if raw is None:
+        return None
+    return LimitComparison(
+        paper=tuple(_measurement_from_dict(m) for m in raw["paper"]),
+        limit=_solution_from_dict(raw["limit"]),
+        margins=tuple(raw["margins"]),
+        outcome=LimitOutcome(raw["outcome"]),
+    )
+
+
+def _period_check_to_dict(check: PeriodCheck | None) -> dict | None:
+    if check is None:
+        return None
+    return {
+        "min_difference_met": check.min_difference_met,
+        "alias_suspected": check.alias_suspected,
+    }
+
+
+def _period_check_from_dict(raw: dict | None) -> PeriodCheck | None:
+    if raw is None:
+        return None
+    return PeriodCheck(
+        min_difference_met=raw["min_difference_met"], alias_suspected=raw["alias_suspected"]
+    )
+
+
+def _tension_evaluation_detail(evaluation: TensionEvaluation) -> dict:
+    return {
+        "schema_version": TENSION_EVALUATION_SCHEMA_VERSION,
+        "measurements": _measurements_to_json(evaluation.measurements),
+        "result": _tension_result_to_dict(evaluation.result),
+        "limit": _limit_to_dict(evaluation.limit),
+        "period_check": _period_check_to_dict(evaluation.period_check),
+    }
+
+
+def _tension_evaluation_derived(evaluation: TensionEvaluation) -> tuple[str | None, float | None]:
+    """`(reference_solution_key, reference_sigma)`; solo si EVALUATED."""
+    if evaluation.status != EvaluationStatus.EVALUATED or evaluation.result is None:
+        return None, None
+    reference = evaluation.result.reference()
+    key = None if reference is None else reference.solution_key
+    return key, evaluation.result.reference_sigma()
+
+
+def tension_evaluation_to_row(evaluation: TensionEvaluation) -> TensionEvaluationRow:
+    """Fila nueva: `first_evaluated_at` = `evaluated_at`."""
+    key, sigma = _tension_evaluation_derived(evaluation)
+    return TensionEvaluationRow(
+        id=evaluation.id,
+        reading_id=evaluation.reading_id,
+        item_id=evaluation.item_id,
+        planet_name=evaluation.planet_name,
+        parameter=evaluation.parameter,
+        status=evaluation.status,
+        archive_planet_name=evaluation.archive_planet_name,
+        reference_solution_key=key,
+        reference_sigma=sigma,
+        own_solution_key=evaluation.own_solution_key,
+        detail=_tension_evaluation_detail(evaluation),
+        first_evaluated_at=evaluation.evaluated_at,
+        evaluated_at=evaluation.evaluated_at,
+    )
+
+
+def apply_tension_evaluation(row: TensionEvaluationRow, evaluation: TensionEvaluation) -> None:
+    """Sobrescribe la fila con la evaluación; `first_evaluated_at` no cambia."""
+    key, sigma = _tension_evaluation_derived(evaluation)
+    row.reading_id = evaluation.reading_id
+    row.item_id = evaluation.item_id
+    row.planet_name = evaluation.planet_name
+    row.parameter = evaluation.parameter
+    row.status = evaluation.status
+    row.archive_planet_name = evaluation.archive_planet_name
+    row.reference_solution_key = key
+    row.reference_sigma = sigma
+    row.own_solution_key = evaluation.own_solution_key
+    row.detail = _tension_evaluation_detail(evaluation)
+    row.evaluated_at = evaluation.evaluated_at
+
+
+def tension_evaluation_from_row(row: TensionEvaluationRow) -> TensionEvaluation:
+    """`schema_version` ausente o desconocida -> `ValueError`."""
+    detail = row.detail
+    version = detail.get("schema_version")
+    if type(version) is not int or version != TENSION_EVALUATION_SCHEMA_VERSION:
+        raise ValueError(
+            f"tension_evaluation: schema_version {version!r} desconocida "
+            f"(soportada: {TENSION_EVALUATION_SCHEMA_VERSION})"
+        )
+    measurements = _measurements_from_json(detail["measurements"])
+    assert measurements is not None  # noqa: S101
+    return TensionEvaluation(
+        id=row.id,
+        reading_id=row.reading_id,
+        item_id=row.item_id,
+        planet_name=row.planet_name,
+        parameter=row.parameter,
+        measurements=measurements,
+        status=row.status,
+        evaluated_at=row.evaluated_at,
+        archive_planet_name=row.archive_planet_name,
+        result=_tension_result_from_dict(detail["result"], row.parameter),
+        limit=_limit_from_dict(detail["limit"]),
+        period_check=_period_check_from_dict(detail["period_check"]),
+        own_solution_key=row.own_solution_key,
     )

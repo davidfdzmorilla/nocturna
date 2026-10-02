@@ -322,12 +322,25 @@ class SourcesConfig(BaseModel):
     exoplanet_archive: ExoplanetArchiveConfig
 
 
+class TensionPeriodConfig(BaseModel):
+    """Regla del periodo de la tensión (T88): diferencia mínima y sospecha de
+    alias. Sin valores por defecto: se declaran en `[tension.period]`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    min_relative_difference: float = Field(gt=0)
+    min_absolute_difference_hours: float = Field(gt=0)
+    alias_tolerance: float = Field(gt=0, lt=0.5)
+    alias_max_harmonic: int = Field(ge=2)
+
+
 class TensionConfig(BaseModel):
-    """Umbral de la tensión frente al catálogo (T73/T74)."""
+    """Umbral de la tensión frente al catálogo (T73/T74) y regla del periodo (T88)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     threshold_sigma: float = Field(gt=0)
+    period: TensionPeriodConfig
 
 
 class LLMConfig(BaseModel):

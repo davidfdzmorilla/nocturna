@@ -54,6 +54,7 @@ TEST_DB_NAME = "nocturna_test"
 # Orden hijas -> padres: mismo orden que el `downgrade()` de la migración
 # inicial, para que TRUNCATE no tropiece con las FK.
 _TABLES_IN_DEPENDENCY_ORDER = (
+    "tension_evaluation",
     "readings",
     "findings",
     "agent_calls",

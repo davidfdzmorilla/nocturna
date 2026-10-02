@@ -187,6 +187,8 @@ import argparse
 import asyncio
 import logging
 import sys
+import traceback
+from collections import Counter
 from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -228,6 +230,10 @@ from nocturna.application.use_cases.popularize_reading import (
     PopularizeResult,
 )
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
+from nocturna.application.use_cases.record_tension_evaluations import (
+    EvaluationRunReport,
+    RecordTensionEvaluations,
+)
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.application.use_cases.take_archive_snapshot import (
     ArchiveSnapshotReport,
@@ -239,7 +245,9 @@ from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
+from nocturna.domain.repositories import ArchiveRepository
 from nocturna.domain.sources import ArxivSource
+from nocturna.domain.tension import EvaluationStatus, PeriodRule, TensionEvaluation
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
 from nocturna.infrastructure.arxiv.client import (
     MIN_REQUEST_INTERVAL_S,
@@ -258,6 +266,7 @@ from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
+    SqlAlchemyTensionEvaluationRepository,
 )
 from nocturna.infrastructure.db.session import (
     create_db_engine,
@@ -564,6 +573,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    evaluate_tensions = subparsers.add_parser(
+        "evaluate-tensions",
+        help="Evalúa y registra las tensiones de las lecturas con medidas (sin LLM).",
+        description=(
+            "Calcula la tensión de las medidas del Reader frente al snapshot local del NASA "
+            "Exoplanet Archive y guarda una evaluación por (lectura, planeta, parámetro). "
+            "Reevalúa las que esperan referencia; no toca las terminales. No usa Claude ni "
+            "gasta tokens. Código 1 si el archivo (alias) no está disponible."
+        ),
+    )
+    evaluate_tensions.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Calcula e informa, pero no escribe nada en la base de datos.",
+    )
+
     return parser
 
 
@@ -784,23 +809,46 @@ _SIGMA_BINS: tuple[tuple[str, float, float], ...] = (
 
 
 def exoplanet_catalog_from_config(
-    http: httpx.AsyncClient, config: PipelineConfig
+    http: httpx.AsyncClient, config: PipelineConfig, archive: ArchiveRepository
 ) -> tuple[ExoplanetArchiveCatalog, ArchiveHttpClient]:
-    """Catálogo del NASA Exoplanet Archive con los límites de `pipeline.toml`.
+    """Catálogo sobre el snapshot local (`archive`) con los límites de `pipeline.toml`.
 
-    Devuelve también el cliente HTTP para poder informar de las peticiones
-    hechas. Campo a campo, como `budget_policy_from_config`.
+    El cliente HTTP solo atiende el servicio de alias (T88); se devuelve para
+    poder informar de las peticiones hechas. Campo a campo, como
+    `budget_policy_from_config`.
     """
-    archive = config.sources.exoplanet_archive
+    settings = config.sources.exoplanet_archive
     client = ArchiveHttpClient(
         http,
-        tap_url=archive.tap_url,
-        alias_url=archive.alias_url,
-        limiter=RateLimiter(archive.min_request_interval_s),
-        request_timeout_s=archive.request_timeout_s,
-        max_requests=archive.max_requests_per_night,
+        tap_url=settings.tap_url,
+        alias_url=settings.alias_url,
+        limiter=RateLimiter(settings.min_request_interval_s),
+        request_timeout_s=settings.request_timeout_s,
+        max_requests=settings.max_requests_per_night,
     )
-    return ExoplanetArchiveCatalog(client), client
+    return ExoplanetArchiveCatalog(archive, client), client
+
+
+def period_rule_from_config(config: PipelineConfig) -> PeriodRule:
+    """`PeriodRule` de `[tension.period]`; el umbral absoluto pasa de horas a días."""
+    period = config.tension.period
+    return PeriodRule(
+        min_relative_difference=period.min_relative_difference,
+        min_absolute_difference_days=period.min_absolute_difference_hours / 24.0,
+        alias_tolerance=period.alias_tolerance,
+        alias_max_harmonic=period.alias_max_harmonic,
+    )
+
+
+def compute_tensions_from_config(
+    config: PipelineConfig, catalog: ExoplanetArchiveCatalog, clock: Clock
+) -> ComputeTensions:
+    return ComputeTensions(
+        catalog,
+        threshold_sigma=config.tension.threshold_sigma,
+        period_rule=period_rule_from_config(config),
+        clock=clock,
+    )
 
 
 def archive_snapshot_source_from_config(
@@ -869,10 +917,86 @@ async def _take_archive_snapshot(
         return await use_case(force_full=full, dry_run=dry_run)
 
 
+def _format_evaluation_report(report: EvaluationRunReport, *, dry_run: bool) -> str:
+    """Informe de `evaluate-tensions`: puro y determinista."""
+    lines = [
+        "Evaluaciones de tensión frente al NASA Exoplanet Archive"
+        f"{' [dry-run: no se escribió nada]' if dry_run else ''}:",
+        f"  creadas: {report.created}",
+        f"  reevaluadas: {report.reevaluated}",
+        f"  sin cambios: {report.unchanged}",
+        f"  terminales (no se tocan): {report.kept_terminal}",
+        "  por estado: "
+        + (
+            ", ".join(
+                f"{status.value}={report.by_status[status]}"
+                for status in EvaluationStatus
+                if status in report.by_status
+            )
+            or "-"
+        ),
+        f"  medidas omitidas: {len(report.skipped)}"
+        + "".join(
+            f" {reason.value}={sum(1 for s in report.skipped if s.reason == reason)}"
+            for reason in SkipReason
+        ),
+    ]
+    return "\n".join(lines)
+
+
+async def _record_tension_evaluations(
+    config: PipelineConfig, session: Session, clock: Clock, *, dry_run: bool
+) -> tuple[EvaluationRunReport, int]:
+    archive_config = config.sources.exoplanet_archive
+    async with httpx.AsyncClient(timeout=archive_config.request_timeout_s) as http:
+        catalog, client = exoplanet_catalog_from_config(
+            http, config, SqlAlchemyArchiveRepository(session)
+        )
+        use_case = RecordTensionEvaluations(
+            readings=SqlAlchemyReadingRepository(session),
+            items=SqlAlchemyItemRepository(session),
+            evaluations=SqlAlchemyTensionEvaluationRepository(session),
+            compute=compute_tensions_from_config(config, catalog, clock),
+        )
+        report = await use_case(dry_run=dry_run)
+        return report, client.requests_made
+
+
+def _evaluate_tensions(args: argparse.Namespace) -> int:
+    """`evaluate-tensions`: `0` ok; `1` archivo/alias no disponible o violación
+    de invariante (no se persiste nada); `2` argumentos (argparse). Sin LLM: no
+    importa `claude_agent_sdk`."""
+    if not args.dry_run:
+        configure_json_logging()
+    settings = Settings()
+    config = load_pipeline_config()
+    clock = system_clock_from_config(config)
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    try:
+        with unit_of_work(session_factory, commit=not args.dry_run) as session:
+            report, _requests = asyncio.run(
+                _record_tension_evaluations(config, session, clock, dry_run=args.dry_run)
+            )
+    except (ExoplanetArchiveUnavailable, InvariantViolation) as exc:
+        print(f"evaluate-tensions falló: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        engine.dispose()
+    print(_format_evaluation_report(report, dry_run=args.dry_run))
+    return 0
+
+
+#: Código de salida de `archive-snapshot` cuando el snapshot se guardó pero la
+#: evaluación de tensiones posterior falló (T88). El snapshot NO se deshace.
+_EXIT_EVALUATION_FAILED = 3
+
+
 def _archive_snapshot(args: argparse.Namespace) -> int:
     """`archive-snapshot`: `0` ok; `1` archivo no disponible, dato inválido o
-    guarda de cambios masivos (no se persiste nada); `2` argumentos (argparse).
-    Sin LLM: no importa `claude_agent_sdk`."""
+    guarda de cambios masivos (no se persiste nada); `2` argumentos (argparse);
+    `3` snapshot guardado pero la evaluación de tensiones posterior falló (el
+    snapshot queda guardado). Sin LLM: no importa `claude_agent_sdk`."""
     if not args.dry_run:
         configure_json_logging()
     settings = Settings()
@@ -888,7 +1012,31 @@ def _archive_snapshot(args: argparse.Namespace) -> int:
         print(f"archive-snapshot falló: {exc}", file=sys.stderr)
         return 1
     print(_format_archive_snapshot_report(report, dry_run=args.dry_run))
+    if args.dry_run:
+        return 0
+
+    # Evaluación de tensiones en OTRA unidad de trabajo: si falla, el snapshot
+    # ya está confirmado y no se toca.
+    try:
+        with unit_of_work(session_factory) as session:
+            evaluation, _requests = asyncio.run(
+                _record_tension_evaluations(config, session, clock, dry_run=False)
+            )
+    except Exception as exc:  # noqa: BLE001 - el snapshot ya está confirmado: cualquier fallo -> 3
+        print(
+            "archive-snapshot: snapshot guardado, pero la evaluación de tensiones falló: "
+            f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
+        return _EXIT_EVALUATION_FAILED
+    print(_format_evaluation_report(evaluation, dry_run=False))
     return 0
+
+
+def _evaluation_sigma(evaluation: TensionEvaluation) -> float | None:
+    if evaluation.result is None:
+        return None
+    return evaluation.result.reference_sigma()
 
 
 def _format_tension_section(
@@ -901,18 +1049,27 @@ def _format_tension_section(
     runs_with_reader_v3: int,
     threshold_sigma: float,
     requests_made: int,
+    usable_measurements: int | None = None,
+    saved_terminal: int = 0,
 ) -> str:
     """Sección de tensiones del `--dry-run`: pura y determinista (mismo
-    informe, mismo texto), sin IO ni reloj."""
+    informe, mismo texto), sin IO ni reloj. `saved_terminal` son las evaluaciones
+    ya guardadas y terminales (no recalculadas); el resto es recalculado."""
     skipped_by_reason = {reason: 0 for reason in SkipReason}
     for skipped in report.skipped:
         skipped_by_reason[skipped.reason] += 1
-    usable = total_measurements - skipped_by_reason[SkipReason.NOT_USABLE]
-    matched = usable - skipped_by_reason[SkipReason.UNMATCHED]
+    usable = (
+        usable_measurements
+        if usable_measurements is not None
+        else total_measurements - skipped_by_reason[SkipReason.NOT_USABLE]
+    )
 
-    sigmas = [result.reference_sigma() for result in report.results]
+    by_status = Counter(evaluation.status for evaluation in report.evaluations)
+    sigmas = [_evaluation_sigma(evaluation) for evaluation in report.evaluations]
     with_reference = [sigma for sigma in sigmas if sigma is not None]
-    candidates = sum(1 for result in report.results if result.is_candidate(threshold_sigma))
+    candidates = sum(
+        1 for evaluation in report.evaluations if evaluation.is_candidate(threshold_sigma)
+    )
     rate = f"{candidates / runs_with_reader_v3:.2f}" if runs_with_reader_v3 else "n/d"
 
     lines = [
@@ -921,10 +1078,21 @@ def _format_tension_section(
         f"  lecturas con extracción de medidas ({READER_V3_PROMPT_VERSION}): {readings_count} "
         f"(con al menos una medida: {readings_with_measurements}) "
         f"en {runs_with_reader_v3} Runs con {READER_V3_PROMPT_VERSION}",
-        f"  medidas: total={total_measurements} utilizables={usable} emparejadas={matched} "
-        f"sin previas={skipped_by_reason[SkipReason.NO_PRIORS]}",
-        f"  resultados: {len(report.results)} (con referencia por defecto: "
-        f"{len(with_reference)}, sin ella: {len(sigmas) - len(with_reference)})",
+        f"  medidas: total={total_measurements} utilizables={usable} "
+        f"omitidas por TTV={skipped_by_reason[SkipReason.PERIOD_TTV]}",
+        f"  evaluaciones: {len(report.evaluations)} (con referencia: {len(with_reference)}, "
+        f"sin ella: {len(sigmas) - len(with_reference)})",
+        f"  origen: estado guardado (terminales, no recalculado)={saved_terminal}; "
+        f"recalculado ahora={len(report.evaluations) - saved_terminal}",
+        "  por estado: "
+        + (
+            ", ".join(
+                f"{status.value}={by_status[status]}"
+                for status in EvaluationStatus
+                if status in by_status
+            )
+            or "-"
+        ),
         "  sigma de referencia por tramos: "
         + " | ".join(
             f"{label}: {sum(1 for sigma in with_reference if low <= sigma < high)}"
@@ -932,28 +1100,41 @@ def _format_tension_section(
         ),
         f"  candidatos (threshold_sigma={threshold_sigma}): {candidates}; "
         f"por Run con {READER_V3_PROMPT_VERSION}: {rate}",
-        f"  peticiones al archivo: {requests_made}",
+        f"  peticiones al archivo (alias): {requests_made}",
     ]
-    for result, sigma in zip(report.results, sigmas, strict=True):
+    for evaluation, sigma in zip(report.evaluations, sigmas, strict=True):
         sigma_text = f"{sigma:.2f}" if sigma is not None else "-"
-        candidate_text = "sí" if result.is_candidate(threshold_sigma) else "no"
+        candidate_text = "sí" if evaluation.is_candidate(threshold_sigma) else "no"
+        reference = evaluation.result.reference() if evaluation.result is not None else None
+        reference_text_ = reference.reference if reference is not None else "-"
+        if evaluation.limit is not None:
+            limit_text = (
+                f"{evaluation.limit.outcome.value} frente a {evaluation.limit.limit.reference} "
+                f"(margen mín {min(evaluation.limit.margins):.2f})"
+            )
+        else:
+            limit_text = "-"
+        alias_text = (
+            "-"
+            if evaluation.period_check is None
+            else ("sí" if evaluation.period_check.alias_suspected else "no")
+        )
+        archive_name = evaluation.archive_planet_name
+        url = f" · {planet_overview_url(archive_name)}" if archive_name is not None else ""
         lines.append(
-            f"  {external_ids.get(result.item_id, str(result.item_id))} · "
-            f"{result.planet_name} · {result.parameter.value} · sigma ref={sigma_text} · "
-            f"candidato={candidate_text} · {planet_overview_url(result.planet_name)}"
+            f"  {external_ids.get(evaluation.item_id, str(evaluation.item_id))} · "
+            f"{evaluation.planet_name} · {evaluation.parameter.value} · sigma ref={sigma_text} · "
+            f"candidato={candidate_text} · estado={evaluation.status.value} · "
+            f"ref={reference_text_} · límite={limit_text} · alias periodo={alias_text}{url}"
         )
     return "\n".join(lines)
 
 
 async def _compute_tensions(
-    pairs: Sequence[tuple[Item, Reading]], config: PipelineConfig
-) -> tuple[TensionReport, int]:
-    async with httpx.AsyncClient(
-        timeout=config.sources.exoplanet_archive.request_timeout_s
-    ) as http:
-        catalog, client = exoplanet_catalog_from_config(http, config)
-        report = await ComputeTensions(catalog)(pairs)
-        return report, client.requests_made
+    session: Session, config: PipelineConfig, clock: Clock
+) -> tuple[EvaluationRunReport, int]:
+    """Evaluaciones conciliadas con lo guardado, sin escribir (`dry_run=True`)."""
+    return await _record_tension_evaluations(config, session, clock, dry_run=True)
 
 
 def _load_tension_inputs(session: Session) -> tuple[list[tuple[Item, Reading]], int]:
@@ -973,15 +1154,27 @@ def _load_tension_inputs(session: Session) -> tuple[list[tuple[Item, Reading]], 
 
 
 def _print_tension_section(
-    config: PipelineConfig, pairs: Sequence[tuple[Item, Reading]], runs_with_reader_v3: int
+    session: Session,
+    config: PipelineConfig,
+    clock: Clock,
+    pairs: Sequence[tuple[Item, Reading]],
+    runs_with_reader_v3: int,
 ) -> None:
-    """Calcula e imprime las tensiones de las lecturas con medidas. No abre
-    sesión de base de datos. Lanza `ExoplanetArchiveUnavailable` si el
-    archivo falla."""
-    report, requests_made = asyncio.run(_compute_tensions(pairs, config))
+    """Calcula e imprime las tensiones de las lecturas con medidas, leyendo el
+    snapshot del archivo de la base (solo lee; el alias puede requerir red).
+    Lanza `ExoplanetArchiveUnavailable` si el alias o el índice local fallan."""
+    evaluation, requests_made = asyncio.run(_compute_tensions(session, config, clock))
+    report = TensionReport(evaluations=evaluation.evaluations, skipped=evaluation.skipped)
     print(
         _format_tension_section(
             report,
+            usable_measurements=sum(
+                1
+                for _, reading in pairs
+                for measurement in reading.measurements or ()
+                if measurement.usable_for_tension
+            ),
+            saved_terminal=evaluation.kept_terminal,
             external_ids={item.id: item.external_id for item, _ in pairs},
             readings_count=len(pairs),
             readings_with_measurements=sum(1 for _, reading in pairs if reading.measurements),
@@ -1172,8 +1365,9 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
     Todo lo que toca la base ocurre dentro de una única
     `unit_of_work(commit=False)`, que siempre se deshace (y prohíbe `commit()`):
     la ingesta se escribe en esa transacción para que `_would_read_items` vea
-    los ítems recién traídos, y al salir desaparece. La consulta al NASA
-    Exoplanet Archive va después, con la sesión ya cerrada. Códigos de salida:
+    los ítems recién traídos, y al salir desaparece. La sección de tensiones
+    (T88) corre en esa misma sesión: lee el snapshot del archivo de la base y
+    solo el servicio de alias puede salir a la red. Códigos de salida:
     0; 1 si falla arXiv o el archivo (en ambos casos sin escribir nada)."""
     settings = Settings()
     config = load_pipeline_config()
@@ -1211,14 +1405,13 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 would_read_v3=would_read_v3,
             )
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
+            try:
+                _print_tension_section(session, config, clock, pairs, runs_with_reader_v3)
+            except ExoplanetArchiveUnavailable as exc:
+                print(f"error consultando el NASA Exoplanet Archive: {exc}", file=sys.stderr)
+                return 1
     finally:
         engine.dispose()
-
-    try:
-        _print_tension_section(config, pairs, runs_with_reader_v3)
-    except ExoplanetArchiveUnavailable as exc:
-        print(f"error consultando el NASA Exoplanet Archive: {exc}", file=sys.stderr)
-        return 1
 
     print("[dry-run: no se escribió nada en la base]")
     return 0
@@ -1938,6 +2131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_item(args)
     if args.command == "archive-snapshot":
         return _archive_snapshot(args)
+    if args.command == "evaluate-tensions":
+        return _evaluate_tensions(args)
     return _run_night(args)
 
 

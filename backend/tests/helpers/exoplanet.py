@@ -3,7 +3,7 @@ los tests de T73 (tensión frente al catálogo). Sin IO ni red."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -63,6 +63,11 @@ def make_solution(
     reference: str = "Livingston et al. 2026",
     is_default: bool = False,
     arxiv_id: str | None = None,
+    soltype: str | None = "Published Confirmed",
+    solution_key: str | None = None,
+    pl_pubdate: str | None = None,
+    releasedate: date | None = None,
+    ttv_flag: bool | None = None,
 ) -> CatalogSolution:
     return CatalogSolution(
         planet_name=planet_name,
@@ -75,6 +80,11 @@ def make_solution(
         reference=reference,
         is_default=is_default,
         arxiv_id=arxiv_id,
+        soltype=soltype,
+        solution_key=solution_key,
+        pl_pubdate=pl_pubdate,
+        releasedate=releasedate,
+        ttv_flag=ttv_flag,
     )
 
 
@@ -124,6 +134,7 @@ def v1298_tension_results() -> dict[str, TensionResult]:
     `anyio.run`, así que no debe llamarse desde un test async.
     """
     import anyio
+    from fakes.clock import FakeClock
 
     from helpers.archive import load_t71c_measurements, make_catalog
     from nocturna.application.use_cases.compute_tensions import ComputeTensions
@@ -132,14 +143,35 @@ def v1298_tension_results() -> dict[str, TensionResult]:
         catalog, _, _ = make_catalog()
         item = make_item("2609.30038")
         reading = make_reading(item.id, load_t71c_measurements(V1298_MEASURES))
-        return await ComputeTensions(catalog)([(item, reading)])
+        compute = ComputeTensions(
+            catalog,
+            threshold_sigma=V1298_THRESHOLD,
+            period_rule=make_period_rule(),
+            clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
+        )
+        return await compute([(item, reading)])
 
     report = anyio.run(run)
-    return {r.planet_name: r for r in report.results}
+    return {e.result.planet_name: e.result for e in report.evaluations if e.result is not None}
+
+
+def make_period_rule():
+    """`PeriodRule` con los valores de `[tension.period]` de pipeline.toml."""
+    from nocturna.domain.tension import PeriodRule
+
+    return PeriodRule(
+        min_relative_difference=1e-4,
+        min_absolute_difference_days=1.0 / 24.0,
+        alias_tolerance=0.01,
+        alias_max_harmonic=5,
+    )
 
 
 def catalog_tension_v1298_b():
-    """`CatalogTension` de V1298 Tau b (masa, referencia ~3,368 sigma, umbral 3)."""
+    """`CatalogTension` de V1298 Tau b (masa, referencia ~3,368 sigma, umbral 3).
+
+    Conserva los cinco campos de T88 de las previas: el JSON persistido
+    (ADR 0017, esquema v1) los guarda como claves opcionales."""
     from nocturna.domain.tension import catalog_tension_from
 
     return catalog_tension_from(

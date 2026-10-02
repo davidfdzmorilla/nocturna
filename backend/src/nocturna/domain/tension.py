@@ -14,9 +14,12 @@ paper queda por encima de la previa, `e_p = err_minus` del paper y
 """
 
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass
-from uuid import UUID
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
+from datetime import date, datetime
+from enum import StrEnum
+from typing import ClassVar
+from uuid import UUID, uuid4
 
 from nocturna.domain.entities import (
     CatalogSolution,
@@ -24,9 +27,12 @@ from nocturna.domain.entities import (
     CatalogTensionComparison,
     MeasuredParameter,
     Measurement,
+    MeasurementLimit,
     MeasurementUnit,
 )
-from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.errors import GuardedFieldAssignment, InvalidTransition, InvariantViolation
+
+PUBLISHED_CONFIRMED = "Published Confirmed"
 
 M_JUP_IN_M_EARTH = 317.83
 R_JUP_IN_R_EARTH = 11.209
@@ -114,6 +120,8 @@ class TensionResult:
     planet_name: str
     parameter: MeasuredParameter
     comparisons: tuple[CatalogComparison, ...]
+    # T88: Reading de origen.
+    reading_id: UUID | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "comparisons", tuple(self.comparisons))
@@ -123,28 +131,24 @@ class TensionResult:
             if comparison.paper.parameter != self.parameter:
                 raise InvariantViolation("'comparisons' debe ser homogénea en 'parameter'")
 
-    def reference_sigma(self) -> float | None:
-        """σ mínimo de las medidas del paper frente a la única previa marcada
-        `is_default`; `None` si no hay exactamente una (con 0 o más de 1 no
-        hay referencia).
+    def reference(self) -> CatalogSolution | None:
+        """Referencia de la comparación (`select_reference` sobre las previas
+        presentes). Se identifica por igualdad de valor, no de objeto: copias
+        iguales de la misma previa cuentan como una."""
+        return select_reference(list(dict.fromkeys(c.prior for c in self.comparisons)))
 
-        La previa por defecto se identifica por igualdad de valor, no por
-        identidad de objeto: un `TensionResult` rehidratado o construido con
-        copias iguales de la misma previa debe dar el mismo resultado. Dos
-        filas por defecto idénticas cuentan como una; dos distintas, como
-        ambigüedad (`None`)."""
-        defaults = {c.prior for c in self.comparisons if c.prior.is_default}
-        if len(defaults) != 1:
+    def reference_sigma(self) -> float | None:
+        """σ mínimo de las medidas del paper frente a `reference()`; `None`
+        si no hay referencia."""
+        reference = self.reference()
+        if reference is None:
             return None
-        (reference,) = defaults
         sigmas = [c.sigma for c in self.comparisons if c.prior == reference]
         return min(sigmas) if sigmas else None
 
     def is_candidate(self, threshold_sigma: float) -> bool:
-        """Candidato a hallazgo: hay referencia por defecto (ver
-        `reference_sigma`) y todas las medidas del paper superan el umbral
-        frente a ella (σ mínimo >= umbral). Las demás previas no cuentan
-        (OPEN_DECISIONS T73, 2026-09-30)."""
+        """Candidato a hallazgo: hay referencia y todas las medidas del paper
+        superan el umbral frente a ella (σ mínimo >= umbral)."""
         sigma = self.reference_sigma()
         return sigma is not None and sigma >= threshold_sigma
 
@@ -156,6 +160,11 @@ def catalog_tension_from(
     `InvariantViolation` si el resultado no es candidato al umbral dado."""
     if not result.is_candidate(threshold_sigma):
         raise InvariantViolation("el resultado no es candidato a hallazgo con ese umbral")
+    reference = result.reference()
+    if reference is None or not reference.is_default:
+        raise InvariantViolation(
+            "solo se puede construir una CatalogTension con referencia 'is_default' (T89)"
+        )
     reference_sigma = result.reference_sigma()
     if reference_sigma is None:
         raise InvariantViolation("el resultado no tiene 'reference_sigma'")
@@ -170,3 +179,287 @@ def catalog_tension_from(
             for c in result.comparisons
         ),
     )
+
+
+def _recency_order(priors: Sequence[CatalogSolution]) -> list[CatalogSolution]:
+    """Más reciente primero: (pl_pubdate desc, releasedate desc, solution_key asc)."""
+    ordered = sorted(priors, key=lambda p: p.solution_key or "")
+    ordered.sort(key=lambda p: p.releasedate or date.min, reverse=True)
+    ordered.sort(key=lambda p: p.pl_pubdate or "", reverse=True)
+    return ordered
+
+
+def _pick(candidates: Sequence[CatalogSolution]) -> CatalogSolution | None:
+    defaults = {p for p in candidates if p.is_default}
+    if len(defaults) > 1:
+        return None
+    if defaults:
+        return next(iter(defaults))
+    ordered = _recency_order(candidates)
+    return ordered[0] if ordered else None
+
+
+def select_reference(priors: Sequence[CatalogSolution]) -> CatalogSolution | None:
+    """Referencia entre las previas: solo `Published Confirmed` utilizables
+    como previa; la `is_default` si cumple (dos distintas: `None`); si no, la
+    más reciente (`_recency_order`)."""
+    return _pick([p for p in priors if p.soltype == PUBLISHED_CONFIRMED and p.usable_as_prior])
+
+
+def select_upper_limit(priors: Sequence[CatalogSolution]) -> CatalogSolution | None:
+    """Como `select_reference`, sobre previas `Published Confirmed` que son
+    una cota superior."""
+    return _pick(
+        [
+            p
+            for p in priors
+            if p.soltype == PUBLISHED_CONFIRMED
+            and p.limit == MeasurementLimit.UPPER
+            and p.value > 0
+        ]
+    )
+
+
+class LimitOutcome(StrEnum):
+    CONSISTENT = "consistent"
+    INCOMPATIBLE = "incompatible"
+
+
+@dataclass(frozen=True, slots=True)
+class LimitComparison:
+    """Medidas del paper frente a una cota superior del catálogo.
+
+    `margins[i] = (x_p - L) / e_minus` en unidad canónica; incompatible solo
+    si todas las medidas superan el umbral."""
+
+    paper: tuple[Measurement, ...]
+    limit: CatalogSolution
+    margins: tuple[float, ...]
+    outcome: LimitOutcome
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "paper", tuple(self.paper))
+        object.__setattr__(self, "margins", tuple(self.margins))
+        if not self.paper:
+            raise InvariantViolation("'paper' no puede estar vacío")
+        if len(self.margins) != len(self.paper):
+            raise InvariantViolation("'margins' debe tener un valor por medida")
+        if self.limit.limit != MeasurementLimit.UPPER:
+            raise InvariantViolation("'limit' debe ser una cota superior")
+
+
+def compare_with_limit(
+    measurements: Sequence[Measurement], limit: CatalogSolution, *, threshold_sigma: float
+) -> LimitComparison:
+    """Compara medidas del paper con una cota superior del catálogo."""
+    if not measurements:
+        raise InvariantViolation("se necesita al menos una medida")
+    if limit.limit != MeasurementLimit.UPPER:
+        raise InvariantViolation("'limit' debe ser una cota superior")
+    bound = to_canonical(limit.value, limit.unit)
+    margins: list[float] = []
+    for m in measurements:
+        if m.parameter != limit.parameter:
+            raise InvariantViolation("medida y cota deben ser del mismo parámetro")
+        if not m.usable_for_tension:
+            raise InvariantViolation("la medida del paper no es utilizable para tensión")
+        assert m.err_minus is not None  # noqa: S101
+        e_minus = to_canonical(m.err_minus, m.unit)
+        if e_minus <= 0:
+            raise InvariantViolation("'err_minus' debe ser mayor que cero para comparar con cota")
+        margins.append((to_canonical(m.value, m.unit) - bound) / e_minus)
+    incompatible = all(x >= threshold_sigma for x in margins)
+    return LimitComparison(
+        paper=tuple(measurements),
+        limit=limit,
+        margins=tuple(margins),
+        outcome=LimitOutcome.INCOMPATIBLE if incompatible else LimitOutcome.CONSISTENT,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodRule:
+    """Regla del periodo. Diferencia mínima: ΔP/P_ref >= `min_relative_difference`
+    o ΔP >= `min_absolute_difference_days`. Alias: P1/P2 o P2/P1 a menos de
+    `alias_tolerance` (absoluta) de un entero n, 2 <= n <= `alias_max_harmonic`."""
+
+    min_relative_difference: float
+    min_absolute_difference_days: float
+    alias_tolerance: float
+    alias_max_harmonic: int
+
+    def __post_init__(self) -> None:
+        if not self.min_relative_difference > 0:
+            raise InvariantViolation("'min_relative_difference' debe ser mayor que cero")
+        if not self.min_absolute_difference_days > 0:
+            raise InvariantViolation("'min_absolute_difference_days' debe ser mayor que cero")
+        if not 0 < self.alias_tolerance < 0.5:
+            raise InvariantViolation("'alias_tolerance' debe estar en (0, 0.5)")
+        if self.alias_max_harmonic < 2:
+            raise InvariantViolation("'alias_max_harmonic' debe ser >= 2")
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodCheck:
+    min_difference_met: bool
+    alias_suspected: bool
+
+
+def check_period(
+    measurements: Sequence[Measurement], reference: CatalogSolution, rule: PeriodRule
+) -> PeriodCheck:
+    """Diferencia mínima (todas las medidas) y sospecha de alias (alguna)."""
+    if not measurements:
+        raise InvariantViolation("se necesita al menos una medida")
+    if reference.parameter != MeasuredParameter.PERIOD:
+        raise InvariantViolation("la referencia debe ser un periodo")
+    p_ref = to_canonical(reference.value, reference.unit)
+    met = True
+    alias = False
+    for m in measurements:
+        if m.parameter != MeasuredParameter.PERIOD:
+            raise InvariantViolation("las medidas deben ser periodos")
+        p = to_canonical(m.value, m.unit)
+        delta = abs(p - p_ref)
+        if not (
+            delta / p_ref >= rule.min_relative_difference
+            or delta >= rule.min_absolute_difference_days
+        ):
+            met = False
+        for ratio in (p / p_ref, p_ref / p):
+            nearest = round(ratio)
+            if (
+                2 <= nearest <= rule.alias_max_harmonic
+                and abs(ratio - nearest) < rule.alias_tolerance
+            ):
+                alias = True
+    return PeriodCheck(min_difference_met=met, alias_suspected=alias)
+
+
+class EvaluationStatus(StrEnum):
+    AWAITING_REFERENCE = "awaiting_reference"
+    EVALUATED = "evaluated"
+    CONSISTENT_WITH_LIMIT = "consistent_with_limit"
+    INCOMPATIBLE_WITH_LIMIT = "incompatible_with_limit"
+    CLOSED_LOOP = "closed_loop"
+
+
+@dataclass(slots=True)
+class TensionEvaluation:
+    """Evaluación de (reading, planeta, parámetro). `status` está protegido:
+    solo cambia con `reevaluate_with`, que devuelve una evaluación nueva."""
+
+    reading_id: UUID
+    item_id: UUID
+    planet_name: str
+    parameter: MeasuredParameter
+    measurements: tuple[Measurement, ...]
+    status: EvaluationStatus
+    evaluated_at: datetime
+    archive_planet_name: str | None = None
+    result: TensionResult | None = None
+    limit: LimitComparison | None = None
+    period_check: PeriodCheck | None = None
+    own_solution_key: str | None = None
+    id: UUID = None  # type: ignore[assignment]  # se rellena en __post_init__
+
+    _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"status"})
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in self._GUARDED_FIELDS and hasattr(self, name):
+            raise GuardedFieldAssignment(
+                f"'{name}' de TensionEvaluation no se puede asignar directamente; "
+                "usa reevaluate_with()"
+            )
+        object.__setattr__(self, name, value)
+
+    def __post_init__(self) -> None:
+        if self.id is None:
+            object.__setattr__(self, "id", uuid4())
+        object.__setattr__(self, "measurements", tuple(self.measurements))
+        if not self.planet_name.strip():
+            raise InvariantViolation("'planet_name' no puede estar vacío")
+        if not self.measurements:
+            raise InvariantViolation("'measurements' no puede estar vacía")
+        if any(m.parameter != self.parameter for m in self.measurements):
+            raise InvariantViolation("'measurements' debe ser homogénea en 'parameter'")
+        if self.evaluated_at.utcoffset() is None:
+            raise InvariantViolation("'evaluated_at' debe llevar zona horaria")
+        if self.result is not None and self.result.parameter != self.parameter:
+            raise InvariantViolation("'result' debe ser del mismo 'parameter'")
+        has_reference = self.result is not None and self.result.reference() is not None
+        status = self.status
+        if (status == EvaluationStatus.EVALUATED) != has_reference:
+            raise InvariantViolation("EVALUATED si y solo si 'result' tiene referencia")
+        limit_statuses = {
+            EvaluationStatus.CONSISTENT_WITH_LIMIT: LimitOutcome.CONSISTENT,
+            EvaluationStatus.INCOMPATIBLE_WITH_LIMIT: LimitOutcome.INCOMPATIBLE,
+        }
+        if status in limit_statuses:
+            if self.limit is None or self.limit.outcome != limit_statuses[status]:
+                raise InvariantViolation("'limit' debe existir y coincidir con el estado")
+        elif self.limit is not None:
+            raise InvariantViolation(f"{status.value} no admite 'limit'")
+        if (
+            self.parameter == MeasuredParameter.PERIOD
+            and status == EvaluationStatus.EVALUATED
+            and self.period_check is None
+        ):
+            raise InvariantViolation("un periodo EVALUATED requiere 'period_check'")
+        if status == EvaluationStatus.CLOSED_LOOP and not self.own_solution_key:
+            raise InvariantViolation("CLOSED_LOOP requiere 'own_solution_key'")
+
+    def reevaluate_with(self, new: "TensionEvaluation") -> "TensionEvaluation":
+        """Sustituto desde AWAITING_REFERENCE; conserva `id` y la clave
+        (reading_id, planet_name, parameter)."""
+        if self.status != EvaluationStatus.AWAITING_REFERENCE:
+            raise InvalidTransition(self.status.value, new.status.value, entity="TensionEvaluation")
+        if (new.reading_id, new.planet_name, new.parameter) != (
+            self.reading_id,
+            self.planet_name,
+            self.parameter,
+        ):
+            raise InvariantViolation(
+                "la reevaluación debe conservar (reading_id, planeta, parámetro)"
+            )
+        return replace(new, id=self.id)
+
+    def same_outcome(self, other: "TensionEvaluation") -> bool:
+        """Mismo resultado ignorando `id` y `evaluated_at`."""
+        return (
+            self.reading_id,
+            self.item_id,
+            self.planet_name,
+            self.parameter,
+            self.measurements,
+            self.status,
+            self.archive_planet_name,
+            self.result,
+            self.limit,
+            self.period_check,
+            self.own_solution_key,
+        ) == (
+            other.reading_id,
+            other.item_id,
+            other.planet_name,
+            other.parameter,
+            other.measurements,
+            other.status,
+            other.archive_planet_name,
+            other.result,
+            other.limit,
+            other.period_check,
+            other.own_solution_key,
+        )
+
+    def is_candidate(self, threshold_sigma: float) -> bool:
+        if self.status == EvaluationStatus.INCOMPATIBLE_WITH_LIMIT:
+            return True
+        if self.status != EvaluationStatus.EVALUATED:
+            return False
+        assert self.result is not None  # noqa: S101
+        if not self.result.is_candidate(threshold_sigma):
+            return False
+        if self.parameter == MeasuredParameter.PERIOD:
+            return self.period_check is not None and self.period_check.min_difference_met
+        return True

@@ -66,3 +66,14 @@ Formatos observados: `releasedate` = `YYYY-MM-DD` (10 caracteres, sin hora);
 
 Las consultas exactas están en la tabla. Respeta ≥2 s entre peticiones y el
 `User-Agent: nocturna/0.1.0`.
+
+## `ps_hip67522_chakraborty2026.csv` (T88, construida a mano)
+
+NO es una captura: tres filas de `ps` con las 29 columnas de T81, montadas a
+mano como primer caso de preprint recién publicado (HIP 67522, Chakraborty et
+al. 2026, arXiv 2606.18045; también primer caso real para T83). Reales: el
+literal de `pl_refname` de Chakraborty (bibcode `2026arXiv260618045C`), la masa
+de b (13.8 +-1.0, `pl_bmassprov=Mass`, `pl_pubdate=2026-09`,
+`releasedate=2026-10-01`) y la cota superior de c (22, `pl_bmasselim=1`).
+Sintéticos: la fila default de Barber et al. 2024 (b, sin masa; su bibcode,
+radio y periodo son marcadores) y los campos no relevantes vacíos.

@@ -1,7 +1,10 @@
-"""ComputeTensions + ExoplanetArchiveCatalog sin red (T74).
+"""ComputeTensions + ExoplanetArchiveCatalog sin red (T74, T88).
 
 Datos reales: `ps_v1298tau.csv` (filas de `ps` de V1298 Tau b y e, grabadas
-del archivo) y las medidas del paper 2609.30038 extraidas por el Reader
+del archivo, sembradas en un `ArchiveRepository` en memoria con
+`soltype="Published Confirmed"` y una `releasedate` de captura, ver
+`helpers.archive.archive_solutions_from_fixture`) y las medidas del paper
+2609.30038 extraidas por el Reader
 (`tests/fixtures/t71c/2609.30038.reader-measures-exp1.derived-fullname.json`).
 El paper NO tiene fila propia en el archivo, asi que la exclusion de la
 solucion propia se prueba con una fila sintetica (marcada).
@@ -19,21 +22,25 @@ encima, asi que e_p = err_minus (x317.83) y e_i = err_plus de la previa:
   Suarez Mascareno 2022 (no es referencia): b 0.038..0.534 ; e 1.248..2.296
 """
 
-import csv
-import io
+import dataclasses
+from datetime import UTC, datetime
 
-import httpx
 import pytest
+from fakes.clock import FakeClock
 from helpers.archive import (
-    archive_handler,
     fixture_text,
     load_t71c_measurements,
+    make_archive,
     make_catalog,
+    v1298_archive_solutions,
+    wasp12_archive_solutions,
 )
-from helpers.exoplanet import make_item, make_measurement, make_reading
+from helpers.exoplanet import make_item, make_measurement, make_period_rule, make_reading
 
-from nocturna.application.use_cases.compute_tensions import ComputeTensions, SkipReason
+from nocturna.application.use_cases.compute_tensions import ComputeTensions
+from nocturna.domain.archive import ArchiveParameterValue
 from nocturna.domain.entities import MeasuredParameter
+from nocturna.domain.tension import EvaluationStatus
 
 pytestmark = pytest.mark.anyio
 
@@ -44,14 +51,20 @@ THRESHOLD = 3.0
 
 
 def _by_planet(report):
-    return {r.planet_name: r for r in report.results}
+    return {e.result.planet_name: e.result for e in report.evaluations if e.result is not None}
 
 
-async def _run(handler=None, external_id=PAPER):
-    catalog, client, seen = make_catalog(handler)
+async def _run(archive=None, external_id=PAPER):
+    catalog, client, seen = make_catalog(archive=archive)
     item = make_item(external_id)
     reading = make_reading(item.id, load_t71c_measurements(MEASURES))
-    report = await ComputeTensions(catalog)([(item, reading)])
+    compute = ComputeTensions(
+        catalog,
+        threshold_sigma=THRESHOLD,
+        period_rule=make_period_rule(),
+        clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
+    )
+    report = await compute([(item, reading)])
     return report, client, seen
 
 
@@ -104,12 +117,12 @@ async def test_las_previas_que_no_son_referencia_no_deciden():
     assert max(suarez) == pytest.approx(0.534, abs=1e-3)  # todas < 3 y aun asi es candidato
 
 
-async def test_peticiones_un_indice_y_un_ps_por_planeta():
+async def test_sin_alias_no_sale_ninguna_peticion():
     _, client, seen = await _run()
 
-    # índice + ps(b) + ps(e); ningún alias, ninguna petición por parámetro extra.
-    assert client.requests_made == 3
-    assert len(seen) == 3
+    # Soluciones e índice salen de la base; los nombres del Reader ya están en el índice.
+    assert client.requests_made == 0
+    assert seen == []
 
 
 async def test_sin_fila_propia_en_el_archivo_no_se_excluye_nada():
@@ -122,30 +135,29 @@ async def test_sin_fila_propia_en_el_archivo_no_se_excluye_nada():
     }
 
 
-def _handler_con_fila_propia_sintetica():
-    """SINTETICO: añade a ps de V1298 Tau b una fila 'del propio paper'
-    (bibcode 2026arXiv2609.30038X, default) con un valor casi igual al medido
-    (0.52 M_jup = 165.3 M_earth), que dejaria sigma ~ 0 si no se excluyera."""
-    base = archive_handler()
-    synthetic = (
-        '"V1298 Tau b","V1298 Tau",0,"<a refstr=SYNTHETIC href=https://ui.adsabs.harvard.edu/'
-        'abs/2026arXiv2609.30038X/abstract target=ref>Propio et al. 2026</a>","Mass",'
-        "165.30000000,20.00000000,-20.00000000,0,,,,,,,,\n"
+def _archivo_con_fila_propia_sintetica():
+    """SINTETICO: añade a V1298 Tau b una fila 'del propio paper' (arxiv_id
+    2609.30038, default) con un valor casi igual al medido (0.52 M_jup =
+    165.3 M_earth), que dejaria sigma ~ 0 si no se excluyera."""
+    base = next(s for s in v1298_archive_solutions() if s.pl_name == "V1298 Tau b" and s.is_default)
+    own = dataclasses.replace(
+        base,
+        pl_refname="<a href=https://ui.adsabs.harvard.edu/abs/2026arXiv2609.30038X/abstract> "
+        "Propio et al. 2026 </a>",
+        ref_key="2026arXiv2609.30038X",
+        ref_text="Propio et al. 2026",
+        arxiv_id=PAPER,
+        mass=ArchiveParameterValue(value=165.3, err1=20.0, err2=-20.0, lim=0),
+        radius=ArchiveParameterValue(),
+        period=ArchiveParameterValue(),
+        pl_bmassprov="Mass",
     )
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        response = base(request)
-        if "where pl_name='V1298 Tau b'" in request.url.params.get("query", ""):
-            rows = list(csv.reader(io.StringIO(response.text)))
-            assert rows[0][0] == "pl_name"
-            return httpx.Response(200, text=response.text + synthetic)
-        return response
-
-    return handler
+    return make_archive(v1298_archive_solutions() + wasp12_archive_solutions() + [own]), own
 
 
 async def test_la_solucion_del_propio_paper_se_excluye_por_arxiv_id():
-    report, _, _ = await _run(_handler_con_fila_propia_sintetica())
+    archive, own = _archivo_con_fila_propia_sintetica()
+    report, _, _ = await _run(archive)
 
     b = _by_planet(report)["V1298 Tau b"]
     assert "Propio et al. 2026" not in {c.prior.reference for c in b.comparisons}
@@ -155,7 +167,8 @@ async def test_la_solucion_del_propio_paper_se_excluye_por_arxiv_id():
 
 async def test_con_otro_external_id_la_fila_sintetica_si_cuenta_como_previa():
     """Control del test anterior: la exclusion depende de la igualdad de ids."""
-    report, _, _ = await _run(_handler_con_fila_propia_sintetica(), external_id="2609.99999")
+    archive, _ = _archivo_con_fila_propia_sintetica()
+    report, _, _ = await _run(archive, external_id="2609.99999")
 
     b = _by_planet(report)["V1298 Tau b"]
     propias = [c for c in b.comparisons if c.prior.reference == "Propio et al. 2026"]
@@ -164,16 +177,30 @@ async def test_con_otro_external_id_la_fila_sintetica_si_cuenta_como_previa():
     assert all(c.prior.arxiv_id == PAPER for c in propias)
 
 
-async def test_planeta_ausente_del_archivo_es_unmatched_sin_peticion_ps():
+async def test_planeta_ausente_del_archivo_espera_referencia_tras_consultar_el_alias():
     item = make_item()
     reading = make_reading(item.id, (make_measurement(0.5, 0.1, 0.1, planet_name="Foo 1 b"),))
     body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
-    catalog, _, seen = make_catalog(archive_handler(alias_body=body))
+    catalog, client, seen = make_catalog(_alias_only(body))
+    compute = ComputeTensions(
+        catalog,
+        threshold_sigma=THRESHOLD,
+        period_rule=make_period_rule(),
+        clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
+    )
 
-    report = await ComputeTensions(catalog)([(item, reading)])
+    report = await compute([(item, reading)])
 
-    assert [s.reason for s in report.skipped] == [SkipReason.UNMATCHED]
-    assert not any("from ps where" in r.url.params.get("query", "") for r in seen)
+    (evaluation,) = report.evaluations
+    assert evaluation.status == EvaluationStatus.AWAITING_REFERENCE
+    assert evaluation.archive_planet_name is None
+    assert client.requests_made == 1 and len(seen) == 1
+
+
+def _alias_only(body):
+    from helpers.archive import alias_handler
+
+    return alias_handler(alias_body=body)
 
 
 def test_los_datos_del_fixture_son_los_que_la_prueba_asume():
