@@ -44,7 +44,7 @@ La noche la lanza `launchd` a las 00:05 desde el árbol principal, en `main`, y 
 1. `git pull` de `main` y `uv run alembic upgrade head`; comprobar `uv run alembic current`.
 2. Si la tarea trae script de relleno, lanzarlo primero con `--dry-run` y revisar la salida. En T79: `uv run python scripts/backfill_exoplanet_match.py --dry-run` y **comprobar que TOI-6981 b (2609.37597) aparece entre los primeros `max_items_per_night` de la cola, marcado y con variante v3** (dentro de los marcados el orden es por `fetched_at`, así que puede no ser el primero).
 3. El relleno real (sin `--dry-run`).
-4. `uv run nocturna run-night --dry-run` y revisar ingesta, plan de gasto y reparto v3/v2. Ojo: hoy el `--dry-run` persiste los ítems ingeridos (deuda registrada).
+4. `uv run nocturna run-night --dry-run` y revisar ingesta, plan de gasto y reparto v3/v2. Desde T87 el `--dry-run` no escribe nada en la base.
 
 Si se mergea sin migrar, la noche falla: con T79, antes de gastar tokens; con T72 habría gastado el Popularizer sin poder guardar candidatos.
 

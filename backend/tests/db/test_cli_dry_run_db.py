@@ -1,12 +1,14 @@
 """Tests de `nocturna.cli::main` para `run-night --dry-run`, contra PostgreSQL real.
 
 `cli.py` no ofrece ningún parámetro para inyectar un `ArxivSource` falso ni
-una sesión de base de datos alternativa: `_run_ingest` construye su propio
-`httpx.AsyncClient`, su propio `ArxivClient` y su propia `unit_of_work`
-internamente (ver su docstring). Sin tocar `cli.py`, la única costura
+una sesión de base de datos alternativa: `_ingest_into` se compone dentro de
+`_run_night_dry_run`, que construye su propio `httpx.AsyncClient` y su propia
+`unit_of_work(commit=False)`. Sin tocar `cli.py`, la única costura
 disponible es sustituir `httpx.AsyncClient` por una versión que sirve
-`httpx.MockTransport` (`_patch_arxiv_transport`); y como `_run_ingest` sí
-persiste de verdad, eso obliga a estos tests a correr contra
+`httpx.MockTransport` (`_patch_arxiv_transport`). Desde T87 el dry-run NO
+persiste nada (la transacción se deshace; ver
+`test_cli_dry_run_no_writes_db.py`), pero sigue necesitando una base real
+porque lee de ella para el plan, así que estos tests corren contra
 `nocturna_test` (fixtures de `tests/db/conftest.py`), con limpieza vía
 `db_session_factory`.
 
