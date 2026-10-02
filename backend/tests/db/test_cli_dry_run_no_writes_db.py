@@ -8,6 +8,7 @@ esquema `public` (incluida `alembic_version`) antes y despues.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -15,8 +16,14 @@ from pathlib import Path
 import httpx
 import pytest
 import sqlalchemy as sa
-from factories import make_agent_call, make_item, make_reading, make_run
-from helpers.archive import archive_handler, load_t71c_measurements
+from factories import (
+    make_agent_call,
+    make_item,
+    make_reading,
+    make_run,
+    seed_archive_snapshot,
+)
+from helpers.archive import alias_handler, load_t71c_measurements, v1298_archive_solutions
 
 from nocturna import cli
 from nocturna.cli import main
@@ -93,7 +100,7 @@ def _route(
     arxiv_status: int = 200,
     archive: Callable[[httpx.Request], httpx.Response] | None = None,
 ) -> None:
-    archive_fn = archive or archive_handler()
+    archive_fn = archive or alias_handler()
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.host == ARCHIVE_HOST:
@@ -157,6 +164,7 @@ def _seed_base(factory) -> None:
     """Dos ítems previos (uno duplicado del feed), una Reading con medidas de
     V1298 Tau y un Run cerrado."""
     measurements = load_t71c_measurements("2609.30038.reader-measures-exp1.derived-fullname.json")
+    seed_archive_snapshot(factory, v1298_archive_solutions())
     with unit_of_work(factory) as session:
         dup = make_item(external_id="2609.17526", title="Duplicado previo")
         other = make_item(external_id="2601.00002", title="Otro previo")
@@ -234,10 +242,21 @@ def test_el_plan_cuenta_los_items_nuevos_nunca_guardados_y_les_da_prioridad(
     assert _snapshot(db_session_factory) == before
 
 
-def test_si_el_archivo_cae_devuelve_1_y_la_base_queda_intacta(
+def test_si_el_alias_del_archivo_cae_devuelve_1_y_la_base_queda_intacta(
     monkeypatch, db_session_factory, capsys
 ):
+    """T88: soluciones e índice salen de la base; el archivo solo se consulta
+    para el alias de un planeta que el índice local no conoce."""
     _seed_base(db_session_factory)
+    with unit_of_work(db_session_factory) as session:
+        odd = make_item(external_id="2609.99999", status=ItemStatus.READ)
+        SqlAlchemyItemRepository(session).add_many([odd])
+        session.flush()
+        odd_measure = load_t71c_measurements(
+            "2609.30038.reader-measures-exp1.derived-fullname.json"
+        )[0]
+        odd_measure = dataclasses.replace(odd_measure, planet_name="Planeta Raro b")
+        SqlAlchemyReadingRepository(session).add(make_reading(odd.id, measurements=(odd_measure,)))
     before = _snapshot(db_session_factory)
     _route(monkeypatch, archive=lambda request: httpx.Response(503, text="mantenimiento"))
 

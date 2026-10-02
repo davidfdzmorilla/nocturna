@@ -36,11 +36,14 @@ from nocturna.domain.archive import (
 )
 from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.tension import TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
     agent_call_to_row,
+    apply_tension_evaluation,
     archive_default_change_to_row,
     archive_snapshot_from_row,
     archive_snapshot_to_row,
+    archive_solution_from_row,
     archive_solution_to_values,
     finding_from_row,
     finding_to_row,
@@ -49,6 +52,8 @@ from nocturna.infrastructure.db.mappers import (
     reading_to_row,
     run_from_row,
     run_to_row,
+    tension_evaluation_from_row,
+    tension_evaluation_to_row,
 )
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
@@ -58,6 +63,7 @@ from nocturna.infrastructure.db.models import (
     ItemRow,
     ReadingRow,
     RunRow,
+    TensionEvaluationRow,
 )
 
 
@@ -451,6 +457,21 @@ class SqlAlchemyArchiveRepository:
         )
         return {name: key for name, key in self._session.execute(stmt)}
 
+    def planet_names(self) -> frozenset[str]:
+        stmt = select(ArchiveSolutionRow.pl_name).where(ArchiveSolutionRow.removed_at.is_(None))
+        return frozenset(self._session.execute(stmt).scalars())
+
+    def active_solutions(self, pl_name: str) -> list[tuple[ArchiveSolution, bool]]:
+        stmt = (
+            select(ArchiveSolutionRow)
+            .where(ArchiveSolutionRow.pl_name == pl_name, ArchiveSolutionRow.removed_at.is_(None))
+            .order_by(ArchiveSolutionRow.solution_key)
+        )
+        return [
+            (archive_solution_from_row(row), row.is_default_current)
+            for row in self._session.execute(stmt).scalars()
+        ]
+
     def save_snapshot(
         self,
         snapshot: ArchiveSnapshot,
@@ -517,4 +538,29 @@ class SqlAlchemyArchiveRepository:
             archive_default_change_to_row(c, snapshot_id=snapshot.id, detected_at=snapshot.taken_at)
             for c in diff.default_changes
         )
+        self._session.flush()
+
+
+class SqlAlchemyTensionEvaluationRepository:
+    """Persistencia de `TensionEvaluation` (T88). Cumple
+    `domain.repositories.TensionEvaluationRepository`; no confirma ni deshace."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def all(self) -> list[TensionEvaluation]:
+        stmt = select(TensionEvaluationRow).order_by(
+            TensionEvaluationRow.first_evaluated_at, TensionEvaluationRow.id
+        )
+        return [tension_evaluation_from_row(r) for r in self._session.execute(stmt).scalars()]
+
+    def add(self, evaluation: TensionEvaluation) -> None:
+        self._session.add(tension_evaluation_to_row(evaluation))
+        self._session.flush()
+
+    def update(self, evaluation: TensionEvaluation) -> None:
+        row = self._session.get(TensionEvaluationRow, evaluation.id)
+        if row is None:
+            raise LookupError(f"no existe TensionEvaluation con id={evaluation.id}")
+        apply_tension_evaluation(row, evaluation)
         self._session.flush()

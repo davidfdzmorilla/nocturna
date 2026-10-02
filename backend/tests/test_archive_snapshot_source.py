@@ -4,6 +4,7 @@ from datetime import date
 
 import httpx
 import pytest
+from fakes.archive import InMemoryArchiveRepository
 from helpers.archive import adql_of, make_client, snapshot_handler
 
 from nocturna import cli
@@ -168,11 +169,13 @@ async def test_el_snapshot_admite_respuestas_de_mas_de_20_mb_con_el_tope_real():
     assert "supera el tope" not in str(exc.value)
 
 
-async def test_el_cliente_del_catalogo_de_t74_conserva_su_tope_de_20_mb():
+async def test_el_cliente_de_alias_del_catalogo_conserva_su_tope_de_20_mb():
     config = load_pipeline_config()
     transport = httpx.MockTransport(lambda r: httpx.Response(200, content=_BIG_BODY))
     async with httpx.AsyncClient(transport=transport) as http:
-        _catalog, client = cli.exoplanet_catalog_from_config(http, config)
+        _catalog, client = cli.exoplanet_catalog_from_config(
+            http, config, InMemoryArchiveRepository()
+        )
         with pytest.raises(ExoplanetArchiveUnavailable, match=str(20 * 1024 * 1024)):
             await client.query_csv("select pl_name from pscomppars")
 

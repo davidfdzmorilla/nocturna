@@ -1,11 +1,20 @@
-"""`ExoplanetArchiveCatalog` (T74) con MockTransport y fixtures reales."""
+"""`ExoplanetArchiveCatalog` (T74, T88): soluciones y nombres desde un
+`ArchiveRepository` en memoria sembrado con filas reales; MockTransport solo
+para el servicio de alias."""
 
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
-from helpers.archive import ALIAS_URL, adql_of, archive_handler, make_catalog
-from helpers.exoplanet import make_item, make_measurement, make_reading
+from fakes.clock import FakeClock
+from helpers.archive import ALIAS_URL, alias_handler, make_archive, make_catalog
+from helpers.exoplanet import (
+    make_item,
+    make_measurement,
+    make_period_rule,
+    make_reading,
+)
 
 from nocturna.application.use_cases.compute_tensions import ComputeTensions, SkipReason
 from nocturna.domain.entities import (
@@ -22,12 +31,17 @@ RADIUS = MeasuredParameter.RADIUS
 PERIOD = MeasuredParameter.PERIOD
 
 
+def _compute(catalog) -> ComputeTensions:
+    return ComputeTensions(
+        catalog,
+        threshold_sigma=3.0,
+        period_rule=make_period_rule(),
+        clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
+    )
+
+
 def _alias_requests(seen: list[httpx.Request]) -> list[httpx.Request]:
     return [r for r in seen if str(r.url).startswith(ALIAS_URL)]
-
-
-def _tap_queries(seen: list[httpx.Request]) -> list[str]:
-    return [adql_of(r) for r in seen if not str(r.url).startswith(ALIAS_URL)]
 
 
 async def test_coincidencia_exacta_no_consulta_alias():
@@ -92,7 +106,7 @@ def _synthetic_alias_body(default_name: str, aliases: list[str]) -> str:
 
 async def test_nombre_sin_digitos_fuera_del_indice_consulta_alias_y_resuelve():
     body = _synthetic_alias_body("WASP-12 b", ["WASP-12 b", "Beta Pictoris b"])
-    catalog, _, seen = make_catalog(archive_handler(alias_body=body))
+    catalog, _, seen = make_catalog(alias_handler(alias_body=body))
 
     assert await catalog.resolve_planet("Beta Pictoris b") == "WASP-12 b"
 
@@ -101,7 +115,7 @@ async def test_nombre_sin_digitos_fuera_del_indice_consulta_alias_y_resuelve():
 
 async def test_nombre_sin_digitos_sin_alias_devuelve_none_con_una_sola_peticion():
     body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
-    catalog, _, seen = make_catalog(archive_handler(alias_body=body))
+    catalog, _, seen = make_catalog(alias_handler(alias_body=body))
 
     assert await catalog.resolve_planet("Proxima Centauri b") is None
     assert await catalog.resolve_planet("proxima centauri b") is None
@@ -118,18 +132,13 @@ async def test_el_alias_recibe_el_nombre_limpio_sin_restos_de_latex():
     assert request.url.params["objname"] == "TOI-1725 b x"
 
 
-@pytest.mark.parametrize(
-    "handler",
-    [
-        lambda r: httpx.Response(200, text=""),
-        lambda r: httpx.Response(200, text="pl_name\n"),
-    ],
-)
-async def test_indice_vacio_lanza_unavailable(handler):
-    catalog, _, _ = make_catalog(handler)
+async def test_indice_local_vacio_lanza_unavailable():
+    catalog, _, seen = make_catalog(archive=make_archive([]))
 
     with pytest.raises(ExoplanetArchiveUnavailable, match="vacío"):
         await catalog.resolve_planet("V1298 Tau b")
+
+    assert seen == []
 
 
 async def test_nombre_que_solo_es_de_la_estrella_devuelve_none():
@@ -141,18 +150,30 @@ async def test_nombre_que_solo_es_de_la_estrella_devuelve_none():
 
 async def test_alias_sin_resolver_devuelve_none():
     body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
-    catalog, _, _ = make_catalog(archive_handler(alias_body=body))
+    catalog, _, _ = make_catalog(alias_handler(alias_body=body))
 
     assert await catalog.resolve_planet("XYZ-999 b") is None
 
 
-async def test_el_indice_se_pide_una_sola_vez():
-    catalog, _, seen = make_catalog()
+async def test_el_indice_local_se_lee_una_sola_vez():
+    archive = make_archive()
+    calls = []
+    real = archive.planet_names
+    archive.planet_names = lambda: calls.append(1) or real()
+    catalog, _, _ = make_catalog(archive=archive)
 
     for name in ("V1298 Tau b", "V1298 Tau e", "WASP-12b", "Foo Bar b"):
         await catalog.resolve_planet(name)
 
-    assert _tap_queries(seen) == ["select pl_name from pscomppars"]
+    assert calls == [1]
+
+
+async def test_el_alias_se_traduce_con_el_indice_local():
+    """El `default_name` del alias solo vale si está en el índice local."""
+    body = _synthetic_alias_body("Planeta Fuera Del Indice b", ["Alias raro b"])
+    catalog, _, _ = make_catalog(alias_handler(alias_body=body))
+
+    assert await catalog.resolve_planet("Alias raro b") is None
 
 
 async def test_el_alias_se_pide_una_vez_por_nombre_normalizado():
@@ -165,7 +186,7 @@ async def test_el_alias_se_pide_una_vez_por_nombre_normalizado():
 
 
 async def test_alias_negativo_tambien_se_cachea():
-    catalog, _, seen = make_catalog(archive_handler(alias_body='{"manifest": {}}'))
+    catalog, _, seen = make_catalog(alias_handler(alias_body='{"manifest": {}}'))
 
     await catalog.resolve_planet("XYZ-999 b")
     await catalog.resolve_planet("xyz-999 b")
@@ -173,7 +194,7 @@ async def test_alias_negativo_tambien_se_cachea():
     assert len(_alias_requests(seen)) == 1
 
 
-async def test_una_peticion_ps_por_planeta_para_los_tres_parametros():
+async def test_las_soluciones_salen_de_la_base_sin_peticiones():
     catalog, client, seen = make_catalog()
 
     mass = await catalog.solutions("V1298 Tau b", MASS)
@@ -181,27 +202,34 @@ async def test_una_peticion_ps_por_planeta_para_los_tres_parametros():
     period = await catalog.solutions("V1298 Tau b", PERIOD)
 
     assert (len(mass), len(radius), len(period)) == (2, 5, 6)
-    ps_queries = [q for q in _tap_queries(seen) if "from ps where" in q]
-    assert len(ps_queries) == 1
-    assert "pl_name='V1298 Tau b'" in ps_queries[0]
-    assert client.requests_made == 1
+    assert seen == []
+    assert client.requests_made == 0
 
 
-async def test_dos_planetas_son_dos_peticiones_ps():
-    catalog, client, _ = make_catalog()
+async def test_las_soluciones_llevan_los_metadatos_del_archivo():
+    catalog, _, _ = make_catalog()
 
-    await catalog.solutions("V1298 Tau b", MASS)
-    await catalog.solutions("V1298 Tau e", MASS)
+    solutions = await catalog.solutions("V1298 Tau b", MASS)
 
-    assert client.requests_made == 2
+    assert all(s.soltype == "Published Confirmed" and s.solution_key for s in solutions)
+    assert all(s.releasedate is not None for s in solutions)
 
 
-async def test_la_comilla_simple_se_escapa_en_el_adql():
-    catalog, _, seen = make_catalog(lambda r: httpx.Response(200, text="pl_name\n"))
+async def test_is_default_sale_de_is_default_current_no_de_la_fila():
+    archive = make_archive()
+    for stored in archive.stored.values():
+        stored.is_default_current = False
+    catalog, _, _ = make_catalog(archive=archive)
 
-    await catalog.solutions("Foo's b", MASS)
+    solutions = await catalog.solutions("V1298 Tau e", MASS)
 
-    assert "pl_name='Foo''s b'" in adql_of(seen[0])
+    assert not any(s.is_default for s in solutions)
+
+
+async def test_planeta_inexistente_no_tiene_soluciones():
+    catalog, _, _ = make_catalog()
+
+    assert await catalog.solutions("Foo b", MASS) == []
 
 
 async def test_solo_masa_verdadera_llega_como_solucion_de_masa():
@@ -226,9 +254,9 @@ async def test_sin_medidas_utilizables_no_sale_ninguna_peticion():
     )
     item = make_item()
 
-    report = await ComputeTensions(catalog)([(item, make_reading(item.id, measurements))])
+    report = await _compute(catalog)([(item, make_reading(item.id, measurements))])
 
-    assert report.results == ()
+    assert report.evaluations == ()
     assert {s.reason for s in report.skipped} == {SkipReason.NOT_USABLE}
     assert seen == []
     assert client.requests_made == 0
@@ -238,7 +266,7 @@ async def test_lecturas_sin_medidas_o_con_lista_vacia_no_sacan_peticiones():
     catalog, _, seen = make_catalog()
     first, second = make_item(), make_item("2601.00002")
 
-    await ComputeTensions(catalog)(
+    await _compute(catalog)(
         [(first, make_reading(first.id, None)), (second, make_reading(second.id, ()))]
     )
 

@@ -1,57 +1,52 @@
-"""`ExoplanetCatalog` sobre el NASA Exoplanet Archive (T74, ADR 0012).
+"""`ExoplanetCatalog` sobre el snapshot local del NASA Exoplanet Archive (T88, ADR 0012).
 
 Cumple el `Protocol` de `domain/catalog.py` por estructura, sin heredar.
-Todo es perezoso y cacheado por instancia: sin medidas utilizables no se
-llama nunca a `resolve_planet` y, por tanto, no sale ninguna petición.
+Las soluciones y los nombres de planeta salen de la base (`ArchiveRepository`,
+tablas del snapshot de T81); la red solo se usa para el servicio de alias,
+cuando un nombre no está en el índice local. Todo es perezoso y cacheado por
+instancia: sin medidas utilizables no se llama nunca a `resolve_planet` y, por
+tanto, no sale ninguna petición ni se lee el índice.
 """
 
 from collections.abc import Mapping, Sequence
 
+from nocturna.domain.archive import catalog_solution_from_archive
 from nocturna.domain.catalog import CatalogSolution
 from nocturna.domain.entities import MeasuredParameter
+from nocturna.domain.repositories import ArchiveRepository
 from nocturna.infrastructure.exoplanet_archive.client import (
     ArchiveHttpClient,
     ExoplanetArchiveUnavailable,
-    adql_string,
 )
-from nocturna.infrastructure.exoplanet_archive.mappers import solutions_from_ps_rows
 from nocturna.infrastructure.exoplanet_archive.names import clean_name, normalize_name
-
-_INDEX_ADQL = "select pl_name from pscomppars"
-_PS_COLUMNS = (
-    "pl_name,default_flag,pl_refname,pl_bmassprov,"
-    "pl_bmasse,pl_bmasseerr1,pl_bmasseerr2,pl_bmasselim,"
-    "pl_rade,pl_radeerr1,pl_radeerr2,pl_radelim,"
-    "pl_orbper,pl_orbpererr1,pl_orbpererr2,pl_orbperlim"
-)
 
 
 class ExoplanetArchiveCatalog:
-    def __init__(self, client: ArchiveHttpClient) -> None:
-        self._client = client
+    def __init__(self, archive: ArchiveRepository, alias_client: ArchiveHttpClient) -> None:
+        self._archive = archive
+        self._alias_client = alias_client
         self._index: dict[str, str] | None = None
         self._alias_cache: dict[str, str | None] = {}
-        self._ps_rows: dict[str, list[dict[str, str | None]]] = {}
 
-    async def _planet_index(self) -> dict[str, str]:
+    def _planet_index(self) -> dict[str, str]:
         if self._index is None:
-            rows = await self._client.query_csv(_INDEX_ADQL)
-            index = {normalize_name(name): name for row in rows if (name := row.get("pl_name"))}
+            index = {normalize_name(name): name for name in self._archive.planet_names()}
             if not index:
                 raise ExoplanetArchiveUnavailable(
-                    "el índice de planetas del Exoplanet Archive llegó vacío"
+                    "el índice local de planetas del Exoplanet Archive está vacío "
+                    "(¿falta ejecutar archive-snapshot?)"
                 )
             self._index = index
         return self._index
 
     async def resolve_planet(self, name: str) -> str | None:
         norm = normalize_name(name)
-        index = await self._planet_index()
+        index = self._planet_index()
         exact = index.get(norm)
         if exact is not None:
             return exact
         if norm not in self._alias_cache:
-            payload = await self._client.lookup_alias(clean_name(name))
+            payload = await self._alias_client.lookup_alias(clean_name(name))
             self._alias_cache[norm] = _default_name_from_alias(payload, norm)
         default_name = self._alias_cache[norm]
         if default_name is None:
@@ -61,13 +56,12 @@ class ExoplanetArchiveCatalog:
     async def solutions(
         self, planet_name: str, parameter: MeasuredParameter
     ) -> Sequence[CatalogSolution]:
-        rows = self._ps_rows.get(planet_name)
-        if rows is None:
-            rows = await self._client.query_csv(
-                f"select {_PS_COLUMNS} from ps where pl_name={adql_string(planet_name)}"
-            )
-            self._ps_rows[planet_name] = rows
-        return solutions_from_ps_rows(rows, parameter)
+        out: list[CatalogSolution] = []
+        for sol, is_default_current in self._archive.active_solutions(planet_name):
+            converted = catalog_solution_from_archive(sol, parameter, is_default=is_default_current)
+            if converted is not None:
+                out.append(converted)
+        return out
 
 
 def _default_name_from_alias(payload: Mapping[str, object], norm_name: str) -> str | None:

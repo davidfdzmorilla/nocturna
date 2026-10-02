@@ -324,6 +324,12 @@ def test_catalog_tension_json_congela_claves_version_y_enums_por_valor():
             "reference",
             "is_default",
             "arxiv_id",
+            # T88: claves aditivas y opcionales, schema_version sigue en 1.
+            "solution_key",
+            "soltype",
+            "pl_pubdate",
+            "releasedate",
+            "ttv_flag",
         }
         for enum_field in ("parameter", "unit", "limit", "origin"):
             assert type(entry["paper"][enum_field]) is str

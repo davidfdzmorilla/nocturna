@@ -15,6 +15,7 @@ from uuid import UUID
 from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
 from nocturna.domain.entities import AgentCall, Finding, Item, Reading, Run
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.tension import TensionEvaluation
 
 
 class ItemRepository(Protocol):
@@ -156,4 +157,28 @@ class ArchiveRepository(Protocol):
         diff: SnapshotDiff,
     ) -> None:
         """Persiste snapshot, soluciones y diff en una sola transacción."""
+        ...
+
+    def planet_names(self) -> frozenset[str]:
+        """`pl_name` de los planetas con alguna solución activa."""
+        ...
+
+    def active_solutions(self, pl_name: str) -> list[tuple[ArchiveSolution, bool]]:
+        """Soluciones activas del planeta, cada una con `is_default_current`."""
+        ...
+
+
+class TensionEvaluationRepository(Protocol):
+    """Persistencia de `TensionEvaluation` (T88)."""
+
+    def all(self) -> list[TensionEvaluation]:
+        """Todas las evaluaciones."""
+        ...
+
+    def add(self, evaluation: TensionEvaluation) -> None:
+        """Inserta una evaluación nueva."""
+        ...
+
+    def update(self, evaluation: TensionEvaluation) -> None:
+        """Sustituye la evaluación con el mismo `id`."""
         ...

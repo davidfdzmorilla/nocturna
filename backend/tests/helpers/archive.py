@@ -9,12 +9,14 @@ reales. Los fixtures son respuestas reales grabadas
 import csv
 import io
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from urllib.parse import parse_qs
 
 import httpx
+from fakes.archive import InMemoryArchiveRepository
 
+from nocturna.domain.archive import ArchiveSolution
 from nocturna.domain.entities import (
     MeasuredParameter,
     Measurement,
@@ -25,6 +27,7 @@ from nocturna.domain.entities import (
 from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
 from nocturna.infrastructure.exoplanet_archive.catalog import ExoplanetArchiveCatalog
 from nocturna.infrastructure.exoplanet_archive.client import ArchiveHttpClient
+from nocturna.infrastructure.exoplanet_archive.mappers import archive_solution_from_ps_row
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "exoplanet_archive"
 T71C_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "t71c"
@@ -98,42 +101,67 @@ def adql_of(request: httpx.Request) -> str:
     return parse_qs(request.url.query.decode())["query"][0]
 
 
-def archive_handler(*, alias_body: str | None = None) -> Callable[[httpx.Request], httpx.Response]:
-    """Servidor falso con los fixtures reales.
+def alias_handler(*, alias_body: str | None = None) -> Callable[[httpx.Request], httpx.Response]:
+    """Servidor falso del servicio de alias (T88: el TAP ya no se consulta en vivo).
 
-    - índice (`select pl_name from pscomppars`): `pscomppars_names_full.csv`
-    - `... from ps where pl_name='X'`: filas de `ps_v1298tau.csv` de ese planeta
-    - alias: `alias_body` (por defecto `aliaslookup_wasp12.json`)
+    Cualquier petición al TAP hace fallar el test: las soluciones salen de la
+    base (`ArchiveRepository`). `alias_body` por defecto: `aliaslookup_wasp12.json`.
     """
-    ps_rows = fixture_rows("ps_v1298tau.csv")
-    header = fixture_text("ps_v1298tau.csv").splitlines()[0].split(",")
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "aliaslookup" in request.url.path:
-            return httpx.Response(200, text=alias_body or fixture_text("aliaslookup_wasp12.json"))
-        adql = adql_of(request)
-        if adql == "select pl_name from pscomppars":
-            return httpx.Response(200, text=fixture_text("pscomppars_names_full.csv"))
-        marker = "where pl_name='"
-        assert marker in adql, adql
-        name = adql.split(marker, 1)[1].rstrip("'").replace("''", "'")
-        out = io.StringIO()
-        writer = csv.DictWriter(out, fieldnames=header, lineterminator="\n")
-        writer.writeheader()
-        for row in ps_rows:
-            if row["pl_name"] == name:
-                writer.writerow({k: (v or "") for k, v in row.items()})
-        return httpx.Response(200, text=out.getvalue())
+        assert "aliaslookup" in request.url.path, f"petición inesperada al TAP: {request.url}"
+        return httpx.Response(200, text=alias_body or fixture_text("aliaslookup_wasp12.json"))
 
     return handler
 
 
+def archive_solutions_from_fixture(
+    name: str, *, soltype: str = "Published Confirmed", releasedate: str = "2026-09-28"
+) -> list[ArchiveSolution]:
+    """`ArchiveSolution` desde filas REALES de un CSV de `ps` grabado antes de T81.
+
+    Origen: `ps_v1298tau.csv` y `ps_wasp12_masses_radii_period.csv` (capturas de
+    T71/T74, 2026-09-28/30) traen las 16 columnas de T74 y NO `soltype` ni
+    `releasedate`; se añaden `soltype="Published Confirmed"` (en
+    `ps_t81_planets.csv`, captura posterior con 29 columnas, todas las filas lo
+    son) y la fecha de captura como `releasedate`. Los valores, errores,
+    referencias y `default_flag` son los reales. Las columnas ausentes
+    (`pl_pubdate`, `ttv_flag`...) quedan `None`.
+    """
+    rows = [{**row, "soltype": soltype, "releasedate": releasedate} for row in fixture_rows(name)]
+    return [archive_solution_from_ps_row(row) for row in rows]
+
+
+def v1298_archive_solutions() -> list[ArchiveSolution]:
+    return archive_solutions_from_fixture("ps_v1298tau.csv")
+
+
+def wasp12_archive_solutions() -> list[ArchiveSolution]:
+    return archive_solutions_from_fixture("ps_wasp12_masses_radii_period.csv")
+
+
+def make_archive(
+    solutions: Sequence[ArchiveSolution] | None = None,
+) -> InMemoryArchiveRepository:
+    """Archivo en memoria con las soluciones dadas (por defecto, V1298 Tau y WASP-12)."""
+    archive = InMemoryArchiveRepository()
+    archive.seed(
+        solutions
+        if solutions is not None
+        else v1298_archive_solutions() + wasp12_archive_solutions()
+    )
+    return archive
+
+
 def make_catalog(
     handler: Callable[[httpx.Request], httpx.Response] | None = None,
+    *,
+    archive: InMemoryArchiveRepository | None = None,
     **kwargs: object,
 ) -> tuple[ExoplanetArchiveCatalog, ArchiveHttpClient, list[httpx.Request]]:
-    client, seen = make_client(handler or archive_handler(), **kwargs)  # type: ignore[arg-type]
-    return ExoplanetArchiveCatalog(client), client, seen
+    """Catálogo sobre un `ArchiveRepository` en memoria; MockTransport solo para el alias."""
+    client, seen = make_client(handler or alias_handler(), **kwargs)  # type: ignore[arg-type]
+    return ExoplanetArchiveCatalog(archive or make_archive(), client), client, seen
 
 
 def load_t71c_measurements(filename: str) -> tuple[Measurement, ...]:

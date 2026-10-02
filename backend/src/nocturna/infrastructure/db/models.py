@@ -54,9 +54,11 @@ from nocturna.domain.entities import (
     AgentCallStatus,
     FindingType,
     ItemStatus,
+    MeasuredParameter,
     RunStatus,
 )
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.tension import EvaluationStatus
 
 # Convención de nombres completa. Sin ella, los CHECK de los enums (y el
 # resto de constraints) salen con nombres autogenerados por PostgreSQL
@@ -75,7 +77,7 @@ class Base(DeclarativeBase):
     metadata = sa.MetaData(naming_convention=NAMING_CONVENTION)
 
 
-def _str_enum(enum_cls: type, name: str) -> sa.Enum:
+def _str_enum(enum_cls: type, name: str, length: int = 20) -> sa.Enum:
     """`sa.Enum` que persiste el *valor* del `StrEnum`, no el nombre del miembro.
 
     `values_callable` es obligatorio: sin él, SQLAlchemy usa por defecto
@@ -94,7 +96,7 @@ def _str_enum(enum_cls: type, name: str) -> sa.Enum:
     return sa.Enum(
         enum_cls,
         native_enum=False,
-        length=20,
+        length=length,
         values_callable=lambda e: [member.value for member in e],
         name=name,
         create_constraint=True,
@@ -382,3 +384,53 @@ class ArchiveDefaultChangeRow(Base):
     detected_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
     __table_args__ = (sa.Index("ix_archive_default_change_snapshot_id", "snapshot_id"),)
+
+
+class TensionEvaluationRow(Base):
+    """Evaluación de tensión de (reading, planeta, parámetro) (T88).
+
+    `detail` (JSONB, `schema_version` 1) guarda medidas, comparaciones con su
+    previa y sigma, cota con márgenes y `outcome`, y `period_check`. La
+    referencia no se guarda en el JSON: se re-deriva de las comparaciones;
+    `reference_solution_key` y `reference_sigma` son su proyección consultable.
+    `first_evaluated_at` no cambia en `update`; `evaluated_at` sí.
+    """
+
+    __tablename__ = "tension_evaluation"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    reading_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("readings.id"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("items.id"), nullable=False
+    )
+    planet_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    parameter: Mapped[MeasuredParameter] = mapped_column(
+        _str_enum(MeasuredParameter, "tension_evaluation_parameter"), nullable=False
+    )
+    status: Mapped[EvaluationStatus] = mapped_column(
+        _str_enum(EvaluationStatus, "tension_evaluation_status", length=30), nullable=False
+    )
+    archive_planet_name: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    reference_solution_key: Mapped[str | None] = mapped_column(
+        sa.CHAR(64), sa.ForeignKey("archive_solution.solution_key"), nullable=True
+    )
+    reference_sigma: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    own_solution_key: Mapped[str | None] = mapped_column(
+        sa.CHAR(64), sa.ForeignKey("archive_solution.solution_key"), nullable=True
+    )
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    first_evaluated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        sa.Index(
+            "uq_tension_evaluation_reading_id_planet_name_parameter",
+            "reading_id",
+            "planet_name",
+            "parameter",
+            unique=True,
+        ),
+        sa.Index("ix_tension_evaluation_status", "status"),
+    )

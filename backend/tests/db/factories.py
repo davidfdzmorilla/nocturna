@@ -97,3 +97,31 @@ def make_agent_call(run_id: UUID, **overrides: object) -> AgentCall:
     }
     defaults.update(overrides)
     return AgentCall(**defaults)
+
+
+def seed_archive_snapshot(session_factory, solutions) -> None:
+    """Persiste `solutions` como un snapshot completo (tablas `archive_*`).
+
+    Para los tests que consumen el snapshot local (T88): las `is_default` de las
+    soluciones quedan como `is_default_current`."""
+    from uuid import uuid4
+
+    from nocturna.domain.archive import ArchiveSnapshot, SnapshotDiff, SnapshotKind
+    from nocturna.infrastructure.db.repositories import SqlAlchemyArchiveRepository
+    from nocturna.infrastructure.db.session import unit_of_work
+
+    snapshot = ArchiveSnapshot(
+        id=uuid4(),
+        taken_at=aware(),
+        kind=SnapshotKind.FULL,
+        max_releasedate=max(s.releasedate for s in solutions),
+        rows_total=len(solutions),
+        defaults_total=sum(1 for s in solutions if s.is_default),
+        duplicate_rows=0,
+        payload_sha256="a" * 64,
+        requests=1,
+        duration_ms=1,
+    )
+    diff = SnapshotDiff(added=tuple(s.solution_key for s in solutions))
+    with unit_of_work(session_factory) as session:
+        SqlAlchemyArchiveRepository(session).save_snapshot(snapshot, solutions, diff)

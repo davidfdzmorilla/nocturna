@@ -154,7 +154,7 @@ def test_postgres_no_healthy_sale_75_sin_lanzar_el_comando(tmp_path, status):
     assert not env.uv_log.exists()
 
 
-@pytest.mark.parametrize("code", [0, 1, 2])
+@pytest.mark.parametrize("code", [0, 1, 2, 3])
 def test_propaga_el_codigo_de_archive_snapshot(tmp_path, code):
     env = Env(tmp_path)
 
@@ -163,6 +163,27 @@ def test_propaga_el_codigo_de_archive_snapshot(tmp_path, code):
     assert result.returncode == code
     out_log = next(env.logs.glob("archive-*.out.log"))
     assert out_log.read_text().rstrip().endswith(f"código de salida: {code}")
+
+
+def test_codigo_3_registra_el_aviso_de_evaluacion_fallida_en_el_log(tmp_path):
+    env = Env(tmp_path)
+
+    result = env.run(UV_EXIT_CODE="3")
+
+    assert result.returncode == 3
+    out = next(env.logs.glob("archive-*.out.log")).read_text()
+    assert "snapshot guardado, pero la evaluación de tensiones falló (código 3)" in out
+    assert out.rstrip().endswith("código de salida: 3")
+
+
+@pytest.mark.parametrize("code", [0, 1, 2])
+def test_otros_codigos_no_registran_el_aviso_de_evaluacion(tmp_path, code):
+    env = Env(tmp_path)
+
+    env.run(UV_EXIT_CODE=str(code))
+
+    out = next(env.logs.glob("archive-*.out.log")).read_text()
+    assert "evaluación de tensiones" not in out
 
 
 def test_lanza_uv_con_frozen_y_el_subcomando_y_reenvia_los_argumentos(tmp_path):

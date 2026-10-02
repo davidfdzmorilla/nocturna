@@ -357,9 +357,10 @@ def test_is_candidate_v1298_e_falso_a_3_sigma_y_verdadero_a_2_5_sigma():
 
 
 def test_is_candidate_sin_previa_default_es_falso():
+    # Sin soltype "Published Confirmed" ninguna previa puede ser referencia.
     priors = [
-        make_solution(0.041, 0.017, 0.017),
-        make_solution(0.64, 0.19, 0.19),
+        make_solution(0.041, 0.017, 0.017, soltype=None),
+        make_solution(0.64, 0.19, 0.19, soltype=None),
     ]
     result = _result([make_measurement(0.52, 0.12, 0.14)], priors)
 
@@ -393,7 +394,10 @@ def test_reference_sigma_con_una_medida_es_su_sigma_frente_a_la_default():
 
 
 def test_reference_sigma_sin_ninguna_default_es_none():
-    priors = [make_solution(0.64, 0.19, 0.19), make_solution(0.30, 0.10, 0.10)]
+    priors = [
+        make_solution(0.64, 0.19, 0.19, soltype=None),
+        make_solution(0.30, 0.10, 0.10, soltype=None),
+    ]
     result = _result([make_measurement(0.52, 0.12, 0.14)], priors)
 
     assert result.reference_sigma() is None
