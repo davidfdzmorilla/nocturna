@@ -13,12 +13,13 @@ Se dividen en dos ficheros:
   de `--since`/`--categories`, errores de arXiv y la comprobación de que
   `claude_agent_sdk` no se importa durante `--dry-run`. `cli.py` no ofrece
   ningún parámetro para sustituir `ArxivClient` o la sesión de base de datos
-  por un doble (`_run_ingest` construye su propio `httpx.AsyncClient` y su
-  propia `unit_of_work` internamente, ver docstring de ese módulo), así que
+  por un doble (`_run_night_dry_run` construye su propio `httpx.AsyncClient` y su
+  propia `unit_of_work(commit=False)` internamente, ver docstring de ese módulo), así que
   la única costura disponible sin tocarlo es sustituir `httpx.AsyncClient`
   por uno que sirva `httpx.MockTransport` -- y eso obliga a esos tests a
-  correr contra la base de datos real de test, porque `_run_ingest` persiste
-  de verdad. De ahí la separación.
+  correr contra la base de datos real de test, porque el dry-run lee de ella
+  para el plan (desde T87 no persiste nada: su transacción se deshace). De
+  ahí la separación.
 """
 
 from __future__ import annotations

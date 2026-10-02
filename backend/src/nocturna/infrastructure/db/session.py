@@ -16,7 +16,7 @@ lee configuración global por su cuenta.
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.infrastructure.config import Settings
@@ -51,21 +51,38 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 
 
 @contextmanager
-def unit_of_work(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
+def unit_of_work(
+    session_factory: sessionmaker[Session], *, commit: bool = True
+) -> Generator[Session, None, None]:
     """Unidad de trabajo: una sesión, `commit()` si todo va bien, `rollback()` si no.
 
     Abre la sesión, la cede a quien la use (típicamente para construir los
     repositorios de esta transacción), confirma al salir sin excepción,
     deshace ante cualquier excepción, y cierra siempre. Es el único lugar
     del proyecto que decide el límite de una transacción.
+
+    Con `commit=False` (T87, `run-night --dry-run`) la transacción **siempre
+    se deshace** al salir, con o sin excepción, y la sesión lleva un listener
+    `before_commit` que lanza `RuntimeError` si alguien llama a `commit()`:
+    un commit accidental dentro de un dry-run persistiría datos, así que se
+    prefiere un fallo ruidoso. La excepción del llamador se propaga intacta.
     """
     session = session_factory()
+    if not commit:
+
+        def _forbid_commit(_session: Session) -> None:
+            raise RuntimeError("commit() no permitido en una unidad de trabajo con commit=False")
+
+        event.listen(session, "before_commit", _forbid_commit)
     try:
         yield session
     except Exception:
         session.rollback()
         raise
     else:
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.rollback()
     finally:
         session.close()

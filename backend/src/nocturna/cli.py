@@ -491,18 +491,19 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Ejecuta la noche de análisis: ingesta de arXiv, Reader, Popularizer y Editor, "
             "en ese orden y dentro del presupuesto de la noche (--dry-run se queda solo en "
-            "la ingesta y el plan de gasto, sin llamar a ningún agente; además calcula las "
-            "tensiones de las lecturas con medidas consultando el NASA Exoplanet Archive, "
-            "con cero tokens, y sale con código 1 si el archivo no está disponible)."
+            "la ingesta real de arXiv sin persistir (transacción que se deshace), el plan de "
+            "gasto, el reparto v3/v2 y el cruce de tensiones con el NASA Exoplanet Archive; "
+            "no escribe nada en la base ni llama a ningún agente, y sale con código 1 si "
+            "arXiv o el archivo no están disponibles)."
         ),
     )
     run_night.add_argument(
         "--dry-run",
         action="store_true",
         help=(
-            "Ingesta real de arXiv y persistencia en base de datos, sin llamar a ningún "
-            "agente LLM. Lo 'dry' es la ausencia de LLM, no la ausencia de escritura: "
-            "los ítems nuevos se guardan igual que en una ejecución completa."
+            "Ingesta real de arXiv sin persistir (transacción que se deshace), plan de "
+            "gasto, reparto v3/v2 y cruce de tensiones; no escribe nada en la base ni "
+            "llama a ningún agente."
         ),
     )
     run_night.add_argument(
@@ -613,14 +614,20 @@ def exoplanet_filter_from_config(config: PipelineConfig) -> ExoplanetFilter:
     )
 
 
-async def _run_ingest(
+async def _ingest_into(
+    session: Session,
     *,
     since: datetime,
     categories: Sequence[str],
     config: PipelineConfig,
-    settings: Settings,
 ) -> IngestResult:
-    """Compone y ejecuta la ingesta de arXiv dentro de una única unidad de trabajo."""
+    """Compone y ejecuta la ingesta de arXiv sobre la sesión recibida.
+
+    No decide la frontera transaccional: quien llama abre `unit_of_work`
+    (con commit en la noche real, sin commit en `--dry-run`). `IngestArxiv`
+    hace la petición a arXiv antes de cualquier SQL, así que la sesión no
+    abre transacción durante la descarga.
+    """
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as http:
         limiter = RateLimiter(MIN_REQUEST_INTERVAL_S)
         retry_policy = arxiv_retry_policy_from_config(config)
@@ -631,20 +638,30 @@ async def _run_ingest(
             retry_policy=retry_policy,
             now=lambda: datetime.now(UTC),
         )
-        engine = create_db_engine(settings)
-        factory = create_session_factory(engine)
-        with unit_of_work(factory) as session:
-            repo = SqlAlchemyItemRepository(session)
-            ingest = IngestArxiv(
-                source=client,
-                items=repo,
-                exoplanet_filter=exoplanet_filter_from_config(config),
-            )
-            return await ingest(
-                since=since,
-                categories=categories,
-                max_results=config.sources.arxiv.max_results_per_fetch,
-            )
+        ingest = IngestArxiv(
+            source=client,
+            items=SqlAlchemyItemRepository(session),
+            exoplanet_filter=exoplanet_filter_from_config(config),
+        )
+        return await ingest(
+            since=since,
+            categories=categories,
+            max_results=config.sources.arxiv.max_results_per_fetch,
+        )
+
+
+async def _run_ingest(
+    *,
+    since: datetime,
+    categories: Sequence[str],
+    config: PipelineConfig,
+    settings: Settings,
+) -> IngestResult:
+    """Compone y ejecuta la ingesta de arXiv dentro de una única unidad de trabajo."""
+    engine = create_db_engine(settings)
+    factory = create_session_factory(engine)
+    with unit_of_work(factory) as session:
+        return await _ingest_into(session, since=since, categories=categories, config=config)
 
 
 def _abstract_preview(text: str) -> str:
@@ -689,21 +706,18 @@ def _print_dry_run_report(result: IngestResult) -> None:
         )
 
 
-def _would_read_items(config: PipelineConfig, settings: Settings) -> list[Item]:
+def _would_read_items(session: Session, config: PipelineConfig) -> list[Item]:
     """Qué ítems leería el Reader esta noche
     (`ItemRepository.next_unread(limits.max_items_per_night)`), lectura pura
     y sin ningún agente: parte del plan de gasto de `--dry-run` (T44, paso
     8). Distinto de `IngestResult.new` -- que solo cuenta lo ingerido *esta*
     noche --: incluye también la cola acumulada de noches anteriores
     (`docs/OPEN_DECISIONS.md`, T20/T44, "los ítems new que nunca se leen se
-    acumulan"). Abre su propio motor/sesión, igual que `_run_ingest`: no hay
-    ningún motor compartido entre las piezas de `--dry-run`.
+    acumulan"). Recibe la sesión del llamador (T87): en `--dry-run` es la
+    misma transacción que se deshace, así que ve los ítems recién "ingeridos"
+    sin que hayan llegado a persistirse; no abre motor propio.
     """
-    engine = create_db_engine(settings)
-    session_factory = create_session_factory(engine)
-    with unit_of_work(session_factory) as session:
-        items = SqlAlchemyItemRepository(session)
-        return items.next_unread(config.limits.max_items_per_night)
+    return SqlAlchemyItemRepository(session).next_unread(config.limits.max_items_per_night)
 
 
 def _print_budget_plan(
@@ -714,8 +728,8 @@ def _print_budget_plan(
     would_read: int,
     would_read_v3: int | None = None,
 ) -> None:
-    """Plan de gasto de la noche: lo que `CLAUDE.md` pide de `--dry-run`
-    ("ingesta + plan de gasto, sin llamar a agentes"), sin instanciar el
+    """Plan de gasto de la noche, que imprime `--dry-run` ("ingesta + plan de
+    gasto, sin llamar a agentes"; no escribe nada en la base), sin instanciar el
     guarda de gasto de `application/` (necesita un `Run` que en `--dry-run`
     no existe) ni tocar la base de datos por su cuenta. Solo usa las
     funciones puras de `application/budget.py` (incluida
@@ -942,23 +956,28 @@ async def _compute_tensions(
         return report, client.requests_made
 
 
-def _print_tension_section(config: PipelineConfig, settings: Settings) -> None:
-    """Calcula e imprime las tensiones de las lecturas con medidas. Lanza
-    `ExoplanetArchiveUnavailable` si el archivo falla."""
-    engine = create_db_engine(settings)
-    session_factory = create_session_factory(engine)
-    with unit_of_work(session_factory) as session:
-        readings = SqlAlchemyReadingRepository(session).with_measurements()
-        items = SqlAlchemyItemRepository(session)
-        pairs: list[tuple[Item, Reading]] = []
-        for reading in readings:
-            item = items.get(reading.item_id)
-            if item is not None:
-                pairs.append((item, reading))
-        runs_with_reader_v3 = SqlAlchemyAgentCallRepository(session).count_runs_with_prompt_version(
-            READER_V3_PROMPT_VERSION
-        )
+def _load_tension_inputs(session: Session) -> tuple[list[tuple[Item, Reading]], int]:
+    """Pares (ítem, lectura) de las lecturas con medidas y nº de Runs con
+    `reader-v3`: lo que necesita la sección de tensiones. Solo lee."""
+    readings = SqlAlchemyReadingRepository(session).with_measurements()
+    items = SqlAlchemyItemRepository(session)
+    pairs: list[tuple[Item, Reading]] = []
+    for reading in readings:
+        item = items.get(reading.item_id)
+        if item is not None:
+            pairs.append((item, reading))
+    runs_with_reader_v3 = SqlAlchemyAgentCallRepository(session).count_runs_with_prompt_version(
+        READER_V3_PROMPT_VERSION
+    )
+    return pairs, runs_with_reader_v3
 
+
+def _print_tension_section(
+    config: PipelineConfig, pairs: Sequence[tuple[Item, Reading]], runs_with_reader_v3: int
+) -> None:
+    """Calcula e imprime las tensiones de las lecturas con medidas. No abre
+    sesión de base de datos. Lanza `ExoplanetArchiveUnavailable` si el
+    archivo falla."""
     report, requests_made = asyncio.run(_compute_tensions(pairs, config))
     print(
         _format_tension_section(
@@ -1146,50 +1165,62 @@ def _run_night(args: argparse.Namespace) -> int:
 
 
 def _run_night_dry_run(args: argparse.Namespace) -> int:
-    """Ingesta real de arXiv, persistida, más el plan de gasto -- sin llamar
-    a ningún agente ni instanciar `RunNight`. Comportamiento sin cambios
-    respecto a antes de T44 salvo la línea nueva de `_would_read_items` en
-    el plan de gasto (T44, paso 8). Además (T74) calcula las tensiones de las
-    lecturas con medidas consultando el NASA Exoplanet Archive (cero tokens) y
-    sale con código 1 si el archivo no está disponible."""
+    """Ensayo de la noche que no escribe nada en la base (T87): ingesta real
+    de arXiv, plan de gasto, reparto v3/v2 y cruce de tensiones, sin llamar a
+    ningún agente ni instanciar `RunNight`.
+
+    Todo lo que toca la base ocurre dentro de una única
+    `unit_of_work(commit=False)`, que siempre se deshace (y prohíbe `commit()`):
+    la ingesta se escribe en esa transacción para que `_would_read_items` vea
+    los ítems recién traídos, y al salir desaparece. La consulta al NASA
+    Exoplanet Archive va después, con la sesión ya cerrada. Códigos de salida:
+    0; 1 si falla arXiv o el archivo (en ambos casos sin escribir nada)."""
     settings = Settings()
     config = load_pipeline_config()
     since = args.since if args.since is not None else _default_since(datetime.now(UTC))
     categories = args.categories if args.categories is not None else config.sources.arxiv.categories
 
+    engine = create_db_engine(settings)
+    factory = create_session_factory(engine)
     try:
-        result = asyncio.run(
-            _run_ingest(since=since, categories=categories, config=config, settings=settings)
-        )
-    except (ArxivUnavailable, ArxivFeedError) as exc:
-        print(f"error consultando arXiv: {exc}", file=sys.stderr)
-        return 1
+        with unit_of_work(factory, commit=False) as session:
+            try:
+                result = asyncio.run(
+                    _ingest_into(session, since=since, categories=categories, config=config)
+                )
+            except (ArxivUnavailable, ArxivFeedError) as exc:
+                print(f"error consultando arXiv: {exc}", file=sys.stderr)
+                return 1
 
-    _print_dry_run_report(result)
+            _print_dry_run_report(result)
 
-    policy = budget_policy_from_config(config)
-    clock = system_clock_from_config(config)
-    to_read = _would_read_items(config, settings)
-    measures_categories = frozenset(config.reader.measurement_categories)
-    would_read_v3 = sum(
-        1
-        for item in to_read
-        if item.exoplanet_match and not measures_categories.isdisjoint(item.categories)
-    )
-    _print_budget_plan(
-        policy,
-        config.window.timezone,
-        clock.now(),
-        would_read=len(to_read),
-        would_read_v3=would_read_v3,
-    )
+            policy = budget_policy_from_config(config)
+            clock = system_clock_from_config(config)
+            to_read = _would_read_items(session, config)
+            measures_categories = frozenset(config.reader.measurement_categories)
+            would_read_v3 = sum(
+                1
+                for item in to_read
+                if item.exoplanet_match and not measures_categories.isdisjoint(item.categories)
+            )
+            _print_budget_plan(
+                policy,
+                config.window.timezone,
+                clock.now(),
+                would_read=len(to_read),
+                would_read_v3=would_read_v3,
+            )
+            pairs, runs_with_reader_v3 = _load_tension_inputs(session)
+    finally:
+        engine.dispose()
 
     try:
-        _print_tension_section(config, settings)
+        _print_tension_section(config, pairs, runs_with_reader_v3)
     except ExoplanetArchiveUnavailable as exc:
         print(f"error consultando el NASA Exoplanet Archive: {exc}", file=sys.stderr)
         return 1
 
+    print("[dry-run: no se escribió nada en la base]")
     return 0
 
 

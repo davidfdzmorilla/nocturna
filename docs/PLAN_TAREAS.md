@@ -214,7 +214,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 
 Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md). Objetivo: publicar como `catalog_tension` las tensiones entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia la calcula Python; Claude solo redacta a partir de números ya calculados. Local, sin despliegue.
 
-**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74, T79, T80 y T81 cerradas; siguiente: T87 (prioridad inmediata), después T88, T89, T82–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
+**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74, T79, T80, T81 y T87 cerradas; siguiente: T88, después T89, T82–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. T75 espera además 7 noches con `reader-v3` (cierre de T74). Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
 
 ### T70 · `page` sin tope en `GET /findings`
 - **Estado**: done
@@ -383,13 +383,14 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: ADR 0021 escrito con los datos medidos.
 
 ### T87 · `--dry-run` no escribe en la base
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: —
 - **Prioridad**: inmediata, antes que cualquier otra tarea pendiente (decisión del autor, 2026-10-02).
 - **Toca agentes y gasto**: no.
 - **Origen**: cuarto informe seguido con ingesta persistida por `run-night --dry-run` (66 ítems el 2026-09-30, 39 el 2026-10-01, 26 el 2026-10-02). Deuda registrada en `TECHNICAL_DEBT.md`.
 - **Alcance**: `run-night --dry-run` no escribe nada en la base: ingesta en memoria o en una transacción con rollback; el dry-run sigue mostrando qué habría ingerido, el plan de gasto, el reparto v3/v2 y el cruce de tensiones.
-- **Hecho cuando**: lo fija el plan.
+- **Hecho cuando**: `unit_of_work(commit=False)` con 4 tests (rollback, `commit()` prohibido, excepción propagada, `commit=True` intacto) y 7 tests del CLI contra la base: recuento de todas las tablas del esquema `public` (incluida `alembic_version`) idéntico antes y después, dos dry-run seguidos con el mismo `new=`, ítems nunca guardados que cuentan en el plan con su prioridad, arXiv o archivo caídos sin escrituras, sin conexiones `idle in transaction`, y la ingesta de la noche real que sigue persistiendo.
+- **Cierre (2026-10-02)**: opción (a) del plan: una sola sesión con `unit_of_work(commit=False)` para la ingesta, el plan de gasto y las lecturas de tensiones; el archivo se consulta con la sesión ya cerrada; marcador `[dry-run: no se escribió nada en la base]`. La noche real, `run-item` y `archive-snapshot` no cambian. Mutación comprobada (`commit=False` → `commit=True` pone en rojo 4 de los 7 tests del CLI). Revisión aprobada. Suite: 2080 passed (223 de `-m db`). Sin migración.
 
 ### T88 · Regla de referencia, límites superiores y medidas en espera
 - **Estado**: pending
