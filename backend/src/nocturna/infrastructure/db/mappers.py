@@ -38,6 +38,8 @@ from nocturna.domain.entities import (
     CatalogTension,
     CatalogTensionComparison,
     Finding,
+    FirstMeasurement,
+    IndependentConfirmation,
     Item,
     MeasuredParameter,
     Measurement,
@@ -302,6 +304,15 @@ def finding_to_row(finding: Finding) -> FindingRow:
         confidence=finding.confidence,
         published_at=finding.published_at,
         catalog_tension=_catalog_tension_to_json(finding.catalog_tension),
+        first_measurement=(
+            None if finding.first_measurement is None else finding.first_measurement.to_json()
+        ),
+        independent_confirmation=(
+            None
+            if finding.independent_confirmation is None
+            else finding.independent_confirmation.to_json()
+        ),
+        tension_evaluation_id=finding.tension_evaluation_id,
     )
 
 
@@ -318,6 +329,17 @@ def finding_from_row(row: FindingRow) -> Finding:
         confidence=row.confidence,
         published_at=row.published_at,
         catalog_tension=_catalog_tension_from_json(row.catalog_tension),
+        first_measurement=(
+            None
+            if row.first_measurement is None
+            else FirstMeasurement.from_json(row.first_measurement)
+        ),
+        independent_confirmation=(
+            None
+            if row.independent_confirmation is None
+            else IndependentConfirmation.from_json(row.independent_confirmation)
+        ),
+        tension_evaluation_id=row.tension_evaluation_id,
     )
 
 

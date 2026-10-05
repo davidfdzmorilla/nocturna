@@ -193,7 +193,7 @@ from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -219,10 +219,17 @@ from nocturna.application.budget import (
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
 from nocturna.application.use_cases.compute_tensions import (
     ComputeTensions,
+    ResolutionFailure,
     SkipReason,
     TensionReport,
 )
 from nocturna.application.use_cases.edit_night import EditNight, EditNightResult, EditOutcome
+from nocturna.application.use_cases.generate_measurement_findings import (
+    GenerateMeasurementFindings,
+    MeasurementFindingsReport,
+    MeasurementFindingsWork,
+    MeasurementFindingsWorkFactory,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
 from nocturna.application.use_cases.popularize_reading import (
     PopularizeOutcome,
@@ -941,6 +948,13 @@ def _format_evaluation_report(report: EvaluationRunReport, *, dry_run: bool) -> 
             for reason in SkipReason
         ),
     ]
+    if report.failures:
+        lines.append(
+            f"  FALLOS de resolución del planeta (sin fila, se reintentan): {len(report.failures)}"
+        )
+        lines.extend(
+            f"    {f.planet_name} ({f.parameter.value}): {f.reason}" for f in report.failures
+        )
     return "\n".join(lines)
 
 
@@ -964,7 +978,8 @@ async def _record_tension_evaluations(
 
 def _evaluate_tensions(args: argparse.Namespace) -> int:
     """`evaluate-tensions`: `0` ok; `1` archivo/alias no disponible o violación
-    de invariante (no se persiste nada); `2` argumentos (argparse). Sin LLM: no
+    de invariante (no se persiste nada), o algún planeta sin resolver (D16: el resto
+    sí se guardó); `2` argumentos (argparse). Sin LLM: no
     importa `claude_agent_sdk`."""
     if not args.dry_run:
         configure_json_logging()
@@ -984,7 +999,8 @@ def _evaluate_tensions(args: argparse.Namespace) -> int:
     finally:
         engine.dispose()
     print(_format_evaluation_report(report, dry_run=args.dry_run))
-    return 0
+    # D16: fallos de resolución (sin fila, se reintentan); el resto sí se guardó.
+    return 1 if report.failures else 0
 
 
 #: Código de salida de `archive-snapshot` cuando el snapshot se guardó pero la
@@ -1030,7 +1046,7 @@ def _archive_snapshot(args: argparse.Namespace) -> int:
         )
         return _EXIT_EVALUATION_FAILED
     print(_format_evaluation_report(evaluation, dry_run=False))
-    return 0
+    return _EXIT_EVALUATION_FAILED if evaluation.failures else 0
 
 
 def _evaluation_sigma(evaluation: TensionEvaluation) -> float | None:
@@ -1051,6 +1067,7 @@ def _format_tension_section(
     requests_made: int,
     usable_measurements: int | None = None,
     saved_terminal: int = 0,
+    failures: Sequence[ResolutionFailure] = (),
 ) -> str:
     """Sección de tensiones del `--dry-run`: pura y determinista (mismo
     informe, mismo texto), sin IO ni reloj. `saved_terminal` son las evaluaciones
@@ -1102,6 +1119,11 @@ def _format_tension_section(
         f"por Run con {READER_V3_PROMPT_VERSION}: {rate}",
         f"  peticiones al archivo (alias): {requests_made}",
     ]
+    if failures:
+        lines.append(
+            f"  FALLOS de resolución del planeta (sin evaluación, se reintentan): {len(failures)}"
+        )
+        lines.extend(f"    {f.planet_name} ({f.parameter.value}): {f.reason}" for f in failures)
     for evaluation, sigma in zip(report.evaluations, sigmas, strict=True):
         sigma_text = f"{sigma:.2f}" if sigma is not None else "-"
         candidate_text = "sí" if evaluation.is_candidate(threshold_sigma) else "no"
@@ -1182,8 +1204,97 @@ def _print_tension_section(
             runs_with_reader_v3=runs_with_reader_v3,
             threshold_sigma=config.tension.threshold_sigma,
             requests_made=requests_made,
+            failures=evaluation.failures,
         )
     )
+
+
+def _measurement_findings_work_factory(
+    session_factory: sessionmaker[Session],
+) -> MeasurementFindingsWorkFactory:
+    """Unidad de trabajo del generador de findings de medidas contra SQLAlchemy.
+    Sin `BudgetGuard`: la generación no llama a ningún agente (T89)."""
+
+    @contextmanager
+    def _open() -> Generator[MeasurementFindingsWork, None, None]:
+        with unit_of_work(session_factory) as session:
+            yield _measurement_findings_work(session)
+
+    return _open
+
+
+def _measurement_findings_work(session: Session) -> MeasurementFindingsWork:
+    return MeasurementFindingsWork(
+        items=SqlAlchemyItemRepository(session),
+        findings=SqlAlchemyFindingRepository(session),
+        evaluations=SqlAlchemyTensionEvaluationRepository(session),
+    )
+
+
+def generate_measurement_findings_from_config(
+    config: PipelineConfig, work: MeasurementFindingsWorkFactory, clock: Clock
+) -> GenerateMeasurementFindings:
+    """`GenerateMeasurementFindings` con `[measurement_findings]`; `planet_overview_url`
+    se inyecta aquí (D14): `application/` no conoce el formato de la URL."""
+    settings = config.measurement_findings
+    return GenerateMeasurementFindings(
+        work=work,
+        clock=clock,
+        planet_overview_url=planet_overview_url,
+        max_candidates=settings.max_candidates_per_night,
+        max_sigma=settings.confirmation_max_sigma,
+        window_days=settings.confirmation_window_days,
+        confirmation_enabled=settings.confirmation_enabled,
+    )
+
+
+def _format_measurement_findings_section(
+    report: MeasurementFindingsReport, *, external_ids: dict[UUID, str]
+) -> str:
+    """Sección del `--dry-run` con los findings de medidas que se generarían:
+    pura y determinista. Las confirmaciones bloqueadas por
+    `confirmation_enabled=false` se listan aparte."""
+    lines = [
+        "",
+        "Findings de medidas que se generarían esta noche (T89, solo base de datos):",
+        f"  primera_medida={report.primera_medida} "
+        f"confirmacion_independiente={report.confirmacion_independiente} "
+        f"bloqueadas={len(report.blocked_confirmations)} "
+        f"ya generadas={report.already_generated} aplazadas por el tope={report.deferred}",
+    ]
+    for finding in report.created:
+        lines.append(
+            f"  {finding.type.value} · {external_ids.get(finding.item_id, str(finding.item_id))}"
+            f" · {finding.title}"
+        )
+    for blocked in report.blocked_confirmations:
+        lines.append(
+            f"  confirmacion_independiente · {blocked.external_id} · {blocked.planet_name} "
+            f"({blocked.parameter}) · bloqueado (confirmation_enabled=false)"
+        )
+    return "\n".join(lines)
+
+
+def _print_measurement_findings_section(
+    session: Session, config: PipelineConfig, clock: Clock
+) -> None:
+    """Imprime los candidatos de T89 que generaría la noche, sin escribir
+    (`dry_run=True`) y en la sesión del llamador (`commit=False`)."""
+
+    @contextmanager
+    def _same_session() -> Generator[MeasurementFindingsWork, None, None]:
+        yield _measurement_findings_work(session)
+
+    report = generate_measurement_findings_from_config(config, _same_session, clock)(
+        run_id=uuid4(), dry_run=True
+    )
+    items = SqlAlchemyItemRepository(session)
+    external_ids: dict[UUID, str] = {}
+    for item_id in {f.item_id for f in report.created}:
+        item = items.get(item_id)
+        if item is not None:
+            external_ids[item_id] = item.external_id
+    print(_format_measurement_findings_section(report, external_ids=external_ids))
 
 
 def _current_or_new_run_night(
@@ -1278,6 +1389,7 @@ def _build_run_night(
     read_item: ReadItem,
     popularize: PopularizeReading,
     edit_night: EditNight,
+    measurement_findings: GenerateMeasurementFindings,
     run_id: UUID,
     max_items: int,
     max_consecutive_failures: int,
@@ -1323,6 +1435,7 @@ def _build_run_night(
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=measurement_findings,
         run_id=run_id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,
@@ -1404,6 +1517,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 would_read=len(to_read),
                 would_read_v3=would_read_v3,
             )
+            _print_measurement_findings_section(session, config, clock)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
             try:
                 _print_tension_section(session, config, clock, pairs, runs_with_reader_v3)
@@ -1459,7 +1573,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     provider = AgentSDKProvider()
     reader_prompts = _load_reader_prompts()
     popularizer_prompt = load_prompt("popularizer")
-    editor_prompt = load_prompt("editor")
+    editor_prompt = load_prompt(EDITOR_PROMPT_VERSION)
     deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
 
     run_id = _current_or_new_run_night(session_factory, policy, clock)
@@ -1491,6 +1605,9 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         base_tokens=config.budget.editor_base_tokens,
         tokens_per_candidate=config.budget.editor_tokens_per_candidate,
     )
+    measurement_findings = generate_measurement_findings_from_config(
+        config, _measurement_findings_work_factory(session_factory), clock
+    )
 
     async def _ingest() -> IngestResult:
         return await _run_ingest(
@@ -1505,6 +1622,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=measurement_findings,
         run_id=run_id,
         max_items=config.limits.max_items_per_night,
         max_consecutive_failures=config.limits.max_consecutive_failures,
@@ -1832,15 +1950,15 @@ def _print_edit_night_report(
         f"descartados={len(result.discarded)}"
     )
     for finding in result.published:
-        reason = result.reasons.get(finding.item_id, "")
+        reason = result.reasons.get(finding.id, "")
         print(
             f"    publicado: {finding.title} "
             f"(finding_id={finding.id}, confidence={finding.confidence}, motivo: {reason})"
         )
-    if result.unknown_item_ids:
+    if result.unknown_candidate_ids:
         print(
-            f"  AVISO: el Editor aprobó {len(result.unknown_item_ids)} item_id que no "
-            f"están entre los candidatos, ignorados: {', '.join(result.unknown_item_ids)}",
+            f"  AVISO: el Editor aprobó {len(result.unknown_candidate_ids)} candidate_id que no "
+            f"están entre los candidatos, ignorados: {', '.join(result.unknown_candidate_ids)}",
             file=sys.stderr,
         )
 
@@ -1880,7 +1998,7 @@ def _edit_one_night(
         work=work,
         provider=provider,
         clock=clock,
-        system_prompt=load_prompt("editor"),
+        system_prompt=load_prompt(EDITOR_PROMPT_VERSION),
         prompt_version=EDITOR_PROMPT_VERSION,
         model=config.models.editor,
         max_turns=config.limits.max_turns_per_agent,

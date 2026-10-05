@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json as json_lib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from nocturna.domain.llm import AgentRequest, AgentResult, AgentRole
@@ -64,6 +65,9 @@ class _QueuedResult:
     duration_ms: int
     model: str | None
     error: Exception | None
+    # T89: respuesta construida a partir de la petición (p. ej. para leer los
+    # `candidate_id` del prompt del Editor, que solo existen en ejecución).
+    build: Callable[[AgentRequest], dict] | None = None
 
 
 class FakeLLMProvider:
@@ -131,6 +135,30 @@ class FakeLLMProvider:
             )
         )
 
+    def respond_with(
+        self,
+        role: AgentRole,
+        *,
+        build: Callable[[AgentRequest], dict],
+        tokens_in: int,
+        tokens_out: int,
+        duration_ms: int = 0,
+        model: str | None = None,
+    ) -> None:
+        """Encola una respuesta JSON calculada en el momento de la llamada a
+        partir del `AgentRequest` (mismo FIFO por rol que `respond()`)."""
+        self._queues.setdefault(role, deque()).append(
+            _QueuedResult(
+                output_text=None,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                duration_ms=duration_ms,
+                model=model,
+                error=None,
+                build=build,
+            )
+        )
+
     def fail(self, role: AgentRole, *, error: Exception) -> None:
         """Encola un fallo: la próxima llamada a `role` relanza `error` tal cual.
 
@@ -164,11 +192,14 @@ class FakeLLMProvider:
         item = queue.popleft()
         if item.error is not None:
             raise item.error
-        assert item.output_text is not None  # invariante interna: ver _QueuedResult
+        output_text = (
+            json_lib.dumps(item.build(request)) if item.build is not None else item.output_text
+        )
+        assert output_text is not None  # invariante interna: ver _QueuedResult
         return AgentResult(
             role=request.role,
             model=item.model if item.model is not None else request.model,
-            output_text=item.output_text,
+            output_text=output_text,
             tokens_in=item.tokens_in,
             tokens_out=item.tokens_out,
             duration_ms=item.duration_ms,

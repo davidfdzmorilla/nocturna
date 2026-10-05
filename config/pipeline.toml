@@ -390,5 +390,25 @@ min_absolute_difference_hours = 1.0
 alias_tolerance = 0.01
 alias_max_harmonic = 5
 
+[measurement_findings]
+# Findings `primera_medida` y `confirmacion_independiente` (T89, ADR 0020).
+# Se generan sin LLM desde las evaluaciones de tensión guardadas (T88) y los
+# decide el Editor junto con el resto de candidatos de la noche.
+# max_candidates_per_night: tope de candidatos de T89 por noche (D9). Entra en
+# la reserva del Editor: editor_base_tokens + (max_items_per_night +
+# max_candidates_per_night) * editor_tokens_per_candidate <= editor_reserve_tokens
+# (2500 + (30 + 5) * 850 = 32250 <= 60000; validado al cargar).
+max_candidates_per_night = 5
+# confirmation_max_sigma: una confirmación exige todas las medidas del paper a
+# σ <= este valor de la referencia del archivo (D4).
+confirmation_max_sigma = 2.0
+# confirmation_window_days: la más reciente de las dos entradas (paper y
+# solución del archivo) debe caer en los últimos N días (D5).
+confirmation_window_days = 30
+# confirmation_enabled: apagada (D6) hasta cerrar T83 (bibcode de la solución
+# propia). Con false no se genera ninguna `confirmacion_independiente`;
+# `run-night --dry-run` las lista como bloqueadas.
+confirmation_enabled = false
+
 [llm]
 provider = "agent_sdk"

@@ -55,6 +55,9 @@ from fakes.llm import FakeLLMProvider
 from helpers.run_night import (
     WITHIN_WINDOW,
     Environment,
+    approve_items_in_editor,
+    in_memory_finding_ids_by_item,
+    make_generator,
     make_item,
     make_policy,
     make_run_night,
@@ -96,11 +99,12 @@ async def test_camino_feliz_encadena_las_tres_fases_en_orden_y_cierra_completed(
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=800, tokens_out=150
     )
-    fake.respond(
-        AgentRole.EDITOR,
-        json={
-            "publish": [{"item_id": str(item.id), "confidence": 0.8, "reason": "Motivo de prueba."}]
-        },
+    approve_items_in_editor(
+        fake,
+        finding_ids_by_item=in_memory_finding_ids_by_item(env),
+        item_ids=[item.id],
+        confidence=0.8,
+        reason="Motivo de prueba.",
         tokens_in=1200,
         tokens_out=100,
     )
@@ -259,9 +263,12 @@ async def test_el_editor_se_llama_exactamente_una_vez_contando_por_rol():
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
-    fake.respond(
-        AgentRole.EDITOR,
-        json={"publish": [{"item_id": str(item_a.id), "confidence": 0.6, "reason": "Motivo."}]},
+    approve_items_in_editor(
+        fake,
+        finding_ids_by_item=in_memory_finding_ids_by_item(env),
+        item_ids=[item_a.id],
+        confidence=0.6,
+        reason="Motivo.",
         tokens_in=100,
         tokens_out=10,
     )
@@ -441,9 +448,12 @@ async def test_cortacircuitos_aborta_fase_a_pero_llama_al_editor_con_los_candida
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
     )
-    fake.respond(
-        AgentRole.EDITOR,
-        json={"publish": [{"item_id": str(item_a.id), "confidence": 0.7, "reason": "Motivo."}]},
+    approve_items_in_editor(
+        fake,
+        finding_ids_by_item=in_memory_finding_ids_by_item(env),
+        item_ids=[item_a.id],
+        confidence=0.7,
+        reason="Motivo.",
         tokens_in=100,
         tokens_out=10,
     )
@@ -595,9 +605,12 @@ async def test_budget_exhausted_en_fase_b_no_toca_la_reserva_y_el_editor_se_llam
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=900, tokens_out=100
     )
-    fake.respond(
-        AgentRole.EDITOR,
-        json={"publish": [{"item_id": str(item_a.id), "confidence": 0.9, "reason": "Motivo."}]},
+    approve_items_in_editor(
+        fake,
+        finding_ids_by_item=in_memory_finding_ids_by_item(env),
+        item_ids=[item_a.id],
+        confidence=0.9,
+        reason="Motivo.",
         tokens_in=100,
         tokens_out=10,
     )
@@ -654,6 +667,7 @@ async def test_budget_exhausted_en_fase_b_no_toca_la_reserva_y_el_editor_se_llam
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=make_generator(env),
         run_id=env.run.id,
         max_items=10,
         max_consecutive_failures=5,
@@ -856,6 +870,7 @@ async def test_ingesta_fallida_continua_con_los_new_existentes_y_no_supera_parti
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=make_generator(env),
         run_id=env.run.id,
         max_items=10,
         max_consecutive_failures=5,
@@ -941,6 +956,7 @@ async def test_el_log_de_ingesta_fallida_incluye_error_detail(caplog, monkeypatc
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=make_generator(env),
         run_id=env.run.id,
         max_items=10,
         max_consecutive_failures=5,

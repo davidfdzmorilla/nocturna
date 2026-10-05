@@ -32,6 +32,7 @@ import pytest
 from factories import make_item
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from helpers.run_night import approve_items_in_editor, db_finding_ids_by_item
 from sqlalchemy import select
 
 from nocturna import cli
@@ -195,11 +196,12 @@ def test_camino_feliz_devuelve_0_y_cierra_el_run_completed_con_contadores(
     fake_provider.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=800, tokens_out=150
     )
-    fake_provider.respond(
-        AgentRole.EDITOR,
-        json={
-            "publish": [{"item_id": str(item_id), "confidence": 0.8, "reason": "Motivo de prueba."}]
-        },
+    approve_items_in_editor(
+        fake_provider,
+        finding_ids_by_item=db_finding_ids_by_item(db_session_factory),
+        item_ids=[item_id],
+        confidence=0.8,
+        reason="Motivo de prueba.",
         tokens_in=1200,
         tokens_out=100,
     )

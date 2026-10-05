@@ -24,6 +24,10 @@ Flujo por par (`Item`, `Reading`):
 9. Sin referencia pero con cota superior `Published Confirmed`:
    `CONSISTENT_WITH_LIMIT` o `INCOMPATIBLE_WITH_LIMIT`.
 10. Sin nada y con solución propia: `CLOSED_LOOP`; sin nada: `AWAITING_REFERENCE`.
+
+`resolve_planet` lanza `PlanetResolutionFailed` (D16, T89) ante una respuesta
+anómala del alias: el grupo no produce evaluación y se anota en
+`TensionReport.failures`; `None` significa solo "ausente del archivo".
 """
 
 from collections.abc import Sequence
@@ -39,7 +43,7 @@ from nocturna.domain.entities import (
     Measurement,
     Reading,
 )
-from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.errors import InvariantViolation, PlanetResolutionFailed
 from nocturna.domain.tension import (
     EvaluationStatus,
     LimitComparison,
@@ -71,9 +75,21 @@ class SkippedMeasurement:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolutionFailure:
+    """Grupo (lectura, planeta, parámetro) cuyo planeta no se pudo resolver
+    (D16, T89): sin evaluación; se reintenta en la próxima ejecución."""
+
+    item_id: UUID
+    planet_name: str
+    parameter: MeasuredParameter
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class TensionReport:
     evaluations: tuple[TensionEvaluation, ...]
     skipped: tuple[SkippedMeasurement, ...]
+    failures: tuple[ResolutionFailure, ...] = ()
 
 
 class ComputeTensions:
@@ -93,11 +109,16 @@ class ComputeTensions:
     async def __call__(self, pairs: Sequence[tuple[Item, Reading]]) -> TensionReport:
         evaluations: list[TensionEvaluation] = []
         skipped: list[SkippedMeasurement] = []
+        failures: list[ResolutionFailure] = []
         for item, reading in pairs:
             if reading.item_id != item.id:
                 raise InvariantViolation("el Reading no corresponde al Item indicado")
-            await self._process(item, reading, evaluations, skipped)
-        return TensionReport(evaluations=tuple(evaluations), skipped=tuple(skipped))
+            await self._process(item, reading, evaluations, skipped, failures)
+        return TensionReport(
+            evaluations=tuple(evaluations),
+            skipped=tuple(skipped),
+            failures=tuple(failures),
+        )
 
     async def _process(
         self,
@@ -105,6 +126,7 @@ class ComputeTensions:
         reading: Reading,
         evaluations: list[TensionEvaluation],
         skipped: list[SkippedMeasurement],
+        failures: list[ResolutionFailure],
     ) -> None:
         if not reading.measurements:
             return
@@ -118,9 +140,13 @@ class ComputeTensions:
             )
 
         for (planet_name, parameter), measurements in groups.items():
-            evaluation = await self._evaluate_group(
-                item, reading, planet_name, parameter, tuple(measurements), skipped
-            )
+            try:
+                evaluation = await self._evaluate_group(
+                    item, reading, planet_name, parameter, tuple(measurements), skipped
+                )
+            except PlanetResolutionFailed as exc:
+                failures.append(ResolutionFailure(item.id, planet_name, parameter, str(exc)))
+                continue
             if evaluation is not None:
                 evaluations.append(evaluation)
 

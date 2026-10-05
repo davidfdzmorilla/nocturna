@@ -32,10 +32,13 @@ POPULARIZER_PROMPT_VERSION: str = "popularizer-v2"
 
 #: Versión a mano del prompt del Editor, mismo criterio que
 #: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al
-#: editar `editor.md`. Primera versión (T43), ya incorpora las lecciones de
-#: T42 (nada de fences, nunca un salto de línea real dentro de una cadena
-#: JSON) desde el primer día.
-EDITOR_PROMPT_VERSION: str = "editor-v1"
+#: editar el prompt. `editor-v1` (T43, `editor.md`, que se conserva) decidía
+#: por `item_id`; `editor-v2` (T89, `editor-v2.md`) describe los tres tipos
+#: de candidato (`paper_explained`, `primera_medida`,
+#: `confirmacion_independiente`) y decide por `candidate_id`. Conserva las
+#: lecciones de T42 (nada de fences, nunca un salto de línea real dentro de
+#: una cadena JSON).
+EDITOR_PROMPT_VERSION: str = "editor-v2"
 
 
 def load_prompt(name: str) -> str:

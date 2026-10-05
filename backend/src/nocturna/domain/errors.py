@@ -139,3 +139,9 @@ class LLMTimeout(LLMError):
     (`asyncio.CancelledError`, p. ej. el corte de `hard_stop` en T44):
     `AgentSDKProvider` nunca traduce una cancelación a este error.
     """
+
+
+class PlanetResolutionFailed(DomainError):
+    """El catálogo no pudo decidir si un planeta existe (respuesta anómala del
+    servicio de alias). Distinto de "no existe": esa medida no se evalúa esa
+    vez y se reintenta en la siguiente ejecución (D16, T89)."""

@@ -8,7 +8,8 @@ Calcula con `ComputeTensions` y reconcilia con lo guardado, por clave
   actualiza si el resultado cambió (`same_outcome`);
 - existe en cualquier otro estado: terminal, no se toca.
 
-Una `Reading` es inmutable: si ya tiene evaluaciones y NINGUNA está en
+Una `Reading` es inmutable: si ya tiene evaluaciones para todos sus grupos
+(planeta, parámetro) utilizables y NINGUNA está en
 `AWAITING_REFERENCE`, no se recalcula (no se consulta el catálogo ni el alias);
 sus evaluaciones guardadas se cuentan en `kept_terminal`. El catálogo solo se
 consulta para lecturas nuevas o con alguna evaluación pendiente.
@@ -24,9 +25,10 @@ from uuid import UUID
 
 from nocturna.application.use_cases.compute_tensions import (
     ComputeTensions,
+    ResolutionFailure,
     SkippedMeasurement,
 )
-from nocturna.domain.entities import Item, Reading
+from nocturna.domain.entities import Item, MeasuredParameter, Reading
 from nocturna.domain.repositories import (
     ItemRepository,
     ReadingRepository,
@@ -45,6 +47,8 @@ class EvaluationRunReport:
     by_status: dict[EvaluationStatus, int] = field(default_factory=dict)
     skipped: tuple[SkippedMeasurement, ...] = ()
     evaluations: tuple[TensionEvaluation, ...] = ()
+    # D16: grupos cuyo planeta no se pudo resolver; sin fila, se reintentan.
+    failures: tuple[ResolutionFailure, ...] = ()
 
 
 class RecordTensionEvaluations:
@@ -72,7 +76,24 @@ class RecordTensionEvaluations:
         settled: list[TensionEvaluation] = []
         for reading in self._readings.with_measurements():
             previous = by_reading.get(reading.id, [])
-            if previous and all(e.status != EvaluationStatus.AWAITING_REFERENCE for e in previous):
+            stored_keys = {(e.planet_name, e.parameter) for e in previous}
+            expected_keys = {
+                (m.planet_name, m.parameter)
+                for m in reading.measurements or ()
+                if m.usable_for_tension and m.parameter != MeasuredParameter.PERIOD
+            }
+            # D16: un grupo que falló en la resolución no tiene fila; la lectura
+            # no se da por cerrada hasta que todos sus grupos tengan evaluación.
+            # Excepción: los grupos de periodo pueden no producir fila nunca
+            # (`PERIOD_TTV`, por diseño); no cuentan como esperados, para que
+            # una lectura con TTV y otra evaluación ya guardada no se
+            # recalcule siempre. Consecuencia: un fallo D16 en un periodo no
+            # se reintenta si la lectura ya tiene otras filas.
+            if (
+                previous
+                and all(e.status != EvaluationStatus.AWAITING_REFERENCE for e in previous)
+                and expected_keys <= stored_keys
+            ):
                 settled.extend(previous)
                 continue
             item = self._items.get(reading.item_id)
@@ -114,4 +135,5 @@ class RecordTensionEvaluations:
             by_status=dict(by_status),
             skipped=report.skipped,
             evaluations=tuple(final),
+            failures=report.failures,
         )

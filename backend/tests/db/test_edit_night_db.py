@@ -31,7 +31,10 @@ from fakes.clock import FakeClock
 from helpers.sdk_doubles import build_fake_query, make_result_message
 
 from nocturna import cli
-from nocturna.application.agents.prompt_loader import EDITOR_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    EDITOR_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import BudgetPolicy
 from nocturna.application.use_cases.edit_night import EditNight, EditOutcome
 from nocturna.domain.entities import ItemStatus
@@ -106,7 +109,7 @@ async def test_orquestador_real_publica_el_aprobado_y_descarta_el_resto(
     monkeypatch.setattr(
         agent_sdk_provider,
         "query",
-        _build_editor_fake_query(publish_item_id=item_a_id),
+        _build_editor_fake_query(publish_candidate_id=finding_a_id),
         raising=True,
     )
 
@@ -115,7 +118,7 @@ async def test_orquestador_real_publica_el_aprobado_y_descarta_el_resto(
         work=work,
         provider=AgentSDKProvider(),
         clock=FakeClock(_WITHIN_WINDOW),
-        system_prompt=load_prompt("editor"),
+        system_prompt=load_prompt(EDITOR_PROMPT_VERSION),
         prompt_version=EDITOR_PROMPT_VERSION,
         model=_MODEL,
         max_turns=3,
@@ -161,15 +164,15 @@ async def test_orquestador_real_publica_el_aprobado_y_descarta_el_resto(
         assert item_b_row.status is ItemStatus.DISCARDED
 
 
-def _build_editor_fake_query(*, publish_item_id):
+def _build_editor_fake_query(*, publish_candidate_id):
     """Doble de `query()` que emite un `ResultMessage` con la decisión del
-    Editor real: aprueba `publish_item_id`, descarta el resto -- mismo
+    Editor real: aprueba `publish_candidate_id`, descarta el resto -- mismo
     patrón que `tests/db/test_popularize_chain.py`."""
 
     payload = {
         "publish": [
             {
-                "item_id": str(publish_item_id),
+                "candidate_id": str(publish_candidate_id),
                 "confidence": 0.85,
                 "reason": "Hallazgo con potencial de interés general.",
             }

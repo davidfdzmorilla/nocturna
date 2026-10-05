@@ -13,7 +13,7 @@ from typing import Protocol
 from uuid import UUID
 
 from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
-from nocturna.domain.entities import AgentCall, Finding, Item, Reading, Run
+from nocturna.domain.entities import AgentCall, Finding, FindingType, Item, Reading, Run
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.tension import TensionEvaluation
 
@@ -84,6 +84,19 @@ class FindingRepository(Protocol):
 
     def get_published(self, finding_id: UUID) -> Finding | None:
         """Recupera un hallazgo por id, solo si está publicado. Usado por T50."""
+        ...
+
+    def evaluation_ids_with_finding(self, type: FindingType) -> frozenset[UUID]:
+        """Ids de `TensionEvaluation` que ya tienen un `Finding` de ese tipo.
+
+        Publicado o no: el índice único `(tension_evaluation_id, type)` impide
+        regenerarlo. Usado por T89.
+        """
+        ...
+
+    def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
+        """Número de `Finding` del run con alguno de esos tipos, publicados o no.
+        Usado por T89 para que el tope de candidatos sea por Run."""
         ...
 
 

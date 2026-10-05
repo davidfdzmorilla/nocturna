@@ -20,18 +20,23 @@ from uuid import uuid4
 import pytest
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
 from fakes.work import (
     InMemoryAgentCallRepository,
     InMemoryFindingRepository,
     InMemoryItemRepository,
     InMemoryReadingRepository,
     InMemoryRunRepository,
+    make_measurement_findings_work_factory,
     make_work_factory,
 )
 
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.application.use_cases.edit_night import EditNight
+from nocturna.application.use_cases.generate_measurement_findings import (
+    GenerateMeasurementFindings,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
@@ -353,6 +358,19 @@ async def _run_minimal_night_for_night_item_log() -> None:
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=GenerateMeasurementFindings(
+            work=make_measurement_findings_work_factory(
+                items=items,
+                findings=findings,
+                evaluations=InMemoryTensionEvaluationRepository(),
+            ),
+            clock=clock,
+            planet_overview_url=lambda name: name,
+            max_candidates=5,
+            max_sigma=2.0,
+            window_days=30,
+            confirmation_enabled=False,
+        ),
         run_id=run.id,
         max_items=10,
         max_consecutive_failures=5,

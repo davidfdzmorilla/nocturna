@@ -96,6 +96,12 @@ min_absolute_difference_hours = 1.0
 alias_tolerance = 0.01
 alias_max_harmonic = 5
 
+[measurement_findings]
+max_candidates_per_night = 5
+confirmation_max_sigma = 2.0
+confirmation_window_days = 30
+confirmation_enabled = false
+
 [llm]
 provider = "agent_sdk"
 """
@@ -142,10 +148,9 @@ def test_la_reserva_del_editor_cubre_el_peor_caso_en_el_toml_real():
     invariante, incluida la definitiva del cierre de T60."""
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
-    worst_case = (
-        config.budget.editor_base_tokens
-        + config.limits.max_items_per_night * config.budget.editor_tokens_per_candidate
-    )
+    worst_case = config.budget.editor_base_tokens + (
+        config.limits.max_items_per_night + config.measurement_findings.max_candidates_per_night
+    ) * (config.budget.editor_tokens_per_candidate)
 
     assert worst_case <= config.budget.editor_reserve_tokens
 
@@ -887,3 +892,101 @@ def test_el_archivo_solo_cabria_pero_junto_a_arxiv_no(tmp_path):
 
     with pytest.raises(ValidationError):
         load_pipeline_config(_write_toml(tmp_path, content))
+
+
+# --- T89: [measurement_findings] ----------------------------------------------
+
+_MEASUREMENT_FINDINGS_SECTION = BASE_TOML[
+    BASE_TOML.index("[measurement_findings]") : BASE_TOML.index("[llm]")
+]
+
+
+def test_el_toml_real_trae_measurement_findings_con_los_valores_decididos():
+    mf = load_pipeline_config(REAL_PIPELINE_TOML).measurement_findings
+
+    assert mf.max_candidates_per_night == 5
+    assert mf.confirmation_max_sigma == 2.0
+    assert mf.confirmation_window_days == 30
+    assert mf.confirmation_enabled is False, "D6: apagada hasta cerrar T83"
+
+
+def test_falta_la_seccion_measurement_findings_falla(tmp_path):
+    content = BASE_TOML.replace(_MEASUREMENT_FINDINGS_SECTION, "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="measurement_findings"):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "max_candidates_per_night",
+        "confirmation_max_sigma",
+        "confirmation_window_days",
+        "confirmation_enabled",
+    ],
+)
+def test_falta_cualquier_clave_de_measurement_findings_falla(tmp_path, key):
+    lines = [
+        line for line in BASE_TOML.splitlines(keepends=True) if not line.startswith(f"{key} =")
+    ]
+    path = _write_toml(tmp_path, "".join(lines))
+
+    with pytest.raises(ValidationError, match=key):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("max_candidates_per_night = 5", "max_candidates_per_night = -1"),
+        ("confirmation_max_sigma = 2.0", "confirmation_max_sigma = 0"),
+        ("confirmation_window_days = 30", "confirmation_window_days = 0"),
+        ("confirmation_enabled = false", 'confirmation_enabled = "false"'),
+        ("confirmation_enabled = false", "confirmation_enabled = 0"),
+    ],
+)
+def test_valores_invalidos_de_measurement_findings_fallan(tmp_path, old, new):
+    path = _write_toml(tmp_path, BASE_TOML.replace(old, new))
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_clave_desconocida_en_measurement_findings_falla(tmp_path):
+    content = BASE_TOML.replace("[measurement_findings]\n", "[measurement_findings]\nextra = 1\n")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_la_reserva_del_editor_incluye_los_candidatos_de_t89(tmp_path):
+    """editor_base (4000) + (max_items (40) + K) * por_candidato (700) <= reserva
+    (60000). El mayor K que cabe se deduce de la fórmula, no de un literal: K
+    cabe y K + 1 hace fallar la carga."""
+    base, per, items, reserve = 4000, 700, 40, 60000
+    max_ok = (reserve - base) // per - items
+
+    ok = BASE_TOML.replace("max_candidates_per_night = 5", f"max_candidates_per_night = {max_ok}")
+    assert load_pipeline_config(_write_toml(tmp_path, ok, "ok.toml"))
+
+    too_many = BASE_TOML.replace(
+        "max_candidates_per_night = 5", f"max_candidates_per_night = {max_ok + 1}"
+    )
+    with pytest.raises(ValidationError, match="max_candidates_per_night"):
+        load_pipeline_config(_write_toml(tmp_path, too_many, "too_many.toml"))
+
+
+def test_con_k_el_validador_rechaza_lo_que_antes_cabia(tmp_path):
+    # Sin K: 4000 + 40 * 700 = 32.000 <= 36.000. Con K = 5: 35.500 <= 36.000.
+    # Con K = 5 y una reserva de 35.000 ya no cabe.
+    content = BASE_TOML.replace("editor_reserve_tokens = 60000", "editor_reserve_tokens = 35000")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="max_candidates_per_night"):
+        load_pipeline_config(path)
+
+    sin_k = content.replace("max_candidates_per_night = 5", "max_candidates_per_night = 0")
+    assert load_pipeline_config(_write_toml(tmp_path, sin_k, "sin_k.toml"))

@@ -14,6 +14,12 @@ ni toca `Run.status`: devuelve el estado propuesto en `RunNightResult`, y el
 único cerrador sigue siendo `_finish_run` de `cli.py` (paso 3, fuera del
 alcance de este módulo).
 
+T89: entre el Popularizer y el Editor corre `_phase_measurement_findings`,
+que genera los `Finding` `primera_medida`/`confirmacion_independiente` de las
+evaluaciones ya guardadas. Es solo base de datos (cero agentes, cero tokens);
+el Editor los decide junto con los `paper_explained` en su única llamada, y se
+llama aunque los únicos candidatos sean de esa fase.
+
 ## El modelo de "degradación monótona" que decide `RunNightResult.status`
 
 La noche empieza optimista (`RunStatus.COMPLETED`) y solo empeora: cada
@@ -186,6 +192,9 @@ from uuid import UUID
 from nocturna.application.budget import BudgetDenied, DenyReason, terminal_status_for
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases.edit_night import EditNight, EditOutcome
+from nocturna.application.use_cases.generate_measurement_findings import (
+    GenerateMeasurementFindings,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeOutcome, PopularizeReading
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
@@ -265,6 +274,7 @@ class RunNight:
         read_item: ReadItem,
         popularize: PopularizeReading,
         edit_night: EditNight,
+        measurement_findings: GenerateMeasurementFindings,
         run_id: UUID,
         max_items: int,
         max_consecutive_failures: int,
@@ -277,6 +287,7 @@ class RunNight:
         self._read_item = read_item
         self._popularize = popularize
         self._edit_night = edit_night
+        self._measurement_findings = measurement_findings
         self._run_id = run_id
         self._max_items = max_items
         self._max_consecutive_failures = max_consecutive_failures
@@ -412,6 +423,9 @@ class RunNight:
 
         read_pairs = await self._phase_reader()
         await self._phase_popularizer(read_pairs)
+
+        if not self._skip_editor:
+            self._phase_measurement_findings()
 
         if self._skip_editor:
             _logger.info(
@@ -736,6 +750,46 @@ class RunNight:
             },
         )
 
+    # --- fase B2: findings de medidas (T89, solo base de datos) --------------
+
+    def _phase_measurement_findings(self) -> None:
+        """Genera los candidatos `primera_medida`/`confirmacion_independiente`
+        de las evaluaciones guardadas. Solo base de datos: ningún agente, ni
+        `AgentRunner` ni `BudgetGuard` (el texto sale de plantillas). Un fallo
+        aquí degrada a `PARTIAL` pero no impide llamar al Editor con los
+        candidatos que haya (los `paper_explained`).
+        """
+        try:
+            report = self._measurement_findings(run_id=self._run_id, dry_run=False)
+        except Exception as exc:
+            self._degrade(RunStatus.PARTIAL, "measurement_findings_error")
+            _logger.exception(
+                "night.phase_end",
+                extra={
+                    "event": "night.phase_end",
+                    "run_id": str(self._run_id),
+                    "phase": "measurement_findings",
+                    "processed": 0,
+                    "ok": 0,
+                    "failed": 1,
+                    "stop_reason": "error",
+                    "error": type(exc).__name__,
+                },
+            )
+            return
+        _logger.info(
+            "night.phase_end",
+            extra={
+                "event": "night.phase_end",
+                "run_id": str(self._run_id),
+                "phase": "measurement_findings",
+                "processed": len(report.created),
+                "ok": len(report.created),
+                "failed": 0,
+                "stop_reason": "completed",
+            },
+        )
+
     # --- fase C: Editor -----------------------------------------------------
 
     async def _phase_editor(self) -> None:
@@ -766,7 +820,7 @@ class RunNight:
                     "discarded": 0,
                     "attempts": 0,
                     "tokens_spent": 0,
-                    "unknown_item_ids": [],
+                    "unknown_candidate_ids": [],
                     "deny_reason": exc.reason.value,
                 },
             )
@@ -784,7 +838,7 @@ class RunNight:
                 "discarded": len(edit_result.discarded),
                 "attempts": edit_result.attempts,
                 "tokens_spent": edit_result.tokens_spent,
-                "unknown_item_ids": list(edit_result.unknown_item_ids),
+                "unknown_candidate_ids": list(edit_result.unknown_candidate_ids),
             },
         )
 

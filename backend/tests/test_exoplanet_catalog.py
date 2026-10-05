@@ -22,6 +22,7 @@ from nocturna.domain.entities import (
     MeasurementLimit,
     MeasurementOrigin,
 )
+from nocturna.domain.errors import PlanetResolutionFailed
 from nocturna.infrastructure.exoplanet_archive.client import ExoplanetArchiveUnavailable
 
 pytestmark = pytest.mark.anyio
@@ -114,7 +115,7 @@ async def test_nombre_sin_digitos_fuera_del_indice_consulta_alias_y_resuelve():
 
 
 async def test_nombre_sin_digitos_sin_alias_devuelve_none_con_una_sola_peticion():
-    body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
+    body = '{"manifest": {"lookup_status": "System Not Found"}}'
     catalog, _, seen = make_catalog(alias_handler(alias_body=body))
 
     assert await catalog.resolve_planet("Proxima Centauri b") is None
@@ -124,7 +125,9 @@ async def test_nombre_sin_digitos_sin_alias_devuelve_none_con_una_sola_peticion(
 
 
 async def test_el_alias_recibe_el_nombre_limpio_sin_restos_de_latex():
-    catalog, _, seen = make_catalog()
+    catalog, _, seen = make_catalog(
+        alias_handler(alias_body='{"manifest": {"lookup_status": "System Not Found"}}')
+    )
 
     await catalog.resolve_planet("TOI-1725~b\\,x")
 
@@ -141,15 +144,17 @@ async def test_indice_local_vacio_lanza_unavailable():
     assert seen == []
 
 
-async def test_nombre_que_solo_es_de_la_estrella_devuelve_none():
+async def test_nombre_que_solo_es_de_la_estrella_es_fallo_de_resolucion():
+    """D16: `OK` sin el nombre en `planet_set` no es "ausente", es anómalo."""
     catalog, _, _ = make_catalog()
 
     # "WASP-12" es alias del sistema y de la estrella, no de ningún planeta.
-    assert await catalog.resolve_planet("WASP-12") is None
+    with pytest.raises(PlanetResolutionFailed):
+        await catalog.resolve_planet("WASP-12")
 
 
 async def test_alias_sin_resolver_devuelve_none():
-    body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
+    body = '{"manifest": {"lookup_status": "System Not Found"}}'
     catalog, _, _ = make_catalog(alias_handler(alias_body=body))
 
     assert await catalog.resolve_planet("XYZ-999 b") is None
@@ -160,7 +165,10 @@ async def test_el_indice_local_se_lee_una_sola_vez():
     calls = []
     real = archive.planet_names
     archive.planet_names = lambda: calls.append(1) or real()
-    catalog, _, _ = make_catalog(archive=archive)
+    catalog, _, _ = make_catalog(
+        alias_handler(alias_body='{"manifest": {"lookup_status": "System Not Found"}}'),
+        archive=archive,
+    )
 
     for name in ("V1298 Tau b", "V1298 Tau e", "WASP-12b", "Foo Bar b"):
         await catalog.resolve_planet(name)
@@ -186,7 +194,9 @@ async def test_el_alias_se_pide_una_vez_por_nombre_normalizado():
 
 
 async def test_alias_negativo_tambien_se_cachea():
-    catalog, _, seen = make_catalog(alias_handler(alias_body='{"manifest": {}}'))
+    catalog, _, seen = make_catalog(
+        alias_handler(alias_body='{"manifest": {"lookup_status": "System Not Found"}}')
+    )
 
     await catalog.resolve_planet("XYZ-999 b")
     await catalog.resolve_planet("xyz-999 b")
@@ -271,3 +281,71 @@ async def test_lecturas_sin_medidas_o_con_lista_vacia_no_sacan_peticiones():
     )
 
     assert seen == []
+
+
+@pytest.mark.parametrize(
+    "status", ["System Not Found", "SYSTEM NOT FOUND", "  system   not found ", "system not found"]
+)
+async def test_system_not_found_en_cualquier_grafia_es_planeta_ausente(status):
+    body = json.dumps({"manifest": {"lookup_status": status}})
+    catalog, _, _ = make_catalog(alias_handler(alias_body=body))
+
+    assert await catalog.resolve_planet("XYZ-999 b") is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"manifest": {"lookup_status": "NOT_FOUND"}}',
+        '{"manifest": {"lookup_status": "Server Error"}}',
+        '{"manifest": {"lookup_status": null}}',
+        '{"manifest": {}}',
+        '{"manifest": "x"}',
+        "{}",
+    ],
+)
+async def test_estado_anomalo_es_fallo_de_resolucion_y_no_se_cachea(body):
+    catalog, _, seen = make_catalog(alias_handler(alias_body=body))
+
+    for _ in range(2):
+        with pytest.raises(PlanetResolutionFailed):
+            await catalog.resolve_planet("XYZ-999 b")
+
+    assert len(_alias_requests(seen)) == 2  # el fallo no quedó cacheado como ausente
+
+
+async def test_ok_sin_el_nombre_en_planet_set_es_fallo():
+    body = _synthetic_alias_body("WASP-12 b", ["Otro nombre b"])
+    catalog, _, _ = make_catalog(alias_handler(alias_body=body))
+
+    with pytest.raises(PlanetResolutionFailed):
+        await catalog.resolve_planet("Beta Pictoris b")
+
+
+async def test_tras_un_fallo_la_siguiente_resolucion_se_reintenta_y_puede_resolver():
+    bad = '{"manifest": {"lookup_status": "Server Error"}}'
+    good = _synthetic_alias_body("WASP-12 b", ["Beta Pictoris b"])
+    responses = [bad, good]
+
+    def handler(request):
+        return alias_handler(alias_body=responses.pop(0))(request)
+
+    catalog, _, _ = make_catalog(handler)
+
+    with pytest.raises(PlanetResolutionFailed):
+        await catalog.resolve_planet("Beta Pictoris b")
+    assert await catalog.resolve_planet("Beta Pictoris b") == "WASP-12 b"
+
+
+async def test_compute_tensions_un_fallo_de_resolucion_no_crea_evaluacion_y_se_informa():
+    item = make_item()
+    reading = make_reading(item.id, (make_measurement(0.5, 0.1, 0.1, planet_name="Foo 1 b"),))
+    body = '{"manifest": {"lookup_status": "Server Error"}}'
+    catalog, _, _ = make_catalog(alias_handler(alias_body=body))
+
+    report = await _compute(catalog)([(item, reading)])
+
+    assert report.evaluations == ()
+    (failure,) = report.failures
+    assert (failure.planet_name, failure.parameter) == ("Foo 1 b", MASS)
+    assert "Server Error" in failure.reason

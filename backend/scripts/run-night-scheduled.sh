@@ -24,7 +24,9 @@
 #                        donde corran.
 #
 # Códigos de salida:
-#     0-8   Los de `nocturna run-night`, propagados sin modificar.
+#     0-8   Los de `nocturna run-night`, propagados sin modificar. El
+#           `nocturna evaluate-tensions` posterior (T89) no los altera: su
+#           fallo solo queda en el log.
 #     75    Precondiciones no listas (Docker o `nocturna-postgres` no
 #           alcanzaron el estado esperado dentro de NOCTURNA_WAIT_S), o no
 #           se pudo crear el centinela (permisos de NOCTURNA_LOG_DIR).
@@ -272,9 +274,36 @@ caffeinate -is uv run --frozen nocturna run-night "$@" >>"$out_log" 2>>"$err_log
 exit_code=$?
 set -e
 
+# T89 (D10): evalúa las lecturas de la noche contra el archivo para que sus
+# findings de medidas aparezcan como candidatos la noche siguiente. Cero
+# tokens y sin Claude. Corre también si la noche terminó matada o con
+# excepción (`exit_code` != 0). Su fallo NO cambia `exit_code`: se registra en
+# el log y la noche conserva el código de `run-night`. Va después de run-night
+# y de la ventana de gasto (el Editor ya terminó), nunca antes. Con
+# `--dry-run` entre los argumentos no se ejecuta: un ensayo no debe escribir.
+dry_run=0
+for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+        dry_run=1
+    fi
+done
+evaluate_exit_code="omitido"
+if [[ "$dry_run" -eq 1 ]]; then
+    echo "run-night-scheduled: --dry-run: se omite evaluate-tensions." >>"$out_log"
+else
+    set +e
+    caffeinate -is uv run --frozen nocturna evaluate-tensions >>"$out_log" 2>>"$err_log"
+    evaluate_exit_code=$?
+    set -e
+    if [[ "$evaluate_exit_code" -ne 0 ]]; then
+        echo "run-night-scheduled: evaluate-tensions falló (código $evaluate_exit_code); la noche conserva el código de run-night ($exit_code)." >>"$err_log"
+    fi
+fi
+
 {
     echo "fin: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "código de salida: $exit_code"
+    echo "evaluate-tensions, código de salida: $evaluate_exit_code (no afecta al de la noche)"
     echo "log de salida estándar: $out_log"
     echo "log de errores: $err_log"
 } >>"$out_log"

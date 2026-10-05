@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 
 from nocturna.domain.catalog import CatalogSolution
 from nocturna.domain.entities import MeasuredParameter
+from nocturna.domain.errors import PlanetResolutionFailed
 
 
 class FakeExoplanetCatalog:
@@ -15,7 +16,10 @@ class FakeExoplanetCatalog:
         self,
         aliases: Mapping[str, str] | None = None,
         solutions: Mapping[tuple[str, MeasuredParameter], Sequence[CatalogSolution]] | None = None,
+        failing: set[str] | None = None,
     ) -> None:
+        # D16: nombres cuya resolución falla (`PlanetResolutionFailed`); mutable.
+        self.failing: set[str] = set(failing or ())
         self._aliases = dict(aliases or {})
         self._solutions = {key: tuple(value) for key, value in (solutions or {}).items()}
         self.resolve_calls: list[str] = []
@@ -23,6 +27,8 @@ class FakeExoplanetCatalog:
 
     async def resolve_planet(self, name: str) -> str | None:
         self.resolve_calls.append(name)
+        if name in self.failing:
+            raise PlanetResolutionFailed(f"alias anómalo para {name!r}")
         return self._aliases.get(name)
 
     async def solutions(

@@ -13,7 +13,14 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nocturna.infrastructure.arxiv.retry import MAX_JITTER_FACTOR
@@ -396,6 +403,25 @@ class ExoplanetFilterConfig(BaseModel):
         return values
 
 
+class MeasurementFindingsConfig(BaseModel):
+    """Findings `primera_medida` y `confirmacion_independiente` (T89,
+    `[measurement_findings]`). Sin defaults en código.
+
+    `max_candidates_per_night` acota los candidatos de T89 que entran en el
+    Editor cada noche (suma al peor caso de su reserva, validado en
+    `PipelineConfig`). `confirmation_max_sigma` y `confirmation_window_days`
+    son los umbrales de la `confirmacion_independiente`; `confirmation_enabled`
+    la apaga hasta cerrar T83 (D6).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_candidates_per_night: int = Field(ge=0)
+    confirmation_max_sigma: float = Field(gt=0)
+    confirmation_window_days: int = Field(gt=0)
+    confirmation_enabled: StrictBool
+
+
 class PipelineConfig(BaseModel):
     """Configuración completa del pipeline, agregando todas las secciones."""
 
@@ -410,6 +436,7 @@ class PipelineConfig(BaseModel):
     reader: ReaderConfig
     tension: TensionConfig
     exoplanet_filter: ExoplanetFilterConfig
+    measurement_findings: MeasurementFindingsConfig
 
     @model_validator(mode="after")
     def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":
@@ -479,24 +506,31 @@ class PipelineConfig(BaseModel):
         y este es el único modelo que ve ambas a la vez; el validador vive
         aquí y no en `BudgetConfig` por eso. El peor caso es que los
         `limits.max_items_per_night` ítems de la noche lleguen todos como
-        candidatos al Editor: si `editor_base_tokens +
-        max_items_per_night * editor_tokens_per_candidate` no cabe en
+        candidatos al Editor, más los `measurement_findings.
+        max_candidates_per_night` de T89: si `editor_base_tokens +
+        (max_items_per_night + max_candidates_per_night) *
+        editor_tokens_per_candidate` no cabe en
         `editor_reserve_tokens`, quien calibre `max_items_per_night` o las
         estimaciones por candidato en T60 sin subir la reserva a la vez
         debe ver la carga de la configuración fallar de día, no descubrirlo
         a las 04:00 con la noche entera pagada y el Editor sin presupuesto
         para publicar nada.
         """
+        max_candidates = (
+            self.limits.max_items_per_night + self.measurement_findings.max_candidates_per_night
+        )
         worst_case = (
             self.budget.editor_base_tokens
-            + self.limits.max_items_per_night * self.budget.editor_tokens_per_candidate
+            + max_candidates * self.budget.editor_tokens_per_candidate
         )
         if worst_case > self.budget.editor_reserve_tokens:
             raise ValueError(
                 "editor_reserve_tokens "
                 f"({self.budget.editor_reserve_tokens}) no cubre el peor caso de "
-                f"editor_base_tokens + max_items_per_night * editor_tokens_per_candidate "
-                f"({self.budget.editor_base_tokens} + {self.limits.max_items_per_night} * "
+                "editor_base_tokens + (max_items_per_night + max_candidates_per_night) * "
+                f"editor_tokens_per_candidate ({self.budget.editor_base_tokens} + "
+                f"({self.limits.max_items_per_night} + "
+                f"{self.measurement_findings.max_candidates_per_night}) * "
                 f"{self.budget.editor_tokens_per_candidate} = {worst_case})"
             )
         return self

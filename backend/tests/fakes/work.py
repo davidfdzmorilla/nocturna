@@ -27,14 +27,28 @@ alcance de T41 paso 7.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 from uuid import UUID
 
 from nocturna.application.budget import BudgetGuard
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
-from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
+from nocturna.application.use_cases.generate_measurement_findings import (
+    MeasurementFindingsWork,
+    MeasurementFindingsWorkFactory,
+)
+from nocturna.domain.entities import (
+    AgentCall,
+    Finding,
+    FindingType,
+    Item,
+    ItemStatus,
+    Reading,
+    Run,
+    RunStatus,
+)
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.repositories import TensionEvaluationRepository
 
 
 class InMemoryRunRepository:
@@ -163,6 +177,16 @@ class InMemoryFindingRepository:
             raise LookupError(f"no existe Finding con id={finding.id}")
         self._findings[finding.id] = finding
 
+    def evaluation_ids_with_finding(self, type: FindingType) -> frozenset[UUID]:
+        return frozenset(
+            f.tension_evaluation_id
+            for f in self._findings.values()
+            if f.type == type and f.tension_evaluation_id is not None
+        )
+
+    def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
+        return sum(1 for f in self._findings.values() if f.run_id == run_id and f.type in types)
+
 
 def make_work_factory(
     *,
@@ -260,3 +284,19 @@ def net_counting_work_factory(
             open_count[0] -= 1
 
     return _net_counting, open_count
+
+
+def make_measurement_findings_work_factory(
+    *,
+    items: InMemoryItemRepository,
+    findings: InMemoryFindingRepository,
+    evaluations: TensionEvaluationRepository,
+) -> MeasurementFindingsWorkFactory:
+    """Fábrica en memoria del generador de findings de medidas (T89): sin
+    `BudgetGuard` ni repositorio de `AgentCall`, como la real."""
+
+    @contextmanager
+    def _work() -> Iterator[MeasurementFindingsWork]:
+        yield MeasurementFindingsWork(items=items, findings=findings, evaluations=evaluations)
+
+    return _work
