@@ -832,6 +832,7 @@ def load_ep_readings(session: Session) -> list[EpReading]:
     stmt = (
         sa.select(ItemRow, ReadingRow)
         .join(ReadingRow, ReadingRow.item_id == ItemRow.id)
+        .where(ReadingRow.superseded_at.is_(None))
         .where(ItemRow.categories.contains(["astro-ph.EP"]))
         .where(sa.not_(ItemRow.external_id.like("9999.%")))
         .order_by(ItemRow.external_id)

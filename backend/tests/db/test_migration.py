@@ -99,7 +99,7 @@ def test_columnas_y_nulabilidad_de_readings(scratch_database_url):
         "tokens_out",
         "model",
     }
-    expected_nullable = {"measurements"}
+    expected_nullable = {"measurements", "prompt_version", "superseded_at"}
     assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:
         assert columns[name]["nullable"] is False, f"'{name}' debería ser NOT NULL"
@@ -324,7 +324,7 @@ def test_los_cinco_indices_existen_por_nombre(test_database_url):
                 {
                     "names": [
                         "uq_items_source_external_id",
-                        "uq_readings_item_id",
+                        "uq_readings_item_id_current",
                         "ix_findings_published_at",
                         "uq_runs_status_running",
                         "ix_agent_calls_run_id_agent",
@@ -337,7 +337,7 @@ def test_los_cinco_indices_existen_por_nombre(test_database_url):
     found = {row.indexname: row.indexdef for row in rows}
     assert set(found) == {
         "uq_items_source_external_id",
-        "uq_readings_item_id",
+        "uq_readings_item_id_current",
         "ix_findings_published_at",
         "uq_runs_status_running",
         "ix_agent_calls_run_id_agent",

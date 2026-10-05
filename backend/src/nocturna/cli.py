@@ -197,6 +197,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.application.agents.prompt_loader import (
@@ -236,7 +237,13 @@ from nocturna.application.use_cases.popularize_reading import (
     PopularizeReading,
     PopularizeResult,
 )
-from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
+from nocturna.application.use_cases.read_item import (
+    ReaderPrompt,
+    ReadItem,
+    ReadOutcome,
+    RereadRefused,
+    reread_refusal,
+)
 from nocturna.application.use_cases.record_tension_evaluations import (
     EvaluationRunReport,
     RecordTensionEvaluations,
@@ -555,6 +562,20 @@ def _build_parser() -> argparse.ArgumentParser:
         type=UUID,
         metavar="ITEM_ID",
         help="UUID del Item a leer. Un UUID mal formado es un error de argumentos (código 2).",
+    )
+    run_item.add_argument(
+        "--reader",
+        choices=["v3"],
+        default=None,
+        help=(
+            "T82: relee un Item ya leído con reader-v3 (solo Reader, sin Popularizer ni "
+            "Editor). Exige --force."
+        ),
+    )
+    run_item.add_argument(
+        "--force",
+        action="store_true",
+        help="T82: confirma la relectura. Exige --reader v3.",
     )
 
     archive_snapshot = subparsers.add_parser(
@@ -1974,8 +1995,10 @@ def _edit_one_night(
     """Ejecuta el Editor sobre los candidatos pendientes de `run_id` y traduce
     el resultado a `(exit_code, run_status)`.
 
-    Única función de este módulo que puede devolver `RunStatus.COMPLETED`
-    (T43, paso 5; ver el docstring del módulo). `max_attempts` se ata a
+    Única función de la cadena de `run-item`/`run-night` que puede devolver
+    `RunStatus.COMPLETED` (T43, paso 5; ver el docstring del módulo). Desde
+    T82, `_reread_item` (relectura solo del Reader, sin Editor) cierra su
+    propio Run `COMPLETED` por otra vía. `max_attempts` se ata a
     `limits.max_editor_calls_per_night` -- nunca a `max_calls_per_item`, que
     es del Reader/Popularizer -- para que el bucle de reintento de
     `AgentRunner` y el tope de `BudgetGuard` no puedan discrepar.
@@ -2242,10 +2265,164 @@ def _run_item(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _new_run_unless_running(
+    session_factory: sessionmaker[Session], policy: BudgetPolicy, clock: SystemClock
+) -> UUID | None:
+    """Abre un `Run` nuevo solo si no hay ninguno `RUNNING`, en una sola unidad
+    de trabajo. `None` si lo hay: nunca se adopta el Run ajeno (T82)."""
+    try:
+        with unit_of_work(session_factory) as session:
+            runs = SqlAlchemyRunRepository(session)
+            if runs.current() is not None:
+                return None
+            now = clock.now()
+            run = Run(
+                started_at=now,
+                budget_tokens=effective_nightly_tokens(policy, now),
+                notes="reread",
+            )
+            runs.add(run)
+            return run.id
+    except IntegrityError as exc:
+        # Carrera: otro proceso abrió un Run RUNNING entre `current()` y el
+        # commit; `uq_runs_status_running` lo rechaza. Equivale a "hay un Run".
+        if "uq_runs_status_running" not in str(exc):
+            raise
+        return None
+
+
+def _reread_item(args: argparse.Namespace) -> int:
+    """`run-item <id> --reader v3 --force` (T82): relee un ítem ya leído con
+    `reader-v3` y sustituye su `Reading` vigente. Solo Reader.
+
+    Códigos de salida: `0` releído (Run `COMPLETED`) · `1` lectura fallida
+    (Run `PARTIAL`) · `2` argumentos (lo decide `main`) · `3` el ítem no
+    existe, no tiene lectura vigente o no es elegible (`reread_refusal`),
+    sin Run · `4` fuera de ventana (sin Run) o denegación de `BudgetGuard`
+    (`terminal_status_for`) · `9` hay un Run `RUNNING`: no se adopta, no se
+    gasta nada y el Run ajeno no se toca. El Run propio lleva `notes` con
+    "reread" (D9 de T82) para distinguirlo de una noche en las métricas.
+
+    Orden: configuración y prompts; pre-comprobaciones sin abrir Run
+    (elegibilidad antes de cualquier `authorize`); ventana; Run; relectura;
+    cierre del Run. Cada intento de la relectura pasa por `BudgetGuard`
+    dentro de `AgentRunner`, con la estimación de v3.
+    """
+    from nocturna.infrastructure.llm.agent_sdk_provider import AgentSDKProvider
+
+    settings = Settings()
+    config = load_pipeline_config()
+    policy = budget_policy_from_config(config)
+    clock = system_clock_from_config(config)
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    reader_prompts = _load_reader_prompts()
+    measures_categories = frozenset(config.reader.measurement_categories)
+
+    with unit_of_work(session_factory) as session:
+        item = SqlAlchemyItemRepository(session).get(args.item_id)
+        previous = (
+            SqlAlchemyReadingRepository(session).get_for_item(args.item_id)
+            if item is not None
+            else None
+        )
+    if item is None:
+        print(f"no existe ningún Item con id={args.item_id}", file=sys.stderr)
+        return 3
+    if previous is None:
+        print(
+            f"el Item {item.external_id} no tiene una lectura vigente que releer "
+            f"(estado '{item.status.value}')",
+            file=sys.stderr,
+        )
+        return 3
+    refusal = reread_refusal(item, previous, measures_categories)
+    if refusal is not None:
+        print(f"el Item {item.external_id} no se puede releer: {refusal.value}", file=sys.stderr)
+        return 3
+
+    if not is_within_window(clock.now(), policy.window_start, policy.window_hard_stop):
+        print(
+            "relectura denegada: outside_window. Fuera de la ventana de ejecución "
+            "(window.start/window.hard_stop en config/pipeline.toml). No hay ninguna "
+            "bandera para saltarla; edita esa sección si necesitas depurar de día.",
+            file=sys.stderr,
+        )
+        return 4
+
+    run_id = _new_run_unless_running(session_factory, policy, clock)
+    if run_id is None:
+        print(
+            "hay un Run RUNNING (la noche en curso u otra invocación): la relectura no lo "
+            "adopta y sale sin gastar. Espera a que termine.",
+            file=sys.stderr,
+        )
+        return 9
+    print(
+        f"run-item --reader v3 abre un Run nuevo ({run_id}) con presupuesto de noche completo; "
+        "un bucle de relecturas no está acotado por nightly_tokens en conjunto, solo "
+        "window.hard_stop lo limita.",
+        file=sys.stderr,
+    )
+    work = _agent_work_factory(session_factory, run_id, policy, clock)
+
+    exit_code = 1
+    status = RunStatus.PARTIAL
+    try:
+        read_item = _build_read_item(
+            config=config, work=work, provider=AgentSDKProvider(), prompts=reader_prompts
+        )
+        try:
+            result = asyncio.run(read_item.reread_with_measurements(item, previous))
+        except RereadRefused as exc:
+            # Defensiva: `reread_refusal` ya filtró estos mismos objetos antes
+            # de abrir el Run, así que hoy no se alcanza. Una carrera real (otro
+            # proceso sustituye la lectura vigente durante la llamada) no llega
+            # aquí: `supersede` lanza InvariantViolation y el Run queda FAILED.
+            print(
+                f"el Item {item.external_id} no se puede releer: {exc.reason.value}",
+                file=sys.stderr,
+            )
+            exit_code, status = 3, RunStatus.PARTIAL
+        except BudgetDenied as exc:
+            _print_budget_denial(exc, role="Reader")
+            exit_code, status = 4, terminal_status_for(exc.reason)
+        else:
+            if result.outcome is not ReadOutcome.READ or result.reading is None:
+                print(
+                    f"relectura fallida para {item.external_id}: {result.outcome.value} "
+                    f"(intentos={result.attempts}, tokens gastados={result.tokens_spent}); "
+                    "la lectura previa sigue vigente",
+                    file=sys.stderr,
+                )
+            else:
+                _print_read_item_report(
+                    item=item,
+                    reading=result.reading,
+                    attempts=result.attempts,
+                    tokens_spent=result.tokens_spent,
+                    prompt_version=result.prompt_version,
+                    work=work,
+                    run_id=run_id,
+                )
+                exit_code, status = 0, RunStatus.COMPLETED
+    except BaseException:
+        # Incluye KeyboardInterrupt/CancelledError: el Run no puede quedar
+        # RUNNING (bloquearía `uq_runs_status_running`). Se relanza siempre.
+        _finish_run(session_factory, run_id, RunStatus.FAILED, clock.now())
+        raise
+    _finish_run(session_factory, run_id, status, clock.now())
+    return exit_code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "run-item":
+        if (args.reader is None) != (not args.force):
+            parser.error("--reader v3 y --force deben usarse juntos")
+        if args.reader is not None:
+            return _reread_item(args)
         return _run_item(args)
     if args.command == "archive-snapshot":
         return _archive_snapshot(args)

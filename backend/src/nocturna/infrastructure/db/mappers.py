@@ -271,6 +271,7 @@ def reading_to_row(reading: Reading) -> ReadingRow:
         tokens_out=reading.tokens_out,
         model=reading.model,
         measurements=_measurements_to_json(reading.measurements),
+        prompt_version=reading.prompt_version,
     )
 
 
@@ -288,6 +289,7 @@ def reading_from_row(row: ReadingRow) -> Reading:
         tokens_out=row.tokens_out,
         model=row.model,
         measurements=_measurements_from_json(row.measurements),
+        prompt_version=row.prompt_version,
     )
 
 

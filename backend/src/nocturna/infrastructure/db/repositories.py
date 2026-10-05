@@ -44,6 +44,7 @@ from nocturna.domain.entities import (
     Run,
     RunStatus,
 )
+from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.tension import TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
@@ -175,18 +176,50 @@ class SqlAlchemyReadingRepository:
         self._session.add(reading_to_row(reading))
 
     def get_for_item(self, item_id: UUID) -> Reading | None:
-        stmt = select(ReadingRow).where(ReadingRow.item_id == item_id)
+        stmt = select(ReadingRow).where(
+            ReadingRow.item_id == item_id, ReadingRow.superseded_at.is_(None)
+        )
         row = self._session.execute(stmt).scalar_one_or_none()
         return reading_from_row(row) if row is not None else None
 
+    def supersede(self, previous_id: UUID, reading: Reading) -> None:
+        """Marca `previous_id` como sustituida y añade `reading` como vigente.
+
+        El `UPDATE` es explícito y se vacía (`flush`) antes del `INSERT`: el
+        índice único parcial `uq_readings_item_id_current` rechazaría dos
+        vigentes a la vez, y el orden del unit-of-work de SQLAlchemy no está
+        garantizado. `rowcount != 1` significa que la previa no existe, ya
+        estaba sustituida o es de otro ítem.
+        """
+        result = self._session.execute(
+            update(ReadingRow)
+            .where(
+                ReadingRow.id == previous_id,
+                ReadingRow.item_id == reading.item_id,
+                ReadingRow.superseded_at.is_(None),
+            )
+            .values(superseded_at=func.now())
+        )
+        if result.rowcount != 1:  # type: ignore[attr-defined]
+            raise InvariantViolation(
+                f"la lectura {previous_id} no es la vigente del ítem {reading.item_id}"
+            )
+        self._session.flush()
+        self._session.add(reading_to_row(reading))
+        self._session.flush()
+
     def with_measurements(self) -> list[Reading]:
         """Lecturas con `measurements IS NOT NULL`, ordenadas por `id`.
+
+        Solo lecturas vigentes (`superseded_at IS NULL`, T82).
 
         `JSONB(none_as_null=True)` guarda `None` como SQL NULL y `()` como
         `[]`, así que `IS NOT NULL` separa "no extraído" de "sin medidas".
         """
         stmt = (
-            select(ReadingRow).where(ReadingRow.measurements.is_not(None)).order_by(ReadingRow.id)
+            select(ReadingRow)
+            .where(ReadingRow.measurements.is_not(None), ReadingRow.superseded_at.is_(None))
+            .order_by(ReadingRow.id)
         )
         return [reading_from_row(row) for row in self._session.execute(stmt).scalars()]
 
@@ -391,9 +424,16 @@ class SqlAlchemyAgentCallRepository:
         return self._session.execute(stmt).scalar_one()
 
     def count_runs_with_prompt_version(self, prompt_version: str) -> int:
-        """Runs distintos con al menos una llamada de esa `prompt_version`."""
-        stmt = select(func.count(func.distinct(AgentCallRow.run_id))).where(
-            AgentCallRow.prompt_version == prompt_version
+        """Runs de noche distintos con al menos una llamada de esa
+        `prompt_version`. Excluye los Runs de relectura (`notes = 'reread'`,
+        D9 de T82): el criterio de T75 cuenta noches de `run-night`."""
+        stmt = (
+            select(func.count(func.distinct(AgentCallRow.run_id)))
+            .join(RunRow, RunRow.id == AgentCallRow.run_id)
+            .where(
+                AgentCallRow.prompt_version == prompt_version,
+                RunRow.notes.is_distinct_from("reread"),
+            )
         )
         return self._session.execute(stmt).scalar_one()
 
