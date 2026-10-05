@@ -125,6 +125,12 @@ min_absolute_difference_hours = 1.0
 alias_tolerance = 0.01
 alias_max_harmonic = 5
 
+[measurement_findings]
+max_candidates_per_night = 5
+confirmation_max_sigma = 2.0
+confirmation_window_days = 30
+confirmation_enabled = false
+
 [llm]
 provider = "agent_sdk"
 """
@@ -435,6 +441,7 @@ def _build_run_night_kwargs(**overrides: object) -> dict[str, object]:
         "read_item": object(),
         "popularize": object(),
         "edit_night": object(),
+        "measurement_findings": object(),
         "run_id": "run-a",
         "max_items": 10,
         "max_consecutive_failures": 5,

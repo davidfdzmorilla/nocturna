@@ -3,27 +3,35 @@
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, time
+from uuid import UUID
 
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
 from fakes.work import (
     InMemoryAgentCallRepository,
     InMemoryFindingRepository,
     InMemoryItemRepository,
     InMemoryReadingRepository,
     InMemoryRunRepository,
+    make_measurement_findings_work_factory,
     make_work_factory,
 )
 
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases.edit_night import EditNight
+from nocturna.application.use_cases.generate_measurement_findings import (
+    GenerateMeasurementFindings,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
 from nocturna.domain.entities import Item, Run
+from nocturna.domain.llm import AgentRole
 
 WITHIN_WINDOW = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
 
@@ -87,6 +95,7 @@ class Environment:
         self.readings = InMemoryReadingRepository()
         self.findings = InMemoryFindingRepository()
         self.agent_calls = InMemoryAgentCallRepository()
+        self.evaluations = InMemoryTensionEvaluationRepository()
         self.clock = FakeClock(now)
         self.guard = BudgetGuard(
             run_id=self.run.id,
@@ -105,6 +114,28 @@ class Environment:
         )
 
 
+def make_generator(
+    env: Environment,
+    *,
+    max_candidates: int = 5,
+    max_sigma: float = 2.0,
+    window_days: int = 30,
+    confirmation_enabled: bool = False,
+) -> GenerateMeasurementFindings:
+    """`GenerateMeasurementFindings` sobre las evaluaciones en memoria de `env`."""
+    return GenerateMeasurementFindings(
+        work=make_measurement_findings_work_factory(
+            items=env.items, findings=env.findings, evaluations=env.evaluations
+        ),
+        clock=env.clock,
+        planet_overview_url=lambda name: f"https://archive.example/overview/{name}",
+        max_candidates=max_candidates,
+        max_sigma=max_sigma,
+        window_days=window_days,
+        confirmation_enabled=confirmation_enabled,
+    )
+
+
 def make_run_night(
     *,
     env: Environment,
@@ -113,6 +144,7 @@ def make_run_night(
     max_items: int = 10,
     max_consecutive_failures: int = 5,
     deadline_s: int = 16_200,
+    measurement_findings: GenerateMeasurementFindings | None = None,
 ) -> RunNight:
     read_item = ReadItem(
         work=env.work,
@@ -164,8 +196,69 @@ def make_run_night(
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=measurement_findings or make_generator(env),
         run_id=env.run.id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,
         deadline_s=deadline_s,
     )
+
+
+def approve_items_in_editor(
+    fake: FakeLLMProvider,
+    *,
+    finding_ids_by_item: Callable[[], dict[UUID, list[UUID]]],
+    item_ids: Sequence[UUID],
+    confidence: float = 0.8,
+    reason: str = "Motivo de prueba.",
+    tokens_in: int = 1000,
+    tokens_out: int = 100,
+) -> None:
+    """Programa una respuesta del Editor que aprueba los `Finding` de `item_ids`.
+
+    Desde T89 el Editor decide por `candidate_id = finding.id`, que solo
+    existe cuando el Popularizer ya persistió el `Finding`: la respuesta se
+    construye en el momento de la llamada, con `finding_ids_by_item()`.
+    """
+
+    def _build(_request: object) -> dict:
+        mapping = finding_ids_by_item()
+        return {
+            "publish": [
+                {"candidate_id": str(finding_id), "confidence": confidence, "reason": reason}
+                for item_id in item_ids
+                for finding_id in mapping.get(item_id, [])
+            ]
+        }
+
+    fake.respond_with(AgentRole.EDITOR, build=_build, tokens_in=tokens_in, tokens_out=tokens_out)
+
+
+def in_memory_finding_ids_by_item(env: Environment) -> Callable[[], dict[UUID, list[UUID]]]:
+    def _mapping() -> dict[UUID, list[UUID]]:
+        result: dict[UUID, list[UUID]] = {}
+        for finding in env.findings.unpublished_for_run(env.run.id):
+            result.setdefault(finding.item_id, []).append(finding.id)
+        return result
+
+    return _mapping
+
+
+def db_finding_ids_by_item(session_factory: object) -> Callable[[], dict[UUID, list[UUID]]]:
+    """Como `in_memory_finding_ids_by_item`, contra la base real: los
+    `Finding` sin publicar, agrupados por `item_id`."""
+    from sqlalchemy import select
+
+    from nocturna.infrastructure.db.models import FindingRow
+
+    def _mapping() -> dict[UUID, list[UUID]]:
+        result: dict[UUID, list[UUID]] = {}
+        with session_factory() as session:  # type: ignore[operator]
+            rows = session.execute(
+                select(FindingRow.item_id, FindingRow.id).where(FindingRow.published_at.is_(None))
+            ).all()
+        for item_id, finding_id in rows:
+            result.setdefault(item_id, []).append(finding_id)
+        return result
+
+    return _mapping

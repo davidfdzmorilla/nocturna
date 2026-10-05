@@ -126,7 +126,14 @@ def test_columnas_y_nulabilidad_de_findings(scratch_database_url):
         "level_amateur",
         "level_technical",
     }
-    expected_nullable = {"confidence", "published_at", "catalog_tension"}
+    expected_nullable = {
+        "confidence",
+        "published_at",
+        "catalog_tension",
+        "first_measurement",
+        "independent_confirmation",
+        "tension_evaluation_id",
+    }
     assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:
         assert columns[name]["nullable"] is False, f"'{name}' debería ser NOT NULL"

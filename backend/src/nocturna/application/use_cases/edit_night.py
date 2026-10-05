@@ -28,6 +28,20 @@ estimado justo en la pieza que guarda el presupuesto (regla dura del plan
 de esta tarea), y `AgentRunner` ya es barato de construir -- no encapsula
 ningún recurso, solo configuración.
 
+## T89: candidatos de varios tipos, decididos por `candidate_id`
+
+Los candidatos de la noche son todos los `Finding` sin publicar del `run_id`,
+de cualquier tipo (`paper_explained`, `primera_medida`,
+`confirmacion_independiente`...). Un mismo ítem puede aportar varios, así que
+el Editor decide por `candidate_id = finding.id`, no por `item_id`. La
+guarda `Item READ` y las transiciones `Item.publish()`/`discard()` solo se
+aplican a `paper_explained`: publicar o descartar un finding de otro tipo no
+cambia el estado del `Item` (ADR 0017 §2 extendido). En el prompt de cada
+candidato van `candidate_id`, `type`, `title`, `level_curious` y, para los
+tipos con datos, una línea `data` (planeta, parámetro, valor±error,
+referencia, σ). Nunca `evidence`: es texto del abstract y, por tanto,
+superficie de inyección.
+
 ## La guarda de estado, por candidato y no fatal
 
 `ReadItem`/`PopularizeReading` exigen el estado de entrada antes de
@@ -46,11 +60,11 @@ no es motivo para no intentar nada.
 
 La publicación real nunca sale del JSON del Editor: sale de la lista de
 candidatos leída de base de datos en la unidad de trabajo 1, cruzada con
-las decisiones del Editor. Un `item_id` que el Editor aprueba pero que no
+las decisiones del Editor. Un `candidate_id` que el Editor aprueba pero que no
 está entre los candidatos no puede publicar nada por construcción -- se
-ignora, se cuenta en `unknown_item_ids` y se registra con `warning`, nunca
+ignora, se cuenta en `unknown_candidate_ids` y se registra con `warning`, nunca
 como `INVALID_OUTPUT`: reintentar cuesta la llamada más cara de la noche
-por una alucinación que, por diseño, no tiene ningún efecto. Un `item_id`
+por una alucinación que, por diseño, no tiene ningún efecto. Un `candidate_id`
 duplicado conserva la primera aparición; las siguientes se ignoran con
 `warning` -- un segundo `Finding.publish()` sobre el mismo `Finding`
 lanzaría `InvalidTransition`, y no hay ninguna razón editorial para que eso
@@ -96,7 +110,13 @@ from nocturna.application.agents.editor_output import (
 from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.domain.clock import Clock
-from nocturna.domain.entities import Finding, Item, ItemStatus
+from nocturna.domain.entities import (
+    Finding,
+    FindingType,
+    Item,
+    ItemStatus,
+    PaperMeasurement,
+)
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentResult, AgentRole, LLMProvider
 
@@ -142,11 +162,11 @@ class EditNightResult:
     módulo) --, la misma cifra que `estimate_editor_tokens` usa para
     calcular el coste estimado. `reasons` solo lleva entradas para los
     `Finding` aprobados: el Editor no da motivo de los que omite, y
-    `published`/`discarded` ya distinguen unos de otros. `unknown_item_ids`
-    son cadenas, no `UUID`: son `item_id` que el Editor devolvió y que no
+    `published`/`discarded` ya distinguen unos de otros. `unknown_candidate_ids`
+    son cadenas, no `UUID`: son `candidate_id` que el Editor devolvió y que no
     corresponden a ningún candidato real, así que no hay garantía de que
     sean UUID válidos que puedan reconstruirse (pueden venir de una
-    alucinación con cualquier forma de texto que `EditorDecision.item_id`
+    alucinación con cualquier forma de texto que `EditorDecision.candidate_id`
     sí haya logrado parsear como UUID, pero que no exista entre los
     candidatos). `tokens_spent` suma el gasto de todos los intentos, igual
     que `ReadItemResult`/`PopularizeResult`; es `0` en `NO_CANDIDATES`,
@@ -158,7 +178,7 @@ class EditNightResult:
     published: list[Finding]
     discarded: list[Finding]
     reasons: dict[UUID, str]
-    unknown_item_ids: tuple[str, ...]
+    unknown_candidate_ids: tuple[str, ...]
     attempts: int
     tokens_spent: int
 
@@ -242,7 +262,9 @@ class EditNight:
                         "todo Finding candidato proviene de un Item ya persistido "
                         f"(item_id={finding.item_id})"
                     )
-                if item.status is not ItemStatus.READ:
+                if finding.type is FindingType.PAPER_EXPLAINED and (
+                    item.status is not ItemStatus.READ
+                ):
                     _logger.warning(
                         "candidato del Editor descartado: Item no está READ "
                         "(run_id=%s, item_id=%s, status=%s)",
@@ -260,7 +282,7 @@ class EditNight:
                 published=[],
                 discarded=[],
                 reasons={},
-                unknown_item_ids=(),
+                unknown_candidate_ids=(),
                 attempts=0,
                 tokens_spent=0,
             )
@@ -300,13 +322,13 @@ class EditNight:
                 published=[],
                 discarded=[],
                 reasons={},
-                unknown_item_ids=(),
+                unknown_candidate_ids=(),
                 attempts=runner_result.attempts,
                 tokens_spent=runner_result.tokens_spent,
             )
 
         editor_output = runner_result.value
-        decisions, unknown_item_ids = self._resolve_decisions(
+        decisions, unknown_candidate_ids = self._resolve_decisions(
             editor_output, candidates=candidates, run_id=run_id
         )
 
@@ -316,14 +338,16 @@ class EditNight:
         published_at = self._clock.now()
         with self._work() as w:
             for finding, item in candidates:
-                decision = decisions.get(finding.item_id)
+                decision = decisions.get(finding.id)
+                is_paper = finding.type is FindingType.PAPER_EXPLAINED
                 if decision is not None:
                     finding.publish(decision.confidence, published_at)
                     w.findings.save(finding)
-                    item.publish()
-                    w.items.save(item)
+                    if is_paper:
+                        item.publish()
+                        w.items.save(item)
                     published.append(finding)
-                    reasons[finding.item_id] = decision.reason
+                    reasons[finding.id] = decision.reason
                     _logger.info(
                         "decisión del Editor: run_id=%s item_id=%s finding_id=%s "
                         "publicado=%s confidence=%s reason=%s",
@@ -335,8 +359,9 @@ class EditNight:
                         decision.reason,
                     )
                 else:
-                    item.discard()
-                    w.items.save(item)
+                    if is_paper:
+                        item.discard()
+                        w.items.save(item)
                     discarded.append(finding)
                     _logger.info(
                         "decisión del Editor: run_id=%s item_id=%s finding_id=%s "
@@ -355,7 +380,7 @@ class EditNight:
             published=published,
             discarded=discarded,
             reasons=reasons,
-            unknown_item_ids=unknown_item_ids,
+            unknown_candidate_ids=unknown_candidate_ids,
             attempts=runner_result.attempts,
             tokens_spent=runner_result.tokens_spent,
         )
@@ -369,55 +394,93 @@ class EditNight:
     ) -> tuple[dict[UUID, EditorDecision], tuple[str, ...]]:
         """Cruza `editor_output.publish` contra los candidatos reales.
 
-        `item_id` que no está entre los candidatos: se ignora, se cuenta en
-        `unknown_item_ids`, `warning` en log -- nunca dispara un reintento
+        `candidate_id` que no está entre los candidatos: se ignora, se cuenta en
+        `unknown_candidate_ids`, `warning` en log -- nunca dispara un reintento
         (ver "Validación de la respuesta del Editor" en el docstring del
-        módulo). `item_id` duplicado: gana la primera aparición, el resto
+        módulo). `candidate_id` duplicado: gana la primera aparición, el resto
         se ignora con `warning`.
         """
-        candidate_ids = {finding.item_id for finding, _ in candidates}
+        candidate_ids = {finding.id for finding, _ in candidates}
         decisions: dict[UUID, EditorDecision] = {}
-        unknown_item_ids: list[str] = []
+        unknown_candidate_ids: list[str] = []
         for decision in editor_output.publish:
-            if decision.item_id not in candidate_ids:
-                unknown_item_ids.append(str(decision.item_id))
+            if decision.candidate_id not in candidate_ids:
+                unknown_candidate_ids.append(str(decision.candidate_id))
                 _logger.warning(
-                    "el Editor aprobó un item_id que no está entre los candidatos, "
-                    "ignorado (run_id=%s, item_id=%s)",
+                    "el Editor aprobó un candidate_id que no está entre los candidatos, "
+                    "ignorado (run_id=%s, candidate_id=%s)",
                     run_id,
-                    decision.item_id,
+                    decision.candidate_id,
                 )
                 continue
-            if decision.item_id in decisions:
+            if decision.candidate_id in decisions:
                 _logger.warning(
-                    "el Editor devolvió un item_id duplicado, se conserva la primera "
-                    "aparición (run_id=%s, item_id=%s)",
+                    "el Editor devolvió un candidate_id duplicado, se conserva la primera "
+                    "aparición (run_id=%s, candidate_id=%s)",
                     run_id,
-                    decision.item_id,
+                    decision.candidate_id,
                 )
                 continue
-            decisions[decision.item_id] = decision
-        return decisions, tuple(unknown_item_ids)
+            decisions[decision.candidate_id] = decision
+        return decisions, tuple(unknown_candidate_ids)
 
     @staticmethod
     def _build_prompt(candidates: list[tuple[Finding, Item]]) -> str:
         """Contenido de usuario de la petición: los candidatos, no instrucciones.
 
-        Solo `item_id`, `title` y `level_curious` de cada candidato --
-        nunca los tres niveles completos, que son ~1.100 tokens/candidato:
-        con `max_items_per_night = 30` (T71.c lo bajó de 40) eso serían
-        decenas de miles de tokens de entrada frente a unos pocos miles
-        con solo el titular y el nivel curioso (`prompts/editor.md` no
-        necesita más para decidir qué merece salir). Todo el bloque viaja
-        envuelto en las marcas
-        `<candidates>`/`</candidates>` que `prompts/editor.md` instruye
-        tratar como dato puro, nunca como instrucción -- mismo patrón que
-        `ReadItem`/`PopularizeReading` aplican a `<abstract>`/`<reading>`.
+        Por candidato: `candidate_id`, `type`, `title`, `level_curious` y, si
+        el tipo tiene datos, una línea `data` -- nunca los tres niveles
+        completos (~1.100 tokens/candidato) ni `evidence` (texto del
+        abstract, superficie de inyección). Todo el bloque viaja envuelto en
+        `<candidates>`/`</candidates>`, que `prompts/editor-v2.md` instruye
+        tratar como dato puro. Los valores se pasan por `_inline`: una sola
+        línea y sin `<`/`>`, para que ningún dato pueda cerrar el bloque.
         """
         lines = ["<candidates>"]
         for finding, _item in candidates:
-            lines.append(f"- item_id: {finding.item_id}")
-            lines.append(f"  title: {finding.title}")
-            lines.append(f"  level_curious: {finding.level_curious}")
+            lines.append(f"- candidate_id: {finding.id}")
+            lines.append(f"  type: {finding.type.value}")
+            lines.append(f"  title: {_inline(finding.title)}")
+            lines.append(f"  level_curious: {_inline(finding.level_curious)}")
+            data = _data_line(finding)
+            if data is not None:
+                lines.append(f"  data: {data}")
         lines.append("</candidates>")
         return "\n".join(lines)
+
+
+def _inline(text: str) -> str:
+    """Una sola línea, sin `<` ni `>`: un dato nunca debe poder cerrar
+    `</candidates>` ni abrir líneas nuevas del bloque."""
+    return " ".join(text.replace("<", " ").replace(">", " ").split())
+
+
+def _num(value: float) -> str:
+    return repr(float(value))
+
+
+def _measurement_data(m: PaperMeasurement) -> str:
+    return f"{_num(m.value)} (+{_num(m.err_plus)}/-{_num(m.err_minus)}) {m.unit.value}"
+
+
+def _data_line(finding: Finding) -> str | None:
+    """Línea `data` del candidato: planeta, parámetro, valor±error, referencia y σ.
+    `None` para `paper_explained` y cualquier tipo sin rama (se omite la línea)."""
+    first = finding.first_measurement
+    if first is not None:
+        values = " | ".join(_measurement_data(m) for m in first.measurements)
+        return _inline(
+            f"planet={first.paper_planet_name}; parameter={first.parameter.value}; "
+            f"value={values}; reference=none ({first.archive_status.value}); sigma=none"
+        )
+    confirmation = finding.independent_confirmation
+    if confirmation is not None:
+        values = " | ".join(_measurement_data(m) for m in confirmation.measurements)
+        ref = confirmation.reference
+        return _inline(
+            f"planet={confirmation.paper_planet_name}; parameter={confirmation.parameter.value}; "
+            f"value={values}; reference={ref.refname} {_num(ref.value)} "
+            f"(+{_num(ref.err_plus)}/-{_num(ref.err_minus)}) {ref.unit.value}; "
+            f"sigma_max={max(confirmation.sigmas):.2f}"
+        )
+    return None

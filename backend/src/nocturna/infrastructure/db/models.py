@@ -167,7 +167,7 @@ class FindingRow(Base):
         PgUUID(as_uuid=True), sa.ForeignKey("runs.id"), nullable=False
     )
     type: Mapped[FindingType] = mapped_column(
-        _str_enum(FindingType, "finding_type"), nullable=False
+        _str_enum(FindingType, "finding_type", length=32), nullable=False
     )
     title: Mapped[str] = mapped_column(sa.Text, nullable=False)
     level_curious: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -179,11 +179,39 @@ class FindingRow(Base):
     # `none_as_null=True`: `None` es SQL NULL y no el JSON `null`, para que el
     # CHECK `catalog_tension_iff_type` funcione. Lleva `schema_version` dentro.
     catalog_tension: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    # T89: un payload JSONB por tipo nuevo (mismo patrón, `schema_version` dentro)
+    # y la evaluación de origen, obligatoria en los dos tipos nuevos.
+    first_measurement: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    independent_confirmation: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    tension_evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("tension_evaluation.id"), nullable=True
+    )
 
     __table_args__ = (
         sa.CheckConstraint(
             "(type = 'catalog_tension') = (catalog_tension IS NOT NULL)",
             name="catalog_tension_iff_type",
+        ),
+        sa.CheckConstraint(
+            "(type = 'primera_medida') = (first_measurement IS NOT NULL)",
+            name="first_measurement_iff_type",
+        ),
+        sa.CheckConstraint(
+            "(type = 'confirmacion_independiente') = (independent_confirmation IS NOT NULL)",
+            name="independent_confirmation_iff_type",
+        ),
+        sa.CheckConstraint(
+            "(type IN ('primera_medida', 'confirmacion_independiente')) "
+            "= (tension_evaluation_id IS NOT NULL)",
+            name="tension_evaluation_id_iff_type",
+        ),
+        sa.Index(
+            "uq_findings_tension_evaluation_id_type",
+            "tension_evaluation_id",
+            "type",
+            unique=True,
         ),
         sa.CheckConstraint(
             "confidence IS NULL OR confidence BETWEEN 0 AND 1", name="confidence_range"

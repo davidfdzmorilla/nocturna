@@ -34,7 +34,16 @@ from nocturna.domain.archive import (
     SnapshotDiff,
     SnapshotKind,
 )
-from nocturna.domain.entities import AgentCall, Finding, Item, ItemStatus, Reading, Run, RunStatus
+from nocturna.domain.entities import (
+    AgentCall,
+    Finding,
+    FindingType,
+    Item,
+    ItemStatus,
+    Reading,
+    Run,
+    RunStatus,
+)
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.tension import TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
@@ -269,6 +278,21 @@ class SqlAlchemyFindingRepository:
         )
         row = self._session.execute(stmt).scalar_one_or_none()
         return finding_from_row(row) if row is not None else None
+
+    def evaluation_ids_with_finding(self, type: FindingType) -> frozenset[UUID]:
+        """Evaluaciones con `Finding` de ese tipo, publicado o no (T89)."""
+        stmt = select(FindingRow.tension_evaluation_id).where(
+            FindingRow.type == type, FindingRow.tension_evaluation_id.is_not(None)
+        )
+        return frozenset(self._session.execute(stmt).scalars().all())
+
+    def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(FindingRow)
+            .where(FindingRow.run_id == run_id, FindingRow.type.in_(list(types)))
+        )
+        return int(self._session.execute(stmt).scalar_one())
 
 
 class SqlAlchemyRunRepository:

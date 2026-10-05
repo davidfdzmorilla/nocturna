@@ -30,6 +30,7 @@ from uuid import uuid4
 import pytest
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
 from fakes.work import (
     InMemoryAgentCallRepository,
     InMemoryFindingRepository,
@@ -38,6 +39,7 @@ from fakes.work import (
     InMemoryRunRepository,
     make_work_factory,
 )
+from helpers.run_night import make_generator
 
 from nocturna import cli
 from nocturna.application.budget import (
@@ -103,6 +105,7 @@ class _Environment:
         self.readings = InMemoryReadingRepository()
         self.findings = InMemoryFindingRepository()
         self.agent_calls = InMemoryAgentCallRepository()
+        self.evaluations = InMemoryTensionEvaluationRepository()
         self.clock = FakeClock(now)
         self.guard = BudgetGuard(
             run_id=self.run.id,
@@ -179,6 +182,7 @@ def _make_run_night(
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=make_generator(env),
         run_id=env.run.id,
         max_items=10,
         max_consecutive_failures=5,

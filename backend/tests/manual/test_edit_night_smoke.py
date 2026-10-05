@@ -98,7 +98,10 @@ from claude_agent_sdk import ResultMessage
 from fakes.clock import FakeClock
 from sqlalchemy import select
 
-from nocturna.application.agents.prompt_loader import EDITOR_PROMPT_VERSION, load_prompt
+from nocturna.application.agents.prompt_loader import (
+    EDITOR_PROMPT_VERSION,
+    load_prompt,
+)
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
 from nocturna.application.use_cases.edit_night import EditNight, EditOutcome
@@ -315,7 +318,7 @@ async def test_smoke_edit_night_llamada_real_produce_decision_y_gasto_contabiliz
         work=work,
         provider=AgentSDKProvider(),
         clock=FakeClock(_WITHIN_WINDOW),
-        system_prompt=load_prompt("editor"),
+        system_prompt=load_prompt(EDITOR_PROMPT_VERSION),
         prompt_version=EDITOR_PROMPT_VERSION,
         model=config.models.editor,
         max_turns=policy.max_turns_per_agent,
@@ -398,12 +401,15 @@ async def test_smoke_edit_night_llamada_real_produce_decision_y_gasto_contabiliz
         f"\n--- decisión del Editor: {len(result.published)} publicados de {result.candidates} ---"
     )
     for finding in result.published:
-        reason = result.reasons.get(finding.item_id, "")
+        reason = result.reasons.get(finding.id, "")
         print(f"  publicado: {finding.title!r} confidence={finding.confidence} motivo={reason!r}")
     for finding in result.discarded:
         print(f"  descartado: {finding.title!r}")
-    if result.unknown_item_ids:
-        print(f"  AVISO: item_id desconocidos devueltos por el Editor: {result.unknown_item_ids}")
+    if result.unknown_candidate_ids:
+        print(
+            "  AVISO: candidate_id desconocidos devueltos por el Editor: "
+            f"{result.unknown_candidate_ids}"
+        )
 
     # `Finding` es un dataclass sin `eq=False`, así que compara por valor: los de
     # `result.published` vienen rehidratados del repositorio y ya mutados (confidence,

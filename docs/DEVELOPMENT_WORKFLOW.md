@@ -52,6 +52,8 @@ En T81 (`archive-snapshot`), tras migrar: `uv run nocturna archive-snapshot --dr
 
 En T88 (`tension_evaluation`), tras migrar y antes del viernes a las 10:00: `uv run nocturna evaluate-tensions --dry-run` y revisar los estados (HIP 67522 b `evaluated` frente a Chakraborty 2026; c `consistent_with_limit`; TOI-6981 b y TOI-210 b `awaiting_reference`); después `uv run nocturna evaluate-tensions` y una segunda ejecución que no debe cambiar nada.
 
+En T89 (findings de medida), tras migrar y antes de la noche: `uv run nocturna evaluate-tensions --dry-run` debe terminar con **0 fallos de resolución** (las filas `awaiting_reference` anteriores a D16 dan por ausente cualquier respuesta del alias distinta de `OK`; si aparece alguno, se revisa a mano antes de la noche); después `uv run nocturna run-night --dry-run` y comprobar la sección de findings de medida: TOI-6981 b (radio) y TOI-210 b (masa y radio) como `primera_medida`, y HIP 67522 b como confirmación "bloqueado (confirmation_enabled=false)". Los envoltorios de launchd se leen del árbol principal, así que el cambio de `run-night-scheduled.sh` entra con el `git pull`.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

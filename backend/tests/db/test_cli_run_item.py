@@ -70,6 +70,7 @@ import pytest
 from factories import make_finding, make_item
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from helpers.run_night import approve_items_in_editor, db_finding_ids_by_item
 from sqlalchemy import select
 
 from nocturna import cli
@@ -390,13 +391,12 @@ def test_exito_encadena_el_editor_y_publica_el_finding_cerrando_el_run_como_comp
         tokens_out=350,
     )
     item_id = _seed_item(db_session_factory)
-    fake_provider.respond(
-        AgentRole.EDITOR,
-        json={
-            "publish": [
-                {"item_id": str(item_id), "confidence": 0.8, "reason": "hallazgo relevante"}
-            ]
-        },
+    approve_items_in_editor(
+        fake_provider,
+        finding_ids_by_item=db_finding_ids_by_item(db_session_factory),
+        item_ids=[item_id],
+        confidence=0.8,
+        reason="hallazgo relevante",
         tokens_in=600,
         tokens_out=120,
     )

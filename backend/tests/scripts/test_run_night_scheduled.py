@@ -107,6 +107,9 @@ fi
 if [ -n "${UV_SLEEP:-}" ]; then
     sleep "${UV_SLEEP}"
 fi
+case "$*" in
+    *evaluate-tensions*) exit "${UV_EVALUATE_EXIT_CODE:-0}" ;;
+esac
 exit "${UV_EXIT_CODE:-0}"
 """
 
@@ -433,7 +436,55 @@ def test_ejecuta_cuando_las_precondiciones_pasan(tmp_path, uv_exit_code):
     assert result.returncode == uv_exit_code
     assert uv_call_log.exists(), "el 'uv' falso debía invocarse con las precondiciones en verde"
     calls = uv_call_log.read_text().splitlines()
-    assert calls == ["run --frozen nocturna run-night"], calls
+    # T89 (D10): tras la noche se evalúan las lecturas (cero tokens).
+    assert calls == [
+        "run --frozen nocturna run-night",
+        "run --frozen nocturna evaluate-tensions",
+    ], calls
+
+
+@pytest.mark.parametrize("night_exit_code", [0, 7, 8])
+def test_fallo_de_evaluate_tensions_no_cambia_el_codigo_de_la_noche(tmp_path, night_exit_code):
+    """T89 (D10): `evaluate-tensions` corre después de `run-night`; si falla, el
+    código de salida sigue siendo el de `run-night` y el fallo queda en el log."""
+    home, bin_dir = _setup_env(tmp_path)
+    uv_call_log = tmp_path / "uv-calls.log"
+    env = _base_env(
+        home,
+        bin_dir,
+        extra={
+            "UV_CALL_LOG_FILE": str(uv_call_log),
+            "UV_EXIT_CODE": str(night_exit_code),
+            "UV_EVALUATE_EXIT_CODE": "3",
+        },
+    )
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == night_exit_code
+    calls = uv_call_log.read_text().splitlines()
+    assert calls[-1] == "run --frozen nocturna evaluate-tensions", calls
+    err_log = _log_dir(home) / f"night-{_night_key()}.err.log"
+    assert "evaluate-tensions falló (código 3)" in err_log.read_text()
+    out_log = _log_dir(home) / f"night-{_night_key()}.out.log"
+    assert "evaluate-tensions, código de salida: 3" in out_log.read_text()
+
+
+def test_no_se_evalua_si_run_night_no_llega_a_lanzarse(tmp_path):
+    """Sin precondiciones (Docker caído) no se invoca ni `run-night` ni `evaluate-tensions`."""
+    home, bin_dir = _setup_env(tmp_path)
+    uv_call_log = tmp_path / "uv-calls.log"
+    env = _base_env(
+        home,
+        bin_dir,
+        wait_s="1",
+        extra={"UV_CALL_LOG_FILE": str(uv_call_log), "DOCKER_INFO_EXIT": "1"},
+    )
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == 75
+    assert not uv_call_log.exists()
 
 
 def test_reenvia_argumentos(tmp_path):
@@ -446,7 +497,25 @@ def test_reenvia_argumentos(tmp_path):
 
     assert result.returncode == 0
     calls = uv_call_log.read_text().splitlines()
+    # Con --dry-run no se lanza evaluate-tensions (un ensayo no escribe).
     assert calls == ["run --frozen nocturna run-night --dry-run"], calls
+    out_log = _log_dir(home) / f"night-{_night_key()}.out.log"
+    assert "se omite evaluate-tensions" in out_log.read_text()
+
+
+def test_reenvia_otros_argumentos_y_evalua(tmp_path):
+    """Sin --dry-run, los argumentos solo van a `run-night`; `evaluate-tensions` no los recibe."""
+    home, bin_dir = _setup_env(tmp_path)
+    uv_call_log = tmp_path / "uv-calls.log"
+    env = _base_env(home, bin_dir, extra={"UV_CALL_LOG_FILE": str(uv_call_log)})
+
+    result = _run_wrapper(["--foo"], env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert uv_call_log.read_text().splitlines() == [
+        "run --frozen nocturna run-night --foo",
+        "run --frozen nocturna evaluate-tensions",
+    ]
 
 
 def test_centinela_impide_el_segundo_lanzamiento(tmp_path):
@@ -461,9 +530,10 @@ def test_centinela_impide_el_segundo_lanzamiento(tmp_path):
     assert first.returncode == 0
     assert second.returncode == 76
     calls = uv_call_log.read_text().splitlines()
-    assert len(calls) == 1, (
-        f"'uv' se invocó {len(calls)} veces; el centinela debía impedir la segunda: {calls}"
-    )
+    assert calls == [
+        "run --frozen nocturna run-night",
+        "run --frozen nocturna evaluate-tensions",
+    ], f"el centinela debía impedir el segundo lanzamiento completo: {calls}"
     sentinel = _log_dir(home) / f".launched-{_night_key()}"
     assert sentinel.exists()
 
@@ -498,7 +568,10 @@ def test_centinela_es_atomico_bajo_lanzamientos_concurrentes(tmp_path):
         f"(a: out={out_a!r} err={err_a!r}; b: out={out_b!r} err={err_b!r})"
     )
     calls = uv_call_log.read_text().splitlines()
-    assert len(calls) == 1, f"'uv' debía invocarse exactamente una vez: {calls}"
+    assert calls == [
+        "run --frozen nocturna run-night",
+        "run --frozen nocturna evaluate-tensions",
+    ], f"'run-night' debía lanzarse exactamente una vez: {calls}"
 
 
 def test_centinela_se_crea_antes_de_ejecutar(tmp_path):

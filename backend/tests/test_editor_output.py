@@ -3,7 +3,7 @@
 Puros, sin IO ni base de datos: la entrada es texto fijo que simula la
 salida cruda del Editor. Ningún test llama a Claude. Mismo patrón que
 `test_popularizer_output.py` (T42), adaptado a la forma del Editor
-(`publish`: lista de `{item_id, confidence, reason}`).
+(`publish`: lista de `{candidate_id, confidence, reason}`).
 """
 
 import json
@@ -23,7 +23,7 @@ from nocturna.application.agents.parsing import InvalidAgentOutput
 
 def _decision(**overrides) -> dict:
     decision = {
-        "item_id": str(uuid4()),
+        "candidate_id": str(uuid4()),
         "confidence": 0.8,
         "reason": "Hallazgo con potencial de interés general.",
     }
@@ -36,8 +36,8 @@ def _payload(*decisions: dict) -> dict:
 
 
 def test_editor_output_valido_se_parsea():
-    item_id = uuid4()
-    text = json.dumps(_payload(_decision(item_id=str(item_id))))
+    candidate_id = uuid4()
+    text = json.dumps(_payload(_decision(candidate_id=str(candidate_id))))
 
     output = parse_editor_output(text)
 
@@ -45,7 +45,7 @@ def test_editor_output_valido_se_parsea():
     assert len(output.publish) == 1
     decision = output.publish[0]
     assert isinstance(decision, EditorDecision)
-    assert decision.item_id == item_id
+    assert decision.candidate_id == candidate_id
     assert decision.confidence == 0.8
     assert decision.reason == "Hallazgo con potencial de interés general."
 
@@ -64,7 +64,7 @@ def test_editor_output_publish_vacia_es_valida():
 # --- EditorOutput: campos obligatorios -------------------------------------
 
 
-@pytest.mark.parametrize("field_name", ["item_id", "confidence", "reason"])
+@pytest.mark.parametrize("field_name", ["candidate_id", "confidence", "reason"])
 def test_editor_output_decision_con_campo_ausente_falla(field_name):
     decision = _decision()
     del decision[field_name]
@@ -132,11 +132,11 @@ def test_editor_output_reason_vacio_o_en_blanco_falla(blank_value):
         parse_editor_output(text)
 
 
-# --- EditorOutput: item_id mal formado -------------------------------------
+# --- EditorOutput: candidate_id mal formado -------------------------------------
 
 
-def test_editor_output_item_id_mal_formado_falla():
-    text = json.dumps(_payload(_decision(item_id="no-es-un-uuid")))
+def test_editor_output_candidate_id_mal_formado_falla():
+    text = json.dumps(_payload(_decision(candidate_id="no-es-un-uuid")))
 
     with pytest.raises(InvalidAgentOutput):
         parse_editor_output(text)
@@ -184,7 +184,7 @@ def test_editor_output_con_caracteres_de_control_crudos_se_repara():
     # literal dentro de una cadena JSON, aquí en `reason`, se repara antes
     # de fallar el parseo.
     raw = (
-        '{"publish": [{"item_id": "'
+        '{"publish": [{"candidate_id": "'
         + str(uuid4())
         + '", "confidence": 0.7, "reason": "Primera frase.\nSegunda frase."}]}'
     )

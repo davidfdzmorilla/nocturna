@@ -409,6 +409,294 @@ class CatalogTension:
             )
 
 
+# --- T89: findings de medidas (ADR 0020) -------------------------------------
+
+MEASUREMENT_FINDING_SCHEMA_VERSION = 1
+
+
+def _check_schema_version(raw: Mapping[str, object], what: str) -> None:
+    version = raw.get("schema_version")
+    if type(version) is not int or version != MEASUREMENT_FINDING_SCHEMA_VERSION:
+        raise ValueError(
+            f"{what}: schema_version {version!r} desconocida "
+            f"(soportada: {MEASUREMENT_FINDING_SCHEMA_VERSION})"
+        )
+
+
+def _require_finite_positive(value: float, field_name: str) -> None:
+    if not math.isfinite(value) or value <= 0:
+        raise InvariantViolation(f"'{field_name}' debe ser finito y mayor que cero")
+
+
+def _require_finite_non_negative(value: float, field_name: str) -> None:
+    if not math.isfinite(value) or value < 0:
+        raise InvariantViolation(f"'{field_name}' debe ser finito y no negativo")
+
+
+@dataclass(frozen=True, slots=True)
+class PaperMeasurement:
+    """Valor medido por el paper con sus dos errores. Es `Measurement` sin
+    `evidence` (texto del abstract: no entra en los findings de T89)."""
+
+    value: float
+    err_plus: float
+    err_minus: float
+    unit: MeasurementUnit
+
+    def __post_init__(self) -> None:
+        _require_finite_positive(self.value, "value")
+        _require_finite_non_negative(self.err_plus, "err_plus")
+        _require_finite_non_negative(self.err_minus, "err_minus")
+
+    @classmethod
+    def from_measurement(cls, measurement: Measurement) -> "PaperMeasurement":
+        if not measurement.usable_for_tension:
+            raise InvariantViolation("la medida no es utilizable (valor puntual con dos errores)")
+        assert measurement.err_plus is not None and measurement.err_minus is not None  # noqa: S101
+        return cls(
+            value=measurement.value,
+            err_plus=measurement.err_plus,
+            err_minus=measurement.err_minus,
+            unit=measurement.unit,
+        )
+
+    def to_json(self) -> dict:
+        return {
+            "value": self.value,
+            "err_plus": self.err_plus,
+            "err_minus": self.err_minus,
+            "unit": self.unit.value,
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, object]) -> "PaperMeasurement":
+        return cls(
+            value=raw["value"],  # type: ignore[arg-type]
+            err_plus=raw["err_plus"],  # type: ignore[arg-type]
+            err_minus=raw["err_minus"],  # type: ignore[arg-type]
+            unit=MeasurementUnit(raw["unit"]),
+        )
+
+
+def _validate_paper_measurements(
+    parameter: MeasuredParameter, measurements: tuple[PaperMeasurement, ...]
+) -> None:
+    if not measurements:
+        raise InvariantViolation("'measurements' no puede estar vacía")
+    for m in measurements:
+        if not isinstance(m, PaperMeasurement):
+            raise InvariantViolation("cada elemento de 'measurements' debe ser PaperMeasurement")
+        if m.unit not in UNITS_BY_PARAMETER[parameter]:
+            raise InvariantViolation(
+                f"'unit' {m.unit.value!r} no es coherente con 'parameter' {parameter.value!r}"
+            )
+
+
+#: Parámetros que admiten los findings de medidas (D2, D3): el periodo no.
+MEASUREMENT_FINDING_PARAMETERS: frozenset[MeasuredParameter] = frozenset(
+    {MeasuredParameter.MASS, MeasuredParameter.RADIUS}
+)
+
+
+class ArchiveStatus(StrEnum):
+    """Por qué una `primera_medida` lo es (D2)."""
+
+    ABSENT = "absent"
+    NO_COMPARABLE_SOLUTION = "no_comparable_solution"
+
+
+@dataclass(frozen=True, slots=True)
+class FirstMeasurement:
+    """Primera medida de un parámetro de un planeta frente al archivo (T89).
+
+    `archive_status` `absent`: el archivo no conoce el planeta
+    (`archive_planet_name` y `archive_url` son `None`).
+    `no_comparable_solution`: el archivo tiene el planeta pero ninguna
+    solución con error bilateral que sirva de referencia; `archive_planet_name`
+    está informado y `archive_url` puede ir o no.
+    """
+
+    paper_planet_name: str
+    archive_planet_name: str | None
+    parameter: MeasuredParameter
+    archive_status: ArchiveStatus
+    measurements: tuple[PaperMeasurement, ...]
+    archive_url: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.paper_planet_name, "paper_planet_name")
+        object.__setattr__(self, "measurements", tuple(self.measurements))
+        if self.parameter not in MEASUREMENT_FINDING_PARAMETERS:
+            raise InvariantViolation("'parameter' debe ser masa o radio")
+        _validate_paper_measurements(self.parameter, self.measurements)
+        absent = self.archive_status == ArchiveStatus.ABSENT
+        if absent != (self.archive_planet_name is None):
+            raise InvariantViolation(
+                "'archive_planet_name' debe ser None si y solo si 'archive_status' es absent"
+            )
+        if self.archive_planet_name is not None:
+            _require_non_empty(self.archive_planet_name, "archive_planet_name")
+        if absent and self.archive_url is not None:
+            raise InvariantViolation("un planeta ausente del archivo no tiene 'archive_url'")
+        if self.archive_url is not None:
+            _require_non_empty(self.archive_url, "archive_url")
+
+    def to_json(self) -> dict:
+        return {
+            "schema_version": MEASUREMENT_FINDING_SCHEMA_VERSION,
+            "paper_planet_name": self.paper_planet_name,
+            "archive_planet_name": self.archive_planet_name,
+            "parameter": self.parameter.value,
+            "archive_status": self.archive_status.value,
+            "archive_url": self.archive_url,
+            "measurements": [m.to_json() for m in self.measurements],
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, object]) -> "FirstMeasurement":
+        """`schema_version` ausente o distinta de la conocida -> `ValueError`."""
+        _check_schema_version(raw, "first_measurement")
+        return cls(
+            paper_planet_name=raw["paper_planet_name"],  # type: ignore[arg-type]
+            archive_planet_name=raw["archive_planet_name"],  # type: ignore[arg-type]
+            parameter=MeasuredParameter(raw["parameter"]),
+            archive_status=ArchiveStatus(raw["archive_status"]),
+            archive_url=raw["archive_url"],  # type: ignore[arg-type]
+            measurements=tuple(
+                PaperMeasurement.from_json(m)
+                for m in raw["measurements"]  # type: ignore[attr-defined]
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmationReference:
+    """Solución del archivo frente a la que se confirma (la referencia de T88)."""
+
+    refname: str
+    arxiv_id: str | None
+    value: float
+    err_plus: float
+    err_minus: float
+    unit: MeasurementUnit
+    releasedate: date
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.refname, "refname")
+        if self.arxiv_id is not None:
+            _require_non_empty(self.arxiv_id, "arxiv_id")
+        _require_finite_positive(self.value, "value")
+        _require_finite_positive(self.err_plus, "err_plus")
+        _require_finite_positive(self.err_minus, "err_minus")
+
+    def to_json(self) -> dict:
+        return {
+            "refname": self.refname,
+            "arxiv_id": self.arxiv_id,
+            "value": self.value,
+            "err_plus": self.err_plus,
+            "err_minus": self.err_minus,
+            "unit": self.unit.value,
+            "releasedate": self.releasedate.isoformat(),
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, object]) -> "ConfirmationReference":
+        return cls(
+            refname=raw["refname"],  # type: ignore[arg-type]
+            arxiv_id=raw["arxiv_id"],  # type: ignore[arg-type]
+            value=raw["value"],  # type: ignore[arg-type]
+            err_plus=raw["err_plus"],  # type: ignore[arg-type]
+            err_minus=raw["err_minus"],  # type: ignore[arg-type]
+            unit=MeasurementUnit(raw["unit"]),
+            releasedate=date.fromisoformat(raw["releasedate"]),  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IndependentConfirmation:
+    """Confirmación independiente de una solución del archivo (T89).
+
+    `sigmas[i]` es el σ de `measurements[i]` frente a `reference`; todos
+    <= `max_sigma`. `max_sigma` y `window_days` son los umbrales con los que
+    se decidió. "Independiente" solo significa paper distinto (D7).
+    """
+
+    paper_planet_name: str
+    archive_planet_name: str
+    parameter: MeasuredParameter
+    archive_url: str
+    measurements: tuple[PaperMeasurement, ...]
+    reference: ConfirmationReference
+    sigmas: tuple[float, ...]
+    max_sigma: float
+    window_days: int
+    paper_published_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.paper_planet_name, "paper_planet_name")
+        _require_non_empty(self.archive_planet_name, "archive_planet_name")
+        _require_non_empty(self.archive_url, "archive_url")
+        object.__setattr__(self, "measurements", tuple(self.measurements))
+        object.__setattr__(self, "sigmas", tuple(self.sigmas))
+        if self.parameter not in MEASUREMENT_FINDING_PARAMETERS:
+            raise InvariantViolation("'parameter' debe ser masa o radio")
+        _validate_paper_measurements(self.parameter, self.measurements)
+        if not isinstance(self.reference, ConfirmationReference):
+            raise InvariantViolation("'reference' debe ser ConfirmationReference")
+        if self.reference.unit not in UNITS_BY_PARAMETER[self.parameter]:
+            raise InvariantViolation("'reference.unit' no es coherente con 'parameter'")
+        _require_finite_positive(self.max_sigma, "max_sigma")
+        if type(self.window_days) is not int or self.window_days <= 0:
+            raise InvariantViolation("'window_days' debe ser un entero mayor que cero")
+        if len(self.sigmas) != len(self.measurements):
+            raise InvariantViolation("'sigmas' debe tener un valor por medida")
+        for sigma in self.sigmas:
+            _require_finite_non_negative(sigma, "sigma")
+            if sigma > self.max_sigma:
+                raise InvariantViolation("cada σ debe ser <= 'max_sigma'")
+        _require_aware(self.paper_published_at, "paper_published_at")
+
+    @property
+    def reference_releasedate(self) -> date:
+        return self.reference.releasedate
+
+    def to_json(self) -> dict:
+        return {
+            "schema_version": MEASUREMENT_FINDING_SCHEMA_VERSION,
+            "paper_planet_name": self.paper_planet_name,
+            "archive_planet_name": self.archive_planet_name,
+            "parameter": self.parameter.value,
+            "archive_url": self.archive_url,
+            "measurements": [m.to_json() for m in self.measurements],
+            "reference": self.reference.to_json(),
+            "sigmas": list(self.sigmas),
+            "max_sigma": self.max_sigma,
+            "window_days": self.window_days,
+            "paper_published_at": self.paper_published_at.isoformat(),
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, object]) -> "IndependentConfirmation":
+        """`schema_version` ausente o distinta de la conocida -> `ValueError`."""
+        _check_schema_version(raw, "independent_confirmation")
+        return cls(
+            paper_planet_name=raw["paper_planet_name"],  # type: ignore[arg-type]
+            archive_planet_name=raw["archive_planet_name"],  # type: ignore[arg-type]
+            parameter=MeasuredParameter(raw["parameter"]),
+            archive_url=raw["archive_url"],  # type: ignore[arg-type]
+            measurements=tuple(
+                PaperMeasurement.from_json(m)
+                for m in raw["measurements"]  # type: ignore[attr-defined]
+            ),
+            reference=ConfirmationReference.from_json(raw["reference"]),  # type: ignore[arg-type]
+            sigmas=tuple(raw["sigmas"]),  # type: ignore[arg-type]
+            max_sigma=raw["max_sigma"],  # type: ignore[arg-type]
+            window_days=raw["window_days"],  # type: ignore[arg-type]
+            paper_published_at=datetime.fromisoformat(raw["paper_published_at"]),  # type: ignore[arg-type]
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Reading:
     """Salida del Reader para un `Item`: una llamada ya ocurrida.
@@ -464,10 +752,13 @@ class Reading:
 
 
 class FindingType(StrEnum):
-    """Tipo de hallazgo publicado: explicación de un paper o tensión con el catálogo."""
+    """Tipo de hallazgo publicado: explicación de un paper, tensión con el
+    catálogo, primera medida o confirmación independiente (T89)."""
 
     PAPER_EXPLAINED = "paper_explained"
     CATALOG_TENSION = "catalog_tension"
+    PRIMERA_MEDIDA = "primera_medida"
+    CONFIRMACION_INDEPENDIENTE = "confirmacion_independiente"
 
 
 @dataclass(slots=True)
@@ -485,6 +776,11 @@ class Finding:
     published_at: datetime | None = None
     id: UUID = field(default_factory=uuid4)
     catalog_tension: CatalogTension | None = None
+    # T89: un payload por tipo y la evaluación de origen (obligatoria en los
+    # dos tipos nuevos, nula en los demás).
+    first_measurement: FirstMeasurement | None = None
+    independent_confirmation: IndependentConfirmation | None = None
+    tension_evaluation_id: UUID | None = None
 
     _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"confidence", "published_at"})
 
@@ -500,14 +796,31 @@ class Finding:
         _require_non_empty(self.level_curious, "level_curious")
         _require_non_empty(self.level_amateur, "level_amateur")
         _require_non_empty(self.level_technical, "level_technical")
-        if (self.type == FindingType.CATALOG_TENSION) != (self.catalog_tension is not None):
-            raise InvariantViolation(
-                "'catalog_tension' debe informarse si y solo si 'type' es catalog_tension"
-            )
-        if self.catalog_tension is not None and not isinstance(
-            self.catalog_tension, CatalogTension
+        for payload_name, payload_type, payload_class in (
+            ("catalog_tension", FindingType.CATALOG_TENSION, CatalogTension),
+            ("first_measurement", FindingType.PRIMERA_MEDIDA, FirstMeasurement),
+            (
+                "independent_confirmation",
+                FindingType.CONFIRMACION_INDEPENDIENTE,
+                IndependentConfirmation,
+            ),
         ):
-            raise InvariantViolation("'catalog_tension' debe ser CatalogTension")
+            payload = getattr(self, payload_name)
+            if (self.type == payload_type) != (payload is not None):
+                raise InvariantViolation(
+                    f"'{payload_name}' debe informarse si y solo si 'type' es {payload_type.value}"
+                )
+            if payload is not None and not isinstance(payload, payload_class):
+                raise InvariantViolation(f"'{payload_name}' debe ser {payload_class.__name__}")
+        needs_evaluation = self.type in (
+            FindingType.PRIMERA_MEDIDA,
+            FindingType.CONFIRMACION_INDEPENDIENTE,
+        )
+        if needs_evaluation != (self.tension_evaluation_id is not None):
+            raise InvariantViolation(
+                "'tension_evaluation_id' debe informarse si y solo si 'type' es "
+                "primera_medida o confirmacion_independiente"
+            )
         if (self.published_at is None) != (self.confidence is None):
             raise InvariantViolation(
                 "'published_at' y 'confidence' deben estar ambos informados o ambos vacíos"

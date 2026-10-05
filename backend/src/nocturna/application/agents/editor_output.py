@@ -34,16 +34,18 @@ class EditorDecision(BaseModel):
 
     `extra="ignore"`: un campo de más que el modelo añada por su cuenta no
     justifica un reintento, que cuesta una llamada real. `strict=True` para
-    todos los campos salvo `item_id`: el JSON que devuelve el Editor lleva
-    el identificador como cadena (es lo único que un modelo puede escribir
-    en JSON), así que `item_id` es la única excepción a `strict=True`, para
-    parsear esa cadena como `UUID`; `confidence` y `reason` sí exigen su
-    tipo exacto.
+    todos los campos salvo `candidate_id`: el JSON que devuelve el Editor
+    lleva el identificador como cadena (es lo único que un modelo puede
+    escribir en JSON), así que `candidate_id` es la única excepción a
+    `strict=True`, para parsear esa cadena como `UUID`; `confidence` y
+    `reason` sí exigen su tipo exacto. Desde T89 `candidate_id` es el `id`
+    del `Finding` candidato (no el `item_id`): un mismo ítem puede aportar
+    varios candidatos de tipos distintos.
     """
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
-    item_id: UUID = Field(strict=False)
+    candidate_id: UUID = Field(strict=False)
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
 

@@ -180,7 +180,7 @@ async def test_con_otro_external_id_la_fila_sintetica_si_cuenta_como_previa():
 async def test_planeta_ausente_del_archivo_espera_referencia_tras_consultar_el_alias():
     item = make_item()
     reading = make_reading(item.id, (make_measurement(0.5, 0.1, 0.1, planet_name="Foo 1 b"),))
-    body = '{"manifest": {"lookup_status": "NOT_FOUND"}}'
+    body = '{"manifest": {"lookup_status": "System Not Found"}}'
     catalog, client, seen = make_catalog(_alias_only(body))
     compute = ComputeTensions(
         catalog,

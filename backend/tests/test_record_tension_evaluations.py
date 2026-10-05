@@ -18,6 +18,7 @@ from helpers.exoplanet import (
 
 from nocturna.application.use_cases.compute_tensions import ComputeTensions
 from nocturna.application.use_cases.record_tension_evaluations import RecordTensionEvaluations
+from nocturna.domain.entities import MeasuredParameter, MeasurementUnit
 from nocturna.domain.tension import EvaluationStatus
 
 pytestmark = pytest.mark.anyio
@@ -211,3 +212,87 @@ async def test_lectura_con_alguna_awaiting_si_consulta_el_catalogo():
 
     assert catalog.resolve_calls == [V1298]
     assert report.unchanged == 1 and report.kept_terminal == 0
+
+
+async def test_fallo_de_resolucion_no_crea_fila_cuenta_como_fallo_y_se_reintenta():
+    """D16: sin fila, y la lectura no se da por cerrada aunque otro grupo sí esté."""
+    item = make_item("2601.00001")
+    other_planet = "V1298 Tau c"
+    reading = make_reading(
+        item.id,
+        (
+            make_measurement(0.52, 0.12, 0.14),
+            make_measurement(0.3, 0.1, 0.1, planet_name=other_planet),
+        ),
+    )
+    readings = InMemoryReadingRepository()
+    readings.add(reading)
+    items = InMemoryItemRepository(item)
+    evaluations = InMemoryTensionEvaluationRepository()
+    solution = make_solution(0.04, 0.02, 0.02, is_default=True, arxiv_id="2501.00001")
+    catalog = FakeExoplanetCatalog(
+        aliases={V1298: V1298, other_planet: other_planet},
+        solutions={(V1298, MASS): [solution], (other_planet, MASS): [solution]},
+        failing={other_planet},
+    )
+
+    first = await _use_case(items, readings, evaluations, catalog)(dry_run=False)
+
+    assert first.created == 1 and len(first.failures) == 1
+    assert first.failures[0].planet_name == other_planet
+    (stored,) = evaluations.all()
+    assert stored.planet_name == V1298
+
+    catalog.failing.clear()
+    second = await _use_case(items, readings, evaluations, catalog)(dry_run=False)
+
+    assert second.failures == ()
+    assert second.created == 1 and second.kept_terminal == 1
+    assert {e.planet_name for e in evaluations.all()} == {V1298, other_planet}
+
+
+async def test_grupo_de_periodo_con_ttv_no_hace_recalcular_la_lectura_cada_noche():
+    """PERIOD_TTV no produce fila por diseño: no debe contar como esperado."""
+    item = make_item("2601.00001")
+    reading = make_reading(
+        item.id,
+        (
+            make_measurement(0.52, 0.12, 0.14),
+            make_measurement(
+                24.1, 0.1, 0.1, parameter=MeasuredParameter.PERIOD, unit=MeasurementUnit.DAY
+            ),
+        ),
+    )
+    readings = InMemoryReadingRepository()
+    readings.add(reading)
+    items = InMemoryItemRepository(item)
+    evaluations = InMemoryTensionEvaluationRepository()
+    mass_solution = make_solution(0.04, 0.01, 0.01, is_default=True, arxiv_id="2501.00001")
+    ttv_solution = make_solution(
+        24.0,
+        0.1,
+        0.1,
+        parameter=MeasuredParameter.PERIOD,
+        unit=MeasurementUnit.DAY,
+        ttv_flag=True,
+        arxiv_id="2501.00001",
+    )
+
+    def catalog() -> FakeExoplanetCatalog:
+        return FakeExoplanetCatalog(
+            aliases={V1298: V1298},
+            solutions={
+                (V1298, MASS): [mass_solution],
+                (V1298, MeasuredParameter.PERIOD): [ttv_solution],
+            },
+        )
+
+    first = await _use_case(items, readings, evaluations, catalog())(dry_run=False)
+    assert first.created == 1
+    assert len(first.skipped) == 1
+
+    cat = catalog()
+    second = await _use_case(items, readings, evaluations, cat)(dry_run=False)
+
+    assert cat.total_calls == 0
+    assert second.kept_terminal == 1 and second.created == 0

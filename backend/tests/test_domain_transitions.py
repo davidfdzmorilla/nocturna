@@ -390,7 +390,12 @@ def test_agent_role_contiene_exactamente_los_valores_esperados():
 
 
 def test_finding_type_contiene_exactamente_los_valores_esperados():
-    assert {type_.value for type_ in FindingType} == {"paper_explained", "catalog_tension"}
+    assert {type_.value for type_ in FindingType} == {
+        "paper_explained",
+        "catalog_tension",
+        "primera_medida",
+        "confirmacion_independiente",
+    }
 
 
 def test_item_transitions_tiene_exactamente_las_transiciones_esperadas():

@@ -26,6 +26,7 @@ import pytest
 from factories import aware, make_agent_call, make_item, make_run
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from helpers.run_night import approve_items_in_editor, db_finding_ids_by_item
 from sqlalchemy import select
 
 from nocturna import cli
@@ -38,6 +39,9 @@ from nocturna.application.agents.prompt_loader import (
 )
 from nocturna.application.budget import BudgetPolicy, effective_nightly_tokens
 from nocturna.application.use_cases.edit_night import EditNight
+from nocturna.application.use_cases.generate_measurement_findings import (
+    GenerateMeasurementFindings,
+)
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
@@ -158,7 +162,7 @@ def _build_run_night(
         work=work,
         provider=fake,
         clock=clock,
-        system_prompt=load_prompt("editor"),
+        system_prompt=load_prompt(EDITOR_PROMPT_VERSION),
         prompt_version=EDITOR_PROMPT_VERSION,
         model=_MODEL_OPUS,
         max_turns=policy.max_turns_per_agent,
@@ -173,6 +177,15 @@ def _build_run_night(
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,
+        measurement_findings=GenerateMeasurementFindings(
+            work=cli._measurement_findings_work_factory(db_session_factory),
+            clock=clock,
+            planet_overview_url=lambda name: name,
+            max_candidates=5,
+            max_sigma=2.0,
+            window_days=30,
+            confirmation_enabled=False,
+        ),
         run_id=run_id,
         max_items=policy.max_items_per_night,
         max_consecutive_failures=5,
@@ -219,13 +232,12 @@ async def test_noche_completa_persiste_findings_items_y_cuadra_tokens_usados(
     fake.respond(
         AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=820, tokens_out=160
     )
-    fake.respond(
-        AgentRole.EDITOR,
-        json={
-            "publish": [
-                {"item_id": str(item_a_id), "confidence": 0.75, "reason": "hallazgo relevante"}
-            ]
-        },
+    approve_items_in_editor(
+        fake,
+        finding_ids_by_item=db_finding_ids_by_item(db_session_factory),
+        item_ids=[item_a_id],
+        confidence=0.75,
+        reason="hallazgo relevante",
         tokens_in=1200,
         tokens_out=90,
     )

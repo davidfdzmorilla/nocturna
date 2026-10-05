@@ -1,7 +1,7 @@
 """Tests de `application/use_cases/edit_night.py::EditNight` (T43).
 
 Empezó como humo mínimo (camino feliz + `NO_CANDIDATES`); el `tester` amplía
-aquí la batería completa: guarda de estado por candidato, `item_id`
+aquí la batería completa: guarda de estado por candidato, `candidate_id`
 desconocido/duplicado, `publish` vacío, fallos transitorios del proveedor,
 `BudgetDenied` (presupuesto insuficiente y `EDITOR_ALREADY_CALLED`), la
 estimación de coste real pasada a `BudgetGuard.authorize`, y la forma exacta
@@ -187,7 +187,11 @@ async def test_camino_feliz_publica_los_aprobados_y_descarta_el_resto():
         AgentRole.EDITOR,
         json={
             "publish": [
-                {"item_id": str(item_a.id), "confidence": 0.9, "reason": "Motivo de prueba."}
+                {
+                    "candidate_id": str(finding_a.id),
+                    "confidence": 0.9,
+                    "reason": "Motivo de prueba.",
+                }
             ]
         },
         tokens_in=2000,
@@ -202,8 +206,8 @@ async def test_camino_feliz_publica_los_aprobados_y_descarta_el_resto():
     assert result.candidates == 2
     assert [f.item_id for f in result.published] == [item_a.id]
     assert [f.item_id for f in result.discarded] == [item_b.id]
-    assert result.reasons == {item_a.id: "Motivo de prueba."}
-    assert result.unknown_item_ids == ()
+    assert result.reasons == {finding_a.id: "Motivo de prueba."}
+    assert result.unknown_candidate_ids == ()
     assert result.tokens_spent == 2300
     assert item_a.status is ItemStatus.PUBLISHED
     assert item_b.status is ItemStatus.DISCARDED
@@ -290,10 +294,10 @@ async def test_publish_vacio_no_publica_nada_pero_no_es_un_fallo():
     assert not finding_b.is_published
 
 
-# --- 4. item_id desconocido: se ignora, cuenta, una sola llamada ----------
+# --- 4. candidate_id desconocido: se ignora, cuenta, una sola llamada ----------
 
 
-async def test_item_id_desconocido_se_ignora_una_sola_llamada_y_el_resto_se_aplica():
+async def test_candidate_id_desconocido_se_ignora_una_sola_llamada_y_el_resto_se_aplica():
     run = _make_run(budget_tokens=100_000)
     item_a = _make_item()
     item_b = _make_item()
@@ -308,8 +312,8 @@ async def test_item_id_desconocido_se_ignora_una_sola_llamada_y_el_resto_se_apli
         AgentRole.EDITOR,
         json={
             "publish": [
-                {"item_id": str(item_a.id), "confidence": 0.7, "reason": "Motivo válido."},
-                {"item_id": str(unknown_id), "confidence": 0.5, "reason": "Alucinación."},
+                {"candidate_id": str(finding_a.id), "confidence": 0.7, "reason": "Motivo válido."},
+                {"candidate_id": str(unknown_id), "confidence": 0.5, "reason": "Alucinación."},
             ]
         },
         tokens_in=1000,
@@ -321,16 +325,16 @@ async def test_item_id_desconocido_se_ignora_una_sola_llamada_y_el_resto_se_apli
     result = await edit_night(run_id=run.id)
 
     assert result.outcome is EditOutcome.EDITED
-    assert result.unknown_item_ids == (str(unknown_id),)
+    assert result.unknown_candidate_ids == (str(unknown_id),)
     assert [f.item_id for f in result.published] == [item_a.id]
     assert [f.item_id for f in result.discarded] == [item_b.id]
-    assert len(fake.calls) == 1, "un item_id desconocido no dispara ningún reintento"
+    assert len(fake.calls) == 1, "un candidate_id desconocido no dispara ningún reintento"
 
 
-# --- 5. item_id duplicado: se publica una vez, sin InvalidTransition ------
+# --- 5. candidate_id duplicado: se publica una vez, sin InvalidTransition ------
 
 
-async def test_item_id_duplicado_se_publica_una_vez_sin_invalid_transition():
+async def test_candidate_id_duplicado_se_publica_una_vez_sin_invalid_transition():
     run = _make_run(budget_tokens=100_000)
     item_a = _make_item()
     finding_a = _make_finding(item_id=item_a.id, run_id=run.id)
@@ -340,8 +344,16 @@ async def test_item_id_duplicado_se_publica_una_vez_sin_invalid_transition():
         AgentRole.EDITOR,
         json={
             "publish": [
-                {"item_id": str(item_a.id), "confidence": 0.6, "reason": "Primera aparición."},
-                {"item_id": str(item_a.id), "confidence": 0.9, "reason": "Segunda aparición."},
+                {
+                    "candidate_id": str(finding_a.id),
+                    "confidence": 0.6,
+                    "reason": "Primera aparición.",
+                },
+                {
+                    "candidate_id": str(finding_a.id),
+                    "confidence": 0.9,
+                    "reason": "Segunda aparición.",
+                },
             ]
         },
         tokens_in=1000,
@@ -357,7 +369,7 @@ async def test_item_id_duplicado_se_publica_una_vez_sin_invalid_transition():
 
     assert result.outcome is EditOutcome.EDITED
     assert [f.item_id for f in result.published] == [item_a.id]
-    assert result.reasons[item_a.id] == "Primera aparición."
+    assert result.reasons[finding_a.id] == "Primera aparición."
     assert finding_a.confidence == 0.6, "gana la primera aparición, no la última"
 
 
@@ -369,10 +381,14 @@ async def test_item_id_duplicado_se_publica_una_vez_sin_invalid_transition():
     [
         lambda: {"raw": "esto no es json en absoluto"},
         lambda: {
-            "json": {"publish": [{"item_id": str(uuid4()), "confidence": 1.7, "reason": "Motivo."}]}
+            "json": {
+                "publish": [{"candidate_id": str(uuid4()), "confidence": 1.7, "reason": "Motivo."}]
+            }
         },
         lambda: {
-            "json": {"publish": [{"item_id": str(uuid4()), "confidence": 0.5, "reason": "   "}]}
+            "json": {
+                "publish": [{"candidate_id": str(uuid4()), "confidence": 0.5, "reason": "   "}]
+            }
         },
     ],
     ids=["json_no_parseable", "confidence_fuera_de_rango", "reason_en_blanco"],
@@ -478,7 +494,9 @@ async def test_candidato_con_item_no_read_se_excluye_antes_de_la_llamada():
     fake = FakeLLMProvider()
     fake.respond(
         AgentRole.EDITOR,
-        json={"publish": [{"item_id": str(item_a.id), "confidence": 0.8, "reason": "Motivo."}]},
+        json={
+            "publish": [{"candidate_id": str(finding_a.id), "confidence": 0.8, "reason": "Motivo."}]
+        },
         tokens_in=1000,
         tokens_out=200,
     )
@@ -606,7 +624,9 @@ async def test_agent_request_contrato_role_model_item_id_system_prompt_y_sin_niv
     )
     assert request.prompt.startswith("<candidates>")
     assert request.prompt.endswith("</candidates>")
-    assert str(item_a.id) in request.prompt
+    assert f"candidate_id: {finding_a.id}" in request.prompt
+    assert "type: paper_explained" in request.prompt
+    assert str(item_a.id) not in request.prompt, "el prompt identifica por candidate_id, no item_id"
     assert "Titular único ZQX99 para localizar en el prompt" in request.prompt
     assert "Nivel curioso único ZQX99" in request.prompt
     assert "NIVEL AMATEUR SECRETO QUE NO DEBE VIAJAR EN EL PROMPT" not in request.prompt
