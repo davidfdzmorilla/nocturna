@@ -125,7 +125,8 @@ def test_downgrade_con_filas_de_tipos_nuevos_falla_y_no_toca_nada(scratch_databa
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
             count = connection.execute(sa.text("SELECT count(*) FROM findings")).scalar_one()
-        assert version == _REVISION
+        # El downgrade es una sola transaccion: nada se revierte, el head sigue puesto.
+        assert version == "f7c2d8e4a951"
         assert count == 1
 
         with engine.begin() as connection:

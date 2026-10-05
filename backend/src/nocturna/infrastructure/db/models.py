@@ -147,9 +147,20 @@ class ReadingRow(Base):
     # `null` JSON, nunca a `NULL` de columna, y la distinción documentada en
     # `Reading.measurements` (T71.c) se perdería.
     measurements: Mapped[list[dict] | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    # T82: NULL = lectura vigente; con fecha, sustituida por otra posterior.
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
-        sa.UniqueConstraint("item_id", name="uq_readings_item_id"),
+        # Como mucho una lectura vigente por ítem, impuesto por la base.
+        sa.Index(
+            "uq_readings_item_id_current",
+            "item_id",
+            unique=True,
+            postgresql_where=sa.text("superseded_at IS NULL"),
+        ),
         sa.CheckConstraint("interest_score BETWEEN 1 AND 5", name="interest_score_range"),
         sa.CheckConstraint("tokens_in >= 0", name="tokens_in_non_negative"),
         sa.CheckConstraint("tokens_out >= 0", name="tokens_out_non_negative"),

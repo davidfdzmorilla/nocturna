@@ -47,6 +47,7 @@ from nocturna.domain.entities import (
     Run,
     RunStatus,
 )
+from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.repositories import TensionEvaluationRepository
 
@@ -138,17 +139,35 @@ class InMemoryItemRepository:
 
 
 class InMemoryReadingRepository:
+    """`readings` conserva toda la historia; `_superseded` guarda los ids
+    sustituidos. `get_for_item` y `with_measurements` solo ven las vigentes."""
+
     def __init__(self) -> None:
         self.readings: list[Reading] = []
+        self._superseded: set[UUID] = set()
 
     def add(self, reading: Reading) -> None:
         self.readings.append(reading)
 
+    def _current(self) -> list[Reading]:
+        return [r for r in self.readings if r.id not in self._superseded]
+
     def get_for_item(self, item_id: UUID) -> Reading | None:
-        return next((r for r in self.readings if r.item_id == item_id), None)
+        return next((r for r in self._current() if r.item_id == item_id), None)
+
+    def supersede(self, previous_id: UUID, reading: Reading) -> None:
+        previous = next((r for r in self._current() if r.id == previous_id), None)
+        if previous is None or previous.item_id != reading.item_id:
+            raise InvariantViolation(
+                f"la lectura {previous_id} no es la vigente del ítem {reading.item_id}"
+            )
+        self._superseded.add(previous_id)
+        self.readings.append(reading)
 
     def with_measurements(self) -> list[Reading]:
-        return sorted((r for r in self.readings if r.measurements is not None), key=lambda r: r.id)
+        return sorted(
+            (r for r in self._current() if r.measurements is not None), key=lambda r: r.id
+        )
 
 
 class InMemoryFindingRepository:

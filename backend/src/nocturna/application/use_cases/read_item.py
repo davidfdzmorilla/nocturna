@@ -17,7 +17,8 @@ gasto, incluida la decisión de que `build` corra dentro de `AgentRunner.run`.
 de trabajo, separada de la escritura de `Reading`/`Item` que hace este
 módulo después de que `run()` devuelva: así lo pide el docstring de
 `BudgetGuard.record_call`, y así lo confirmó la revisión de T41 -- `readings`
-tiene `uq_readings_item_id`, y un `IntegrityError` (dos `run-item`
+tiene el índice único parcial `uq_readings_item_id_current` (sobre las lecturas
+vigentes, `superseded_at IS NULL`), y un `IntegrityError` (dos `run-item`
 concurrentes sobre el mismo ítem, por ejemplo) en una unidad de trabajo
 compartida haría rollback también de la fila de `AgentCall`, una llamada ya
 cobrada por la suscripción.
@@ -54,6 +55,7 @@ tuviera medidas que descartar.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -78,6 +80,48 @@ _logger = logging.getLogger(__name__)
 #: (que este módulo no persiste) y, si se descartó, en el abstract del propio
 #: `Item`.
 _EVIDENCE_LOG_PREVIEW_CHARS = 200
+
+
+class RereadRefusal(StrEnum):
+    """Por qué un ítem no se puede releer con `reader-v3` (T82)."""
+
+    #: El ítem está `NEW` (camino normal) o `FAILED` (sin `Reading`).
+    STATUS_NOT_REREADABLE = "status_not_rereadable"
+    #: No cumple ADR 0018 §2: categoría fuera de `measurement_categories` o
+    #: `exoplanet_match` falso.
+    NOT_MEASUREMENT_ELIGIBLE = "not_measurement_eligible"
+    #: La lectura vigente ya tiene `measurements` (`None` es la única releíble).
+    ALREADY_HAS_MEASUREMENTS = "already_has_measurements"
+    #: La lectura vigente no pertenece a este ítem.
+    READING_MISMATCH = "reading_mismatch"
+
+
+class RereadRefused(Exception):  # noqa: N818 -- nombre fijado por el plan de T82
+    """`reread_with_measurements` rechazó el ítem antes de autorizar nada."""
+
+    def __init__(self, reason: RereadRefusal) -> None:
+        super().__init__(f"relectura rechazada: {reason.value}")
+        self.reason = reason
+
+
+def reread_refusal(
+    item: Item, previous: Reading, measures_categories: frozenset[str]
+) -> RereadRefusal | None:
+    """Regla pura de elegibilidad para releer `item` con `reader-v3` (T82).
+
+    `None` si se puede releer. Solo se relee un ítem ya leído (`read`,
+    `discarded`, `published`) cuya lectura vigente no tiene medidas
+    (`measurements is None`) y que cumple los criterios de ADR 0018 §2.
+    """
+    if item.status in (ItemStatus.NEW, ItemStatus.FAILED):
+        return RereadRefusal.STATUS_NOT_REREADABLE
+    if previous.item_id != item.id:
+        return RereadRefusal.READING_MISMATCH
+    if not item.exoplanet_match or measures_categories.isdisjoint(item.categories):
+        return RereadRefusal.NOT_MEASUREMENT_ELIGIBLE
+    if previous.measurements is not None:
+        return RereadRefusal.ALREADY_HAS_MEASUREMENTS
+    return None
 
 
 class ReadOutcome(StrEnum):
@@ -238,26 +282,7 @@ class ReadItem:
             runner = self._runner_measures
             prompt_version = self._measures_prompt_version
 
-            def _build_reading_v3(result: AgentResult, run_id: UUID) -> Reading:
-                parsed = parse_reader_v3_output(result.output_text)
-                filtered = filter_measurements(
-                    parsed.measurements, abstract=item.abstract, title=item.title
-                )
-                discards_by_attempt.clear()
-                discards_by_attempt.extend(filtered.discarded)
-                return Reading(
-                    item_id=item.id,
-                    summary=parsed.summary,
-                    objects=tuple(parsed.objects),
-                    claims=tuple(parsed.claims),
-                    interest_score=parsed.interest_score,
-                    tokens_in=result.tokens_in,
-                    tokens_out=result.tokens_out,
-                    model=result.model,
-                    measurements=filtered.kept,
-                )
-
-            build = _build_reading_v3
+            build = self._make_build_v3(item, discards_by_attempt)
         else:
             runner = self._runner_base
             prompt_version = self._base_prompt_version
@@ -273,6 +298,7 @@ class ReadItem:
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
                     model=result.model,
+                    prompt_version=prompt_version,
                 )
 
             build = _build_reading_v2
@@ -322,6 +348,73 @@ class ReadItem:
         return ReadItemResult(
             outcome=outcome,
             reading=None,
+            attempts=runner_result.attempts,
+            tokens_spent=runner_result.tokens_spent,
+            prompt_version=prompt_version,
+        )
+
+    def _make_build_v3(
+        self, item: Item, discards_by_attempt: list[DiscardedMeasurement]
+    ) -> Callable[[AgentResult, UUID], Reading]:
+        """`build` de `reader-v3`, compartido por `__call__` y la relectura (T82)."""
+        prompt_version = self._measures_prompt_version
+
+        def _build_reading_v3(result: AgentResult, run_id: UUID) -> Reading:
+            parsed = parse_reader_v3_output(result.output_text)
+            filtered = filter_measurements(
+                parsed.measurements, abstract=item.abstract, title=item.title
+            )
+            discards_by_attempt.clear()
+            discards_by_attempt.extend(filtered.discarded)
+            return Reading(
+                item_id=item.id,
+                summary=parsed.summary,
+                objects=tuple(parsed.objects),
+                claims=tuple(parsed.claims),
+                interest_score=parsed.interest_score,
+                tokens_in=result.tokens_in,
+                tokens_out=result.tokens_out,
+                model=result.model,
+                measurements=filtered.kept,
+                prompt_version=prompt_version,
+            )
+
+        return _build_reading_v3
+
+    async def reread_with_measurements(self, item: Item, previous: Reading) -> ReadItemResult:
+        """Relee `item` con `reader-v3` y sustituye su lectura vigente (T82).
+
+        La elegibilidad (`reread_refusal`) se comprueba antes de cualquier
+        `authorize`: un ítem no elegible lanza `RereadRefused` sin gastar ni
+        dejar `AgentCall`. Usa el mismo `_runner_measures` (estimación y
+        prompt de v3) que el camino normal. En éxito, `supersede` conserva la
+        previa; no toca `Item.status` ni guarda el ítem. Con `INVALID_OUTPUT`
+        agotado no hay `mark_failed` (el ítem no está `NEW`) y la previa sigue
+        vigente; timeout, límite de tasa o error del proveedor no cambian
+        nada salvo el `AgentCall`. `BudgetDenied` se propaga.
+        """
+        refusal = reread_refusal(item, previous, self._measures_categories)
+        if refusal is not None:
+            raise RereadRefused(refusal)
+
+        prompt_version = self._measures_prompt_version
+        discards_by_attempt: list[DiscardedMeasurement] = []
+        runner_result = await self._runner_measures.run(
+            prompt=self._build_prompt(item),
+            item_id=item.id,
+            build=self._make_build_v3(item, discards_by_attempt),
+        )
+        outcome = _OUTCOME_BY_ATTEMPT[runner_result.outcome]
+        reading: Reading | None = None
+        if runner_result.outcome is AttemptOutcome.OK:
+            reading = runner_result.value
+            with self._work() as w:
+                w.readings.supersede(previous.id, reading)
+            kept = len(reading.measurements) if reading.measurements is not None else 0
+            self._log_measurements(item, prompt_version, kept, discards_by_attempt)
+        return ReadItemResult(
+            outcome=outcome,
+            reading=reading,
             attempts=runner_result.attempts,
             tokens_spent=runner_result.tokens_spent,
             prompt_version=prompt_version,

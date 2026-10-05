@@ -30,7 +30,7 @@
 
 \echo '=== Q1 · Cabecera de la noche ==='
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 ),
 tokens_reales AS (
     SELECT COALESCE(SUM(ac.tokens_in + ac.tokens_out), 0) AS tokens
@@ -55,7 +55,7 @@ FROM n, tokens_reales tr;
 \echo ''
 \echo '=== Q2 · Desglose por agente / prompt_version / status (ROLLUP) ==='
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 )
 SELECT
     CASE WHEN GROUPING(ac.agent) = 1 THEN '(todos)' ELSE ac.agent::text END AS agent,
@@ -83,7 +83,7 @@ ORDER BY agent, prompt_version, status;
 -- 97,8% del pool compartido. `:reserva` se define al principio del fichero
 -- y debe seguir a `editor_reserve_tokens` de `config/pipeline.toml`.
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 ),
 por_agente AS (
     SELECT ac.agent, SUM(ac.tokens_in + ac.tokens_out) AS tokens
@@ -113,7 +113,7 @@ FROM n, resumen r;
 -- del Reader (agent_calls con agent = 'reader' y status = 'ok'), único
 -- rastro de qué item_id leyó el Reader en esta noche concreta.
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 ),
 items_leidos AS (
     SELECT DISTINCT ac.item_id
@@ -132,7 +132,7 @@ SELECT
     COUNT(fn.item_id) AS candidatos,
     COUNT(fn.item_id) FILTER (WHERE fn.published_at IS NOT NULL) AS publicados
 FROM items_leidos il
-JOIN readings r ON r.item_id = il.item_id
+JOIN readings r ON r.item_id = il.item_id AND r.superseded_at IS NULL
 LEFT JOIN findings_noche fn ON fn.item_id = il.item_id
 GROUP BY r.interest_score
 ORDER BY r.interest_score;
@@ -147,7 +147,7 @@ ORDER BY r.interest_score;
 -- popularizer en estado invalid_output, y añade la tercera como cajón
 -- aparte para no confundirla con las otras dos ni perderla del recuento.
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 ),
 items_leidos AS (
     SELECT DISTINCT ac.item_id
@@ -200,7 +200,7 @@ WHERE status = 'new';
 \echo ''
 \echo '=== Q7 · Candidatos huérfanos (Finding sin publicar, Item aún READ) ==='
 WITH n AS (
-    SELECT * FROM runs ORDER BY started_at DESC LIMIT 1
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 )
 SELECT
     f.id AS finding_id,
@@ -215,7 +215,7 @@ ORDER BY f.title;
 
 \echo ''
 \echo '=== Q8 · Medidas del Reader de la noche (reader-v3) ==='
-WITH n AS (SELECT * FROM runs ORDER BY started_at DESC LIMIT 1),
+WITH n AS (SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1),
 lecturas AS (
   SELECT DISTINCT ac.item_id, ac.prompt_version FROM agent_calls ac JOIN n ON ac.run_id = n.id
   WHERE ac.agent = 'reader' AND ac.status = 'ok' AND ac.item_id IS NOT NULL)
@@ -223,7 +223,7 @@ SELECT i.external_id, l.prompt_version,
        m->>'planet_name' AS planeta, m->>'parameter' AS parametro, m->>'value' AS valor,
        m->>'err_plus' AS err_plus, m->>'err_minus' AS err_minus, m->>'unit' AS unidad,
        m->>'limit' AS limite, m->>'origin' AS origen, m->>'evidence' AS evidencia
-FROM lecturas l JOIN readings r ON r.item_id = l.item_id JOIN items i ON i.id = l.item_id
+FROM lecturas l JOIN readings r ON r.item_id = l.item_id AND r.superseded_at IS NULL JOIN items i ON i.id = l.item_id
 LEFT JOIN LATERAL jsonb_array_elements(r.measurements) m ON true
 WHERE r.measurements IS NOT NULL
 ORDER BY i.external_id, planeta, parametro;

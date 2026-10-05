@@ -711,6 +711,11 @@ class Reading:
     encontró ninguna medida utilizable en el abstract. Confundir ambos casos
     escondería, en el informe de la noche, la diferencia entre "no se buscó"
     y "se buscó y no había".
+
+    `prompt_version` (T82): versión del prompt del Reader que produjo la
+    lectura. `None` es una fila histórica de la que no se conoce la versión.
+    Si se informa, no puede estar vacía. Que una lectura esté sustituida por
+    otra más reciente es historia de persistencia, no un atributo de la entidad.
     """
 
     item_id: UUID
@@ -722,6 +727,7 @@ class Reading:
     tokens_out: int
     model: str
     measurements: tuple[Measurement, ...] | None = None
+    prompt_version: str | None = None
     id: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
@@ -741,6 +747,8 @@ class Reading:
         if self.tokens_out < 0:
             raise InvariantViolation("'tokens_out' no puede ser negativo")
         _require_non_empty(self.model, "model")
+        if self.prompt_version is not None:
+            _require_non_empty(self.prompt_version, "prompt_version")
         if self.measurements is not None:
             if not isinstance(self.measurements, tuple):
                 raise InvariantViolation(

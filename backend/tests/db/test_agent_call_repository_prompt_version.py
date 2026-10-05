@@ -30,3 +30,18 @@ def test_count_runs_with_prompt_version_cuenta_runs_distintos(db_session):
     assert calls.count_runs_with_prompt_version("reader-v3") == 2
     assert calls.count_runs_with_prompt_version("reader-v2") == 1
     assert calls.count_runs_with_prompt_version("reader-v9") == 0
+
+
+def test_count_runs_with_prompt_version_excluye_runs_de_relectura(db_session):
+    runs = SqlAlchemyRunRepository(db_session)
+    calls = SqlAlchemyAgentCallRepository(db_session)
+    noche = make_run(status=RunStatus.COMPLETED, finished_at=aware(1))
+    relectura = make_run(status=RunStatus.COMPLETED, finished_at=aware(1), notes="reread")
+    runs.add(noche)
+    runs.add(relectura)
+    db_session.flush()
+    calls.add(make_agent_call(noche.id, prompt_version="reader-v3"))
+    calls.add(make_agent_call(relectura.id, prompt_version="reader-v3"))
+    db_session.flush()
+
+    assert calls.count_runs_with_prompt_version("reader-v3") == 1

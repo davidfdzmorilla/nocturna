@@ -46,11 +46,24 @@ class ReadingRepository(Protocol):
         ...
 
     def get_for_item(self, item_id: UUID) -> Reading | None:
-        """Recupera la lectura de un ítem, si existe. Usado por T42."""
+        """Recupera la lectura *vigente* de un ítem, si existe. Usado por T42.
+
+        Una lectura sustituida (T82, `supersede`) no se devuelve nunca.
+        """
+        ...
+
+    def supersede(self, previous_id: UUID, reading: Reading) -> None:
+        """Marca `previous_id` como sustituida y añade `reading` como vigente (T82).
+
+        Ambas cosas ocurren en la misma unidad de trabajo. La lectura previa se
+        conserva. `reading.item_id` debe ser el de la previa. Lanza
+        `InvariantViolation` si `previous_id` no existe, ya no es vigente o
+        pertenece a otro ítem; en ese caso no se añade nada.
+        """
         ...
 
     def with_measurements(self) -> list[Reading]:
-        """Lecturas con `measurements` extraídas (T74).
+        """Lecturas *vigentes* con `measurements` extraídas (T74).
 
         Incluye las de lista vacía (`()`, "se buscó y no había medidas") y
         excluye las de `None` (SQL NULL, "no extraído"). Orden determinista
