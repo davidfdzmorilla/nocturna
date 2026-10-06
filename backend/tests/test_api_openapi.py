@@ -18,11 +18,37 @@ import json
 
 from nocturna.api.app import create_app
 
-_FORBIDDEN_KEYS = ("confidence", "run_id", "item_id")
+_FORBIDDEN_KEYS = (
+    "confidence",
+    "run_id",
+    "item_id",
+    "tension_evaluation_id",
+    "solution_key",
+    "soltype",
+    "ttv_flag",
+)
 
 
-def test_openapi_no_expone_confidence_run_id_ni_item_id() -> None:
+def test_openapi_no_expone_campos_prohibidos() -> None:
     spec = json.dumps(create_app().openapi())
 
     for key in _FORBIDDEN_KEYS:
         assert f'"{key}"' not in spec, f"la especificación OpenAPI expone '{key}'"
+
+
+def test_openapi_parametro_type_de_findings_es_enum_con_los_cuatro_valores() -> None:
+    spec = create_app().openapi()
+    params = spec["paths"]["/findings"]["get"]["parameters"]
+    type_param = next(p for p in params if p["name"] == "type")
+
+    assert type_param["required"] is False
+    schema = type_param["schema"]
+    # `FindingType | None` se serializa como anyOf [enum $ref, null].
+    ref = next(opt["$ref"] for opt in schema["anyOf"] if "$ref" in opt)
+    enum_schema = spec["components"]["schemas"][ref.rsplit("/", 1)[1]]
+    assert set(enum_schema["enum"]) == {
+        "paper_explained",
+        "catalog_tension",
+        "primera_medida",
+        "confirmacion_independiente",
+    }

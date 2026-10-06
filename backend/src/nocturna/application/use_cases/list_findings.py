@@ -26,7 +26,7 @@ ese es precisamente el escenario que existe para cubrir.
 from dataclasses import dataclass
 from uuid import UUID
 
-from nocturna.domain.entities import Finding
+from nocturna.domain.entities import Finding, FindingType
 from nocturna.domain.repositories import FindingRepository, ItemRepository
 
 
@@ -62,7 +62,9 @@ class ListPublishedFindings:
     def __init__(self, findings: FindingRepository) -> None:
         self._findings = findings
 
-    def __call__(self, limit: int, offset: int) -> FindingsPage:
+    def __call__(
+        self, limit: int, offset: int, finding_type: FindingType | None = None
+    ) -> FindingsPage:
         """Devuelve hasta `limit` hallazgos publicados a partir de `offset`.
 
         `total` viene de `count_published()`, no de `len(findings)`: son
@@ -74,9 +76,12 @@ class ListPublishedFindings:
         `published_page` devolviera sin `published_at` se descarta aquí, no
         se propaga. Descartar en vez de fallar: un listado no debe romperse
         entero por una fila mal filtrada, tiene sentido servir el resto.
+
+        `finding_type` (T77) se pasa tal cual al repositorio, tanto a la
+        página como al recuento; `None` no filtra.
         """
-        page = self._findings.published_page(limit, offset)
-        total = self._findings.count_published()
+        page = self._findings.published_page(limit, offset, finding_type=finding_type)
+        total = self._findings.count_published(finding_type=finding_type)
         published = [finding for finding in page if finding.is_published]
         return FindingsPage(findings=published, total=total)
 

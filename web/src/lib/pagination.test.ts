@@ -61,4 +61,16 @@ describe("pageHref", () => {
   it("la página 1 enlaza a la raíz, sin query string", () => {
     expect(pageHref(1)).toBe("/");
   });
+
+  it("con filtro, la página 1 da /?tipo=slug", () => {
+    expect(pageHref(1, "primera_medida")).toBe("/?tipo=primera-medida");
+  });
+
+  it("con filtro conserva tipo en las demás páginas", () => {
+    expect(pageHref(3, "catalog_tension")).toBe("/?tipo=tension&page=3");
+  });
+
+  it("sin filtro no cambia", () => {
+    expect(pageHref(2)).toBe("/?page=2");
+  });
 });

@@ -74,6 +74,8 @@ class _FakeFindingRepository:
     ) -> None:
         self._page = page if page is not None else []
         self._total = total
+        self.page_calls: list[tuple[int, int, FindingType | None]] = []
+        self.count_calls: list[FindingType | None] = []
         self._by_id = by_id if by_id is not None else {}
 
     def add(self, finding: Finding) -> None:
@@ -85,10 +87,14 @@ class _FakeFindingRepository:
     def save(self, finding: Finding) -> None:
         raise NotImplementedError
 
-    def published_page(self, limit: int, offset: int) -> list[Finding]:
+    def published_page(
+        self, limit: int, offset: int, *, finding_type: FindingType | None = None
+    ) -> list[Finding]:
+        self.page_calls.append((limit, offset, finding_type))
         return self._page
 
-    def count_published(self) -> int:
+    def count_published(self, *, finding_type: FindingType | None = None) -> int:
+        self.count_calls.append(finding_type)
         return self._total
 
     def get_published(self, finding_id: UUID) -> Finding | None:
@@ -123,6 +129,38 @@ def test_list_published_findings_propaga_limit_offset_y_total() -> None:
     result = use_case(limit=2, offset=10)
 
     assert result == FindingsPage(findings=findings, total=57)
+
+
+def test_list_published_findings_pasa_el_filtro_de_tipo_a_pagina_y_recuento() -> None:
+    repo = _FakeFindingRepository()
+    use_case = ListPublishedFindings(repo)
+
+    use_case(limit=5, offset=10, finding_type=FindingType.PRIMERA_MEDIDA)
+
+    assert repo.page_calls == [(5, 10, FindingType.PRIMERA_MEDIDA)]
+    assert repo.count_calls == [FindingType.PRIMERA_MEDIDA]
+
+
+def test_list_published_findings_sin_filtro_pasa_none() -> None:
+    repo = _FakeFindingRepository()
+
+    ListPublishedFindings(repo)(limit=5, offset=0)
+
+    assert repo.page_calls == [(5, 0, None)]
+    assert repo.count_calls == [None]
+
+
+def test_list_published_findings_con_filtro_sigue_descartando_no_publicados() -> None:
+    item = _make_item()
+    published = _make_finding(item_id=item.id)
+    unpublished = _make_finding(item_id=item.id, published=False)
+    repo = _FakeFindingRepository(page=[published, unpublished], total=2)
+
+    result = ListPublishedFindings(repo)(
+        limit=10, offset=0, finding_type=FindingType.PAPER_EXPLAINED
+    )
+
+    assert result.findings == [published]
 
 
 def test_list_published_findings_descarta_entidad_no_publicada_del_repositorio() -> None:

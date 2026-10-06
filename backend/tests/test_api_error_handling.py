@@ -39,10 +39,12 @@ class _BoomFindingRepository:
     """Doble de `FindingRepository` (`domain/repositories.py`) que lanza en
     cualquier método que `list_findings` pueda invocar."""
 
-    def published_page(self, limit: int, offset: int) -> list[object]:
+    def published_page(
+        self, limit: int, offset: int, *, finding_type: object = None
+    ) -> list[object]:
         raise RuntimeError(_LEAKY_MESSAGE)
 
-    def count_published(self) -> int:
+    def count_published(self, *, finding_type: object = None) -> int:
         raise RuntimeError(_LEAKY_MESSAGE)
 
     def get_published(self, finding_id: object) -> object:

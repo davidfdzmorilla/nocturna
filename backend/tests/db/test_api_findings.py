@@ -44,14 +44,21 @@ import httpx
 import pytest
 import sqlalchemy as sa
 from factories import make_finding, make_item, make_run
+from helpers.finding_payloads import (
+    catalog_tension_two_priors,
+    first_measurement_absent,
+    independent_confirmation,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from test_api_schemas import _FORBIDDEN_NESTED_KEYS, all_keys
+from test_finding_measurement_types import _seed_evaluation
 
 from nocturna.api.app import create_app
 from nocturna.api.deps import get_session
 from nocturna.api.routes import findings
-from nocturna.domain.entities import Finding, RunStatus
+from nocturna.domain.entities import Finding, FindingType, RunStatus
 from nocturna.infrastructure.config import Settings
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyFindingRepository,
@@ -488,3 +495,248 @@ def test_max_page_coincide_con_el_limite_documentado() -> None:
     test. No lee `web/src/lib/pagination.ts`: la coincidencia con la web se
     mantiene por convención (comentario de la constante en ambos ficheros)."""
     assert findings.MAX_PAGE == 999_999
+
+
+# --- 11. T77: tipo visible, filtro `?type=` y payloads por tipo --------------
+
+_ALL_TYPES = [
+    FindingType.PAPER_EXPLAINED,
+    FindingType.CATALOG_TENSION,
+    FindingType.PRIMERA_MEDIDA,
+    FindingType.CONFIRMACION_INDEPENDIENTE,
+]
+
+
+def _seed_typed_finding(
+    db_session: Session,
+    type_: FindingType,
+    *,
+    published: bool = True,
+    published_at: datetime = PUBLISHED_AT,
+) -> Finding:
+    """Siembra un `Finding` de cualquiera de los cuatro tipos con su payload.
+
+    `primera_medida` y `confirmacion_independiente` exigen por FK una
+    `tension_evaluation`, que se siembra con el helper de
+    `test_finding_measurement_types.py`.
+    """
+    item, run = _seed_item_and_run(db_session)
+    extra: dict[str, object] = {}
+    if type_ == FindingType.CATALOG_TENSION:
+        extra["catalog_tension"] = catalog_tension_two_priors()
+    elif type_ == FindingType.PRIMERA_MEDIDA:
+        extra["first_measurement"] = first_measurement_absent()
+        extra["tension_evaluation_id"] = _seed_evaluation(db_session, item.id)
+    elif type_ == FindingType.CONFIRMACION_INDEPENDIENTE:
+        extra["independent_confirmation"] = independent_confirmation()
+        extra["tension_evaluation_id"] = _seed_evaluation(db_session, item.id)
+    finding = make_finding(item_id=item.id, run_id=run.id, type=type_, **extra)
+    if published:
+        finding.publish(confidence=0.8, at=published_at)
+    SqlAlchemyFindingRepository(db_session).add(finding)
+    db_session.flush()
+    return finding
+
+
+def _seed_one_of_each(db_session: Session) -> dict[FindingType, Finding]:
+    return {t: _seed_typed_finding(db_session, t) for t in _ALL_TYPES}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("type_", _ALL_TYPES)
+async def test_filtro_por_tipo_devuelve_solo_ese_tipo_con_total_filtrado(
+    client: httpx.AsyncClient, db_session: Session, type_: FindingType
+) -> None:
+    seeded = _seed_one_of_each(db_session)
+
+    response = await client.get("/findings", params={"type": type_.value})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["id"] for item in body["items"]] == [str(seeded[type_].id)]
+    assert [item["type"] for item in body["items"]] == [type_.value]
+    assert body["total"] == 1
+
+
+@pytest.mark.anyio
+async def test_filtro_por_tipo_excluye_y_no_cuenta_los_no_publicados(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    published = _seed_typed_finding(db_session, FindingType.PRIMERA_MEDIDA)
+    _seed_typed_finding(db_session, FindingType.PRIMERA_MEDIDA, published=False)
+    _seed_typed_finding(db_session, FindingType.CATALOG_TENSION, published=False)
+
+    response = await client.get("/findings", params={"type": "primera_medida"})
+    other = await client.get("/findings", params={"type": "catalog_tension"})
+
+    assert [i["id"] for i in response.json()["items"]] == [str(published.id)]
+    assert response.json()["total"] == 1
+    assert other.json() == {"items": [], "page": 1, "size": 20, "total": 0}
+
+
+@pytest.mark.anyio
+async def test_filtro_por_tipo_segunda_pagina_y_total_son_correctos(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    firsts = [
+        _seed_typed_finding(
+            db_session,
+            FindingType.PRIMERA_MEDIDA,
+            published_at=PUBLISHED_AT - timedelta(minutes=i),
+        )
+        for i in range(5)
+    ]
+    # Ruido de otros tipos, más reciente, que no debe colarse en ninguna página.
+    for _ in range(3):
+        _seed_typed_finding(
+            db_session, FindingType.PAPER_EXPLAINED, published_at=PUBLISHED_AT + timedelta(days=1)
+        )
+    expected = [str(f.id) for f in firsts]
+
+    page_2 = await client.get("/findings", params={"type": "primera_medida", "page": 2, "size": 2})
+
+    body = page_2.json()
+    assert body["total"] == 5
+    assert [i["id"] for i in body["items"]] == expected[2:4]
+    assert {i["type"] for i in body["items"]} == {"primera_medida"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", ["nope", "", "PRIMERA_MEDIDA", "primera-medida"])
+async def test_filtro_por_tipo_invalido_devuelve_422_sin_detalle_interno(
+    client: httpx.AsyncClient, db_session: Session, value: str
+) -> None:
+    _seed_typed_finding(db_session, FindingType.PAPER_EXPLAINED)
+
+    response = await client.get("/findings", params={"type": value})
+
+    assert response.status_code == 422
+    lowered = response.text.lower()
+    for leaked in ("traceback", "psycopg", "sqlalchemy", "select ", "5433"):
+        assert leaked not in lowered
+
+
+@pytest.mark.anyio
+async def test_listado_sin_filtro_devuelve_todos_los_tipos_con_orden_y_desempate(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    seeded = _seed_one_of_each(db_session)  # los cuatro empatados en `published_at`
+    expected = [str(i) for i in sorted((f.id for f in seeded.values()), reverse=True)]
+
+    response = await client.get("/findings")
+
+    body = response.json()
+    assert [i["id"] for i in body["items"]] == expected
+    assert body["total"] == 4
+    by_id = {str(f.id): f.type.value for f in seeded.values()}
+    assert {i["id"]: i["type"] for i in body["items"]} == by_id
+    # El listado lleva `type` pero no los payloads.
+    for item in body["items"]:
+        assert set(item) == {"id", "title", "published_at", "type", "level_curious"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("type_", [FindingType.PRIMERA_MEDIDA, FindingType.CATALOG_TENSION])
+async def test_404_de_un_no_publicado_de_tipo_nuevo_es_indistinguible_de_un_id_inexistente(
+    client: httpx.AsyncClient, db_session: Session, type_: FindingType
+) -> None:
+    unpublished = _seed_typed_finding(db_session, type_, published=False)
+
+    response_unpublished = await client.get(f"/findings/{unpublished.id}")
+    response_missing = await client.get(f"/findings/{uuid4()}")
+
+    assert response_unpublished.status_code == 404
+    assert response_unpublished.content == response_missing.content
+    assert dict(response_unpublished.headers) == dict(response_missing.headers)
+    assert response_unpublished.json() == {"detail": "finding not found"}
+
+
+_PAYLOAD_FIELD = {
+    FindingType.PAPER_EXPLAINED: None,
+    FindingType.CATALOG_TENSION: "catalog_tension",
+    FindingType.PRIMERA_MEDIDA: "first_measurement",
+    FindingType.CONFIRMACION_INDEPENDIENTE: "independent_confirmation",
+}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("type_", _ALL_TYPES)
+async def test_detalle_trae_su_payload_y_los_otros_dos_a_null(
+    client: httpx.AsyncClient, db_session: Session, type_: FindingType
+) -> None:
+    finding = _seed_typed_finding(db_session, type_)
+
+    response = await client.get(f"/findings/{finding.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == type_.value
+    own = _PAYLOAD_FIELD[type_]
+    for field in ("catalog_tension", "first_measurement", "independent_confirmation"):
+        if field == own:
+            assert body[field] is not None
+        else:
+            assert body[field] is None
+    assert _FORBIDDEN_NESTED_KEYS.isdisjoint(all_keys(body))
+
+
+@pytest.mark.anyio
+async def test_detalle_de_catalog_tension_trae_evidence_archive_url_y_sigma_por_comparacion(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    finding = _seed_typed_finding(db_session, FindingType.CATALOG_TENSION)
+    domain = finding.catalog_tension
+    assert domain is not None
+
+    body = (await client.get(f"/findings/{finding.id}")).json()
+
+    tension = body["catalog_tension"]
+    assert tension["archive_url"] == domain.archive_url
+    assert tension["threshold_sigma"] == 3.0
+    assert tension["reference_sigma"] == domain.reference_sigma
+    assert len(tension["comparisons"]) == 2
+    for out, expected in zip(tension["comparisons"], domain.comparisons, strict=True):
+        assert out["sigma"] == expected.sigma
+        assert out["paper"]["evidence"] == expected.paper.evidence
+        assert out["prior"]["reference"] == expected.prior.reference
+        assert out["prior"]["arxiv_id"] == expected.prior.arxiv_id
+
+
+@pytest.mark.anyio
+async def test_detalle_de_los_tipos_nuevos_conserva_los_numeros_del_payload(
+    client: httpx.AsyncClient, db_session: Session
+) -> None:
+    first = _seed_typed_finding(db_session, FindingType.PRIMERA_MEDIDA)
+    confirmation = _seed_typed_finding(db_session, FindingType.CONFIRMACION_INDEPENDIENTE)
+
+    first_body = (await client.get(f"/findings/{first.id}")).json()["first_measurement"]
+    conf_body = (await client.get(f"/findings/{confirmation.id}")).json()[
+        "independent_confirmation"
+    ]
+
+    assert first_body["archive_status"] == "absent"
+    assert first_body["measurements"] == [
+        {"value": 2.4, "err_plus": 0.1, "err_minus": 0.1, "unit": "R_earth"}
+    ]
+    assert conf_body["sigmas"] == [0.3]
+    assert conf_body["max_sigma"] == 2.0
+    assert conf_body["reference"]["refname"] == "Chakraborty 2026"
+    assert conf_body["reference"]["releasedate"] == "2026-10-01"
+
+
+def test_repositorio_filtra_publicados_en_sql_tambien_con_filtro_de_tipo(
+    db_session: Session,
+) -> None:
+    """La segunda barrera del caso de uso enmascararía un `WHERE published_at IS
+    NOT NULL` perdido en SQL; por eso el repositorio se comprueba directamente."""
+    published = _seed_typed_finding(db_session, FindingType.PRIMERA_MEDIDA)
+    unpublished = _seed_typed_finding(db_session, FindingType.PRIMERA_MEDIDA, published=False)
+    repo = SqlAlchemyFindingRepository(db_session)
+
+    page = repo.published_page(10, 0, finding_type=FindingType.PRIMERA_MEDIDA)
+
+    assert [f.id for f in page] == [published.id]
+    assert unpublished.id not in {f.id for f in page}
+    assert repo.count_published(finding_type=FindingType.PRIMERA_MEDIDA) == 1
+    assert repo.count_published(finding_type=FindingType.CATALOG_TENSION) == 0
+    assert repo.published_page(10, 0, finding_type=FindingType.CATALOG_TENSION) == []
