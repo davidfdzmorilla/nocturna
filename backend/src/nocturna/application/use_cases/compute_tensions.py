@@ -14,8 +14,9 @@ Flujo por par (`Item`, `Reading`):
 4. Las restantes se agrupan por (`planet_name` del Reader, parámetro).
 5. `resolve_planet` devuelve `None`: `AWAITING_REFERENCE` sin planeta de
    archivo (no se llama a `solutions`).
-6. Se pide `solutions` una vez por grupo. Las del propio paper (`arxiv_id ==
-   item.external_id`) se excluyen siempre y se anota su `solution_key`.
+6. Se pide `solutions` una vez por grupo. Las del propio paper (`classify_solution`:
+   `arxiv_id` igual o, en masa y radio, valores casados; ADR 0023) se excluyen
+   siempre y se anota su `solution_key`. Las ambiguas siguen siendo previas.
 7. Periodo con `ttv_flag` en alguna solución del planeta: `PERIOD_TTV`, sin
    evaluación.
 8. Con referencia (`select_reference` sobre las previas utilizables):
@@ -44,6 +45,11 @@ from nocturna.domain.entities import (
     Reading,
 )
 from nocturna.domain.errors import InvariantViolation, PlanetResolutionFailed
+from nocturna.domain.own_solution import (
+    OwnSolutionRule,
+    SolutionProvenance,
+    classify_solution,
+)
 from nocturna.domain.tension import (
     EvaluationStatus,
     LimitComparison,
@@ -99,11 +105,13 @@ class ComputeTensions:
         *,
         threshold_sigma: float,
         period_rule: PeriodRule,
+        own_solution_rule: OwnSolutionRule,
         clock: Clock,
     ) -> None:
         self._catalog = catalog
         self._threshold = threshold_sigma
         self._period_rule = period_rule
+        self._own_rule = own_solution_rule
         self._clock = clock
 
     async def __call__(self, pairs: Sequence[tuple[Item, Reading]]) -> TensionReport:
@@ -194,9 +202,23 @@ class ComputeTensions:
             )
             return None
 
-        own = sorted(s.solution_key or "" for s in solutions if s.arxiv_id == item.external_id)
+        own_provenance = (SolutionProvenance.OWN_ARXIV_ID, SolutionProvenance.OWN_VALUE_MATCH)
+        classified = [
+            (
+                s,
+                classify_solution(
+                    s,
+                    external_id=item.external_id,
+                    published_at=item.published_at,
+                    measurements=measurements,
+                    rule=self._own_rule,
+                ),
+            )
+            for s in solutions
+        ]
+        own = sorted(s.solution_key or "" for s, kind in classified if kind in own_provenance)
         own_key = own[0] if own else None
-        others = [s for s in solutions if s.arxiv_id != item.external_id]
+        others = [s for s, kind in classified if kind not in own_provenance]
         priors = [s for s in others if s.usable_as_prior]
 
         result: TensionResult | None = None

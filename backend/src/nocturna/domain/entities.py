@@ -282,9 +282,9 @@ class CatalogSolution:
     propio paper que se está analizando. Contrato para el adaptador (T74):
     identificador arXiv SIN versión y con el mismo formato que
     `Item.external_id` (p. ej. `2609.30038`, nunca `2609.30038v2` ni
-    `arXiv:2609.30038`), porque la exclusión compara por igualdad exacta
-    de cadenas. `None` si el adaptador no lo reconoce: entonces el paper se
-    compara consigo mismo y sale σ ≈ 0 (fallo hacia el lado seguro).
+    `arXiv:2609.30038`). `None` si el adaptador no lo reconoce. Cómo se
+    decide si una solución es la del propio paper: `classify_solution` en
+    `domain/own_solution.py` y ADR 0023.
     """
 
     planet_name: str

@@ -35,7 +35,13 @@ from helpers.archive import (
     v1298_archive_solutions,
     wasp12_archive_solutions,
 )
-from helpers.exoplanet import make_item, make_measurement, make_period_rule, make_reading
+from helpers.exoplanet import (
+    make_item,
+    make_measurement,
+    make_own_solution_rule,
+    make_period_rule,
+    make_reading,
+)
 
 from nocturna.application.use_cases.compute_tensions import ComputeTensions
 from nocturna.domain.archive import ArchiveParameterValue
@@ -62,6 +68,7 @@ async def _run(archive=None, external_id=PAPER):
         catalog,
         threshold_sigma=THRESHOLD,
         period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
         clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
     )
     report = await compute([(item, reading)])
@@ -186,6 +193,7 @@ async def test_planeta_ausente_del_archivo_espera_referencia_tras_consultar_el_a
         catalog,
         threshold_sigma=THRESHOLD,
         period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
         clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
     )
 

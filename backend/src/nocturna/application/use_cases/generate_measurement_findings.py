@@ -46,6 +46,7 @@ from nocturna.domain.measurement_findings import (
     first_measurement_from,
     independent_confirmation_from,
 )
+from nocturna.domain.own_solution import OwnSolutionRule
 from nocturna.domain.repositories import (
     FindingRepository,
     ItemRepository,
@@ -144,6 +145,7 @@ class GenerateMeasurementFindings:
         max_sigma: float,
         window_days: int,
         confirmation_enabled: bool,
+        own_solution_rule: OwnSolutionRule,
     ) -> None:
         self._work = work
         self._clock = clock
@@ -152,6 +154,7 @@ class GenerateMeasurementFindings:
         self._max_sigma = max_sigma
         self._window_days = window_days
         self._confirmation_enabled = confirmation_enabled
+        self._own_rule = own_solution_rule
 
     def __call__(self, *, run_id: UUID, dry_run: bool) -> MeasurementFindingsReport:
         now = self._clock.now()
@@ -188,6 +191,8 @@ class GenerateMeasurementFindings:
                     now=now,
                     max_sigma=self._max_sigma,
                     window_days=self._window_days,
+                    item_external_id=item.external_id,
+                    own_rule=self._own_rule,
                 ):
                     continue
                 if not self._confirmation_enabled:
@@ -278,6 +283,8 @@ class GenerateMeasurementFindings:
             max_sigma=self._max_sigma,
             window_days=self._window_days,
             archive_url=self._planet_overview_url(evaluation.archive_planet_name),
+            item_external_id=item.external_id,
+            own_rule=self._own_rule,
         )
         texts = render_confirmacion_independiente(confirmation, arxiv_id=item.external_id)
         return Finding(

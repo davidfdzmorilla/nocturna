@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from helpers.archive import fixture_rows
-from helpers.exoplanet import make_measurement, make_solution
+from helpers.exoplanet import make_measurement, make_own_solution_rule, make_solution
 
 from nocturna.domain.archive import catalog_solution_from_archive
 from nocturna.domain.entities import (
@@ -53,6 +53,8 @@ OLD_PAPER = datetime(2026, 1, 2, 3, 0, tzinfo=UTC)
 RELEASE = date(2026, 10, 1)
 MAX_SIGMA = 2.0
 WINDOW = 30
+EXTERNAL_ID = "2609.35979"
+OWN_RULE = make_own_solution_rule()
 URL = "https://exoplanetarchive.ipac.caltech.edu/overview/HIP%2067522%20b"
 
 
@@ -192,7 +194,13 @@ def test_hip_67522_c_consistent_with_limit_no_es_elegible():
     )
     assert not first_measurement_eligible(ev)
     assert not confirmation_eligible(
-        ev, item_published_at=NOW, now=NOW, max_sigma=MAX_SIGMA, window_days=WINDOW
+        ev,
+        item_published_at=NOW,
+        now=NOW,
+        max_sigma=MAX_SIGMA,
+        window_days=WINDOW,
+        item_external_id=EXTERNAL_ID,
+        own_rule=OWN_RULE,
     )
 
 
@@ -211,7 +219,13 @@ def test_closed_loop_y_awaiting_con_solucion_propia_no_son_primera_medida():
 
 def _eligible(ev, *, published=OLD_PAPER, now=NOW, max_sigma=MAX_SIGMA, window=WINDOW):
     return confirmation_eligible(
-        ev, item_published_at=published, now=now, max_sigma=max_sigma, window_days=window
+        ev,
+        item_published_at=published,
+        now=now,
+        max_sigma=max_sigma,
+        window_days=window,
+        item_external_id=EXTERNAL_ID,
+        own_rule=OWN_RULE,
     )
 
 
@@ -229,6 +243,8 @@ def test_hip_67522_b_frente_a_chakraborty_es_confirmacion():
         max_sigma=MAX_SIGMA,
         window_days=WINDOW,
         archive_url=URL,
+        item_external_id=EXTERNAL_ID,
+        own_rule=OWN_RULE,
     )
     assert ic.sigmas == pytest.approx((1.4242, 0.7476), abs=5e-5)
     assert ic.reference.refname == "Chakraborty et al. 2026"
@@ -354,6 +370,8 @@ def test_periodo_evaluado_no_es_confirmacion():
             max_sigma=2.0,
             window_days=30,
             archive_url=URL,
+            item_external_id=EXTERNAL_ID,
+            own_rule=OWN_RULE,
         )
 
 
@@ -367,6 +385,8 @@ def test_confirmacion_no_elegible_lanza_en_la_factoria():
             max_sigma=2.0,
             window_days=30,
             archive_url=URL,
+            item_external_id=EXTERNAL_ID,
+            own_rule=OWN_RULE,
         )
 
 
@@ -393,6 +413,8 @@ def _confirmation():
         max_sigma=2.0,
         window_days=30,
         archive_url=URL,
+        item_external_id=EXTERNAL_ID,
+        own_rule=OWN_RULE,
     )
 
 

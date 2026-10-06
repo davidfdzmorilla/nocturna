@@ -15,6 +15,7 @@ from helpers.exoplanet import (
     RADIUS,
     make_item,
     make_measurement,
+    make_own_solution_rule,
     make_period_rule,
     make_reading,
     make_solution,
@@ -44,7 +45,11 @@ NOW = datetime(2026, 10, 2, 3, 0, tzinfo=UTC)
 
 def compute(catalog) -> ComputeTensions:
     return ComputeTensions(
-        catalog, threshold_sigma=3.0, period_rule=make_period_rule(), clock=FakeClock(NOW)
+        catalog,
+        threshold_sigma=3.0,
+        period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
+        clock=FakeClock(NOW),
     )
 
 
@@ -116,7 +121,10 @@ async def test_v1298_b_incluye_default_livingston_y_suarez_mascareno():
 
 async def test_toi_2109_b_sin_tension_da_sigma_cero_y_no_es_candidato():
     paper = make_measurement(5.02, 0.75, 0.75, planet_name="TOI-2109 b")
-    prior = make_solution(5.02, 0.75, 0.75, planet_name="TOI-2109 b", is_default=True)
+    # T83: `pl_pubdate` antiguo, para que un valor idéntico no se tome por el propio paper.
+    prior = make_solution(
+        5.02, 0.75, 0.75, planet_name="TOI-2109 b", is_default=True, pl_pubdate="2020-01"
+    )
     item, reading = _pair((paper,))
     catalog = _catalog({("TOI-2109 b", MASS): [prior]})
 
@@ -390,6 +398,9 @@ def _period(value, ep=0.0001, em=0.0001, **kw):
 
 
 def _period_prior(value, ep=0.0001, em=0.0001, **kw):
+    # T83: con `pl_pubdate` nulo la fecha cuenta como plausible y un valor casi igual
+    # sería la solución propia; las previas ajenas de estos tests llevan fecha antigua.
+    kw.setdefault("pl_pubdate", "2020-01")
     return make_solution(
         value, ep, em, parameter=PERIOD, unit=MeasurementUnit.DAY, is_default=True, **kw
     )

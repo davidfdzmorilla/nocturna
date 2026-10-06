@@ -15,6 +15,7 @@ import sqlalchemy as sa
 from factories import make_finding, make_item, make_reading, make_run
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from helpers.exoplanet import make_own_solution_rule
 from helpers.measurement_findings import toi_6981_b
 
 from nocturna import cli
@@ -91,6 +92,7 @@ def _generator(factory) -> GenerateMeasurementFindings:
         max_sigma=2.0,
         window_days=30,
         confirmation_enabled=False,
+        own_solution_rule=make_own_solution_rule(),
     )
 
 

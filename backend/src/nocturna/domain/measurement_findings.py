@@ -4,7 +4,8 @@ Funciones puras sobre una `TensionEvaluation` ya calculada y guardada: sin IO,
 sin red y sin catálogo. Decisiones: D2 (qué es una primera medida), D3 (solo
 masa y radio), D4 (σ <= `max_sigma` frente a la referencia de T88), D5 (ventana
 de recencia) y D7 (independencia = paper distinto, ya garantizado porque la
-solución propia se excluye al evaluar).
+solución propia se excluye al evaluar; desde T83, ADR 0023, la referencia se
+reclasifica con `classify_solution` y debe ser `INDEPENDENT`).
 """
 
 from datetime import date, datetime
@@ -18,6 +19,7 @@ from nocturna.domain.entities import (
     PaperMeasurement,
 )
 from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.own_solution import OwnSolutionRule, SolutionProvenance, classify_solution
 from nocturna.domain.tension import EvaluationStatus, TensionEvaluation
 
 
@@ -77,7 +79,7 @@ def _in_window(
     return (now.date() - latest).days <= window_days
 
 
-def confirmation_eligible(
+def reference_within_confirmation_limits(
     ev: TensionEvaluation,
     *,
     item_published_at: datetime,
@@ -85,9 +87,10 @@ def confirmation_eligible(
     max_sigma: float,
     window_days: int,
 ) -> bool:
-    """`evaluated` de masa o radio con todas las medidas a σ <= `max_sigma`
-    de la referencia de T88 (no tiene por qué ser `is_default`) y la entrada
-    más reciente dentro de la ventana."""
+    """Regla de `confirmacion_independiente` anterior a T83, sin mirar la
+    procedencia de la referencia: `evaluated` de masa o radio con todas las
+    medidas a σ <= `max_sigma` de la referencia de T88 (no tiene por qué ser
+    `is_default`) y la entrada más reciente dentro de la ventana."""
     if ev.parameter not in MEASUREMENT_FINDING_PARAMETERS:
         return False
     resolved = _reference_sigmas(ev)
@@ -97,6 +100,40 @@ def confirmation_eligible(
     if any(sigma > max_sigma for sigma in sigmas):
         return False
     return _in_window(item_published_at, reference.releasedate, now, window_days)
+
+
+def confirmation_eligible(
+    ev: TensionEvaluation,
+    *,
+    item_published_at: datetime,
+    now: datetime,
+    max_sigma: float,
+    window_days: int,
+    item_external_id: str,
+    own_rule: OwnSolutionRule,
+) -> bool:
+    """`reference_within_confirmation_limits` y, desde T83 (ADR 0023), referencia
+    `INDEPENDENT` del paper: reclasificada al generar, de modo que también
+    protege las evaluaciones guardadas antes de T83."""
+    if not reference_within_confirmation_limits(
+        ev,
+        item_published_at=item_published_at,
+        now=now,
+        max_sigma=max_sigma,
+        window_days=window_days,
+    ):
+        return False
+    assert ev.result is not None  # noqa: S101
+    stored_reference = ev.result.reference()
+    assert stored_reference is not None  # noqa: S101
+    provenance = classify_solution(
+        stored_reference,
+        external_id=item_external_id,
+        published_at=item_published_at,
+        measurements=ev.measurements,
+        rule=own_rule,
+    )
+    return provenance == SolutionProvenance.INDEPENDENT
 
 
 def first_measurement_from(ev: TensionEvaluation, *, archive_url: str | None) -> FirstMeasurement:
@@ -126,6 +163,8 @@ def independent_confirmation_from(
     max_sigma: float,
     window_days: int,
     archive_url: str,
+    item_external_id: str,
+    own_rule: OwnSolutionRule,
 ) -> IndependentConfirmation:
     """`IndependentConfirmation` de una evaluación elegible."""
     if not confirmation_eligible(
@@ -134,6 +173,8 @@ def independent_confirmation_from(
         now=now,
         max_sigma=max_sigma,
         window_days=window_days,
+        item_external_id=item_external_id,
+        own_rule=own_rule,
     ):
         raise InvariantViolation("la evaluación no es elegible como confirmación independiente")
     resolved = _reference_sigmas(ev)

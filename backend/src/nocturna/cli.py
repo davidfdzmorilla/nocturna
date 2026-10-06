@@ -259,6 +259,7 @@ from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
+from nocturna.domain.own_solution import OwnSolutionRule
 from nocturna.domain.repositories import ArchiveRepository
 from nocturna.domain.sources import ArxivSource
 from nocturna.domain.tension import EvaluationStatus, PeriodRule, TensionEvaluation
@@ -868,6 +869,15 @@ def period_rule_from_config(config: PipelineConfig) -> PeriodRule:
     )
 
 
+def own_solution_rule_from_config(config: PipelineConfig) -> OwnSolutionRule:
+    """`OwnSolutionRule` de `[tension.own_solution]` (T83)."""
+    own = config.tension.own_solution
+    return OwnSolutionRule(
+        value_rel_tolerance=own.value_rel_tolerance,
+        pubdate_margin_months=own.pubdate_margin_months,
+    )
+
+
 def compute_tensions_from_config(
     config: PipelineConfig, catalog: ExoplanetArchiveCatalog, clock: Clock
 ) -> ComputeTensions:
@@ -875,6 +885,7 @@ def compute_tensions_from_config(
         catalog,
         threshold_sigma=config.tension.threshold_sigma,
         period_rule=period_rule_from_config(config),
+        own_solution_rule=own_solution_rule_from_config(config),
         clock=clock,
     )
 
@@ -1266,6 +1277,7 @@ def generate_measurement_findings_from_config(
         max_sigma=settings.confirmation_max_sigma,
         window_days=settings.confirmation_window_days,
         confirmation_enabled=settings.confirmation_enabled,
+        own_solution_rule=own_solution_rule_from_config(config),
     )
 
 

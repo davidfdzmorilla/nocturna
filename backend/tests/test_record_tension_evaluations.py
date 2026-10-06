@@ -11,6 +11,7 @@ from helpers.exoplanet import (
     MASS,
     make_item,
     make_measurement,
+    make_own_solution_rule,
     make_period_rule,
     make_reading,
     make_solution,
@@ -29,7 +30,11 @@ NOW = datetime(2026, 10, 2, 3, 0, tzinfo=UTC)
 
 def _compute(catalog) -> ComputeTensions:
     return ComputeTensions(
-        catalog, threshold_sigma=3.0, period_rule=make_period_rule(), clock=FakeClock(NOW)
+        catalog,
+        threshold_sigma=3.0,
+        period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
+        clock=FakeClock(NOW),
     )
 
 

@@ -390,6 +390,17 @@ min_absolute_difference_hours = 1.0
 alias_tolerance = 0.01
 alias_max_harmonic = 5
 
+[tension.own_solution]
+# Solución propia del paper en el archivo (T83, ADR 0023). Además de por
+# `arxiv_id`, una solución sin `arxiv_id` (bibcode de revista) se considera la
+# del propio paper si su masa o radio casa con una medida del paper a
+# <= value_rel_tolerance (relativa al valor del archivo) y su pl_pubdate no es
+# anterior al mes del paper menos pubdate_margin_months. Si la fecha es
+# plausible pero el valor no casa (y siempre en periodo) es ambigua: sigue
+# siendo previa, pero no sostiene una confirmación independiente.
+value_rel_tolerance = 0.01
+pubdate_margin_months = 6
+
 [measurement_findings]
 # Findings `primera_medida` y `confirmacion_independiente` (T89, ADR 0020).
 # Se generan sin LLM desde las evaluaciones de tensión guardadas (T88) y los

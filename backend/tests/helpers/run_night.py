@@ -20,6 +20,7 @@ from fakes.work import (
     make_work_factory,
 )
 
+from helpers.exoplanet import make_own_solution_rule
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases.edit_night import EditNight
@@ -133,6 +134,7 @@ def make_generator(
         max_sigma=max_sigma,
         window_days=window_days,
         confirmation_enabled=confirmation_enabled,
+        own_solution_rule=make_own_solution_rule(),
     )
 
 
