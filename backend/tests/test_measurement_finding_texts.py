@@ -1,6 +1,6 @@
 """T89: plantillas deterministas de los findings de medidas. Sin red ni Claude."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
@@ -12,14 +12,19 @@ from helpers.measurement_findings import (
 )
 
 from nocturna.application.measurement_finding_texts import (
+    _UNIT_LABEL,
     format_number,
     format_sigma,
     render_confirmacion_independiente,
     render_primera_medida,
 )
 from nocturna.domain.entities import (
+    MEASUREMENT_FINDING_PARAMETERS,
+    UNITS_BY_PARAMETER,
     ArchiveStatus,
+    ConfirmationReference,
     FirstMeasurement,
+    IndependentConfirmation,
     MeasuredParameter,
     MeasurementUnit,
     PaperMeasurement,
@@ -121,7 +126,7 @@ def test_primera_medida_masa_en_unidades_de_jupiter_convierte_en_el_nivel_curios
 
     texts = render_primera_medida(fm, arxiv_id="2610.00002")
 
-    assert texts.title == "Primera medida de la masa de X b: 0,5 ± 0,1 M_Jup"
+    assert texts.title == "Primera medida de la masa de X b: 0,5 ± 0,1 M♃"
     assert "unas 159 veces la de la Tierra" in texts.level_curious
 
 
@@ -184,3 +189,88 @@ def test_es_determinista():
     a = render_confirmacion_independiente(_confirmation(), arxiv_id="2609.35979")
     b = render_confirmacion_independiente(_confirmation(), arxiv_id="2609.35979")
     assert a == b
+
+
+def test_primera_medida_radio_en_unidades_de_jupiter():
+    fm = FirstMeasurement(
+        paper_planet_name="X b",
+        archive_planet_name=None,
+        parameter=MeasuredParameter.RADIUS,
+        archive_status=ArchiveStatus.ABSENT,
+        measurements=(PaperMeasurement(0.969, 0.017, 0.017, MeasurementUnit.R_JUP),),
+    )
+
+    texts = render_primera_medida(fm, arxiv_id="2610.00004")
+
+    assert texts.title == "Primera medida del radio de X b: 0,969 ± 0,017 R♃"
+    assert "R♃" in texts.level_amateur
+    assert "R♃" in texts.level_technical
+
+
+def _jupiter_confirmation(parameter: MeasuredParameter, unit: MeasurementUnit):
+    return IndependentConfirmation(
+        paper_planet_name="X b",
+        archive_planet_name="X b",
+        parameter=parameter,
+        archive_url="https://archive.test/X",
+        measurements=(PaperMeasurement(0.5, 0.1, 0.1, unit),),
+        reference=ConfirmationReference(
+            refname="Ref et al. 2026",
+            arxiv_id=None,
+            value=0.55,
+            err_plus=0.05,
+            err_minus=0.05,
+            unit=unit,
+            releasedate=date(2026, 10, 1),
+        ),
+        sigmas=(0.4,),
+        max_sigma=2.0,
+        window_days=30,
+        paper_published_at=PUBLISHED,
+    )
+
+
+def test_confirmacion_con_medida_y_referencia_en_unidades_de_jupiter():
+    confirmation = _jupiter_confirmation(MeasuredParameter.MASS, MeasurementUnit.M_JUP)
+
+    texts = render_confirmacion_independiente(confirmation, arxiv_id="2610.00005")
+
+    assert "0,5 ± 0,1 M♃" in texts.level_amateur
+    assert "da 0,55 ± 0,05 M♃." in texts.level_amateur
+
+
+def test_cada_unidad_tiene_etiqueta_legible():
+    for unit in MeasurementUnit:
+        label = _UNIT_LABEL[unit]
+        assert "_" not in label
+        assert label.lower() != unit.value.lower()
+
+
+_FINDING_UNITS = [
+    (parameter, unit)
+    for parameter in MEASUREMENT_FINDING_PARAMETERS
+    for unit in sorted(UNITS_BY_PARAMETER[parameter], key=lambda u: u.value)
+]
+
+
+@pytest.mark.parametrize(("parameter", "unit"), _FINDING_UNITS)
+def test_ningun_texto_filtra_el_identificador_interno_de_la_unidad(parameter, unit):
+    fm = FirstMeasurement(
+        paper_planet_name="X b",
+        archive_planet_name=None,
+        parameter=parameter,
+        archive_status=ArchiveStatus.ABSENT,
+        measurements=(PaperMeasurement(0.5, 0.1, 0.1, unit),),
+    )
+    rendered = [
+        render_primera_medida(fm, arxiv_id="2610.00006"),
+        render_confirmacion_independiente(
+            _jupiter_confirmation(parameter, unit), arxiv_id="2610.00006"
+        ),
+    ]
+    for texts in rendered:
+        for text in (texts.title, texts.level_curious, texts.level_amateur, texts.level_technical):
+            lowered = text.lower()
+            assert unit.value not in text
+            assert "_jup" not in lowered and "_earth" not in lowered
+            assert "M_" not in text and "R_" not in text and "_M" not in text and "_R" not in text
