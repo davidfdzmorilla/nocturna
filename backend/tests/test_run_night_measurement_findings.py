@@ -208,3 +208,31 @@ async def test_si_el_editor_falla_no_se_publica_nada_y_no_se_regenera():
     # Otra noche: la evaluación ya tiene su Finding (huérfano) y no se regenera.
     again = make_generator(env)(run_id=env.run.id, dry_run=False)
     assert again.created == () and again.already_generated == 1
+
+
+async def test_la_fase_de_medidas_no_degrada_la_noche_con_el_log_a_info(caplog, monkeypatch):
+    """Regresion T90: con el log a INFO el evento `night.measurement_findings`
+    no debe lanzar (clave reservada de `LogRecord`) ni degradar el Run."""
+    import logging
+
+    from nocturna.application.use_cases import generate_measurement_findings as gen_module
+    from nocturna.application.use_cases import run_night as run_night_module
+
+    monkeypatch.setattr(run_night_module._logger, "disabled", False)
+    monkeypatch.setattr(gen_module._logger, "disabled", False)
+    toi = _toi_item()
+    env = Environment(items=[toi], policy=make_policy(), now=WITHIN_WINDOW)
+    env.evaluations.add(toi_6981_b(toi.id))
+    fake = FakeLLMProvider()
+    approve_items_in_editor(
+        fake, finding_ids_by_item=in_memory_finding_ids_by_item(env), item_ids=[toi.id]
+    )
+    run_night = make_run_night(env=env, provider=fake, ingest_result=_empty_ingest())
+
+    with caplog.at_level(logging.INFO):
+        result = await run_night()
+
+    assert "measurement_findings_error" not in result.notes
+    assert result.status is not RunStatus.PARTIAL
+    assert result.status is RunStatus.COMPLETED
+    assert result.findings_published == 1

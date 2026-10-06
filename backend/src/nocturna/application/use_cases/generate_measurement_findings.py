@@ -221,7 +221,7 @@ class GenerateMeasurementFindings:
                 "event": "night.measurement_findings",
                 "run_id": str(run_id),
                 "dry_run": dry_run,
-                "created": len(created),
+                "findings_created": len(created),
                 "primera_medida": sum(1 for f in created if f.type is FindingType.PRIMERA_MEDIDA),
                 "confirmacion_independiente": sum(
                     1 for f in created if f.type is FindingType.CONFIRMACION_INDEPENDIENTE
