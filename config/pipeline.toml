@@ -416,10 +416,12 @@ confirmation_max_sigma = 2.0
 # confirmation_window_days: la más reciente de las dos entradas (paper y
 # solución del archivo) debe caer en los últimos N días (D5).
 confirmation_window_days = 30
-# confirmation_enabled: apagada (D6) hasta cerrar T83 (bibcode de la solución
-# propia). Con false no se genera ninguna `confirmacion_independiente`;
-# `run-night --dry-run` las lista como bloqueadas.
-confirmation_enabled = false
+# confirmation_enabled: apagada (D6) hasta cerrar T83 (solución propia por
+# `arxiv_id` y por valores, ADR 0023). Activada por el autor el 2026-10-06
+# tras el informe de T83 en la base real (ninguna confirmación con referencia
+# propia o ambigua). Con false no se genera ninguna `confirmacion_independiente`
+# y `run-night --dry-run` las lista como bloqueadas.
+confirmation_enabled = true
 
 [llm]
 provider = "agent_sdk"
