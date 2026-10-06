@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { FindingSummary } from "@/lib/api/types";
 import { formatPublishedAt } from "@/lib/dates";
+import { TypeBadge } from "./TypeBadge";
 
 type FindingCardProps = {
   finding: FindingSummary;
@@ -24,7 +25,8 @@ export function FindingCard({ finding }: FindingCardProps) {
       <h2 className="text-lg font-semibold">
         <Link href={`/hallazgo/${finding.id}`}>{finding.title}</Link>
       </h2>
-      <time dateTime={iso} className="mt-1 block text-sm text-text-muted">
+      <TypeBadge type={finding.type} />
+      <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
         {label}
       </time>
       <p className="mt-3 line-clamp-4 text-text">{finding.level_curious}</p>

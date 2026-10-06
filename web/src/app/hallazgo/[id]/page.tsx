@@ -4,6 +4,9 @@ import type { Metadata } from "next";
 import { fetchFinding } from "@/lib/api/client";
 import { formatPublishedAt } from "@/lib/dates";
 import { parseLevelParam, levelText } from "@/lib/levels";
+import { FindingData } from "@/components/FindingData";
+import { TypeBadge } from "@/components/TypeBadge";
+import { safeArxivSourceUrl } from "@/lib/externalLinks";
 import { LevelNav } from "@/components/LevelNav";
 import { Notice } from "@/components/Notice";
 
@@ -19,14 +22,6 @@ export const dynamic = "force-dynamic";
  */
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * La API (T50) garantiza que `source_url` siempre lleva este prefijo.
- * Se comprueba igualmente aquí antes de usarlo como `href`: hace
- * explícita esa confianza en un dato ajeno en vez de dar por hecho el
- * contrato de otro servicio sin comprobarlo en el punto de uso.
- */
-const ARXIV_ABS_PREFIX = "https://arxiv.org/abs/";
 
 type FindingPageProps = {
   params: Promise<{ id: string }>;
@@ -96,11 +91,14 @@ export default async function FindingPage({
   const { nivel } = await searchParams;
   const level = parseLevelParam(nivel);
   const { iso, label } = formatPublishedAt(finding.published_at);
+  // La API (T50) garantiza el prefijo de arXiv; se comprueba también aquí.
+  const arxivUrl = safeArxivSourceUrl(finding.source_url);
 
   return (
     <>
       <h1 className="text-2xl font-semibold text-text">{finding.title}</h1>
-      <time dateTime={iso} className="mt-1 block text-sm text-text-muted">
+      <TypeBadge type={finding.type} />
+      <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
         {label}
       </time>
 
@@ -110,9 +108,11 @@ export default async function FindingPage({
         {levelText(finding, level)}
       </article>
 
-      {finding.source_url?.startsWith(ARXIV_ABS_PREFIX) ? (
+      <FindingData finding={finding} />
+
+      {arxivUrl ? (
         <p className="mt-6">
-          <a href={finding.source_url} rel="noopener noreferrer">
+          <a href={arxivUrl} rel="noopener noreferrer">
             Ver el artículo original en arXiv
           </a>
         </p>

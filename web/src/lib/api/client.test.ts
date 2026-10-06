@@ -42,6 +42,9 @@ const sampleFinding: FindingDetail = {
   level_amateur: "aficionado",
   level_technical: "tecnico",
   source_url: "https://arxiv.org/abs/1234.5678",
+  catalog_tension: null,
+  first_measurement: null,
+  independent_confirmation: null,
 };
 
 describe("fetchFinding", () => {
@@ -144,5 +147,63 @@ describe("fetchFindingsPage", () => {
     const result = await fetchFindingsPage(1, 20);
 
     expect(result).toEqual({ ok: true, data: page });
+  });
+
+  it("sin filtro la query no lleva type", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 200, ok: true }),
+    );
+    await fetchFindingsPage(2, 20);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      `${API_URL}/findings?page=2&size=20`,
+    );
+  });
+
+  it("con filtro añade type con el valor del enum", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 200, ok: true }),
+    );
+    await fetchFindingsPage(1, 20, "primera_medida");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      `${API_URL}/findings?page=1&size=20&type=primera_medida`,
+    );
+  });
+
+  it("422 de la API es unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 422, ok: false }),
+    );
+    expect(await fetchFindingsPage(1, 20, "catalog_tension")).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+  });
+});
+
+describe("fetchFinding con payloads", () => {
+  it("devuelve el detalle con su payload tal cual", async () => {
+    const detail: FindingDetail = {
+      ...sampleFinding,
+      type: "primera_medida",
+      first_measurement: {
+        paper_planet_name: "X b",
+        archive_planet_name: null,
+        parameter: "mass",
+        archive_status: "absent",
+        archive_url: null,
+        measurements: [
+          {
+            value: 1.5,
+            err_plus: 0.2,
+            err_minus: 0.2,
+            unit: "M_jup",
+          },
+        ],
+      },
+    };
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 200, ok: true, json: () => Promise.resolve(detail) }),
+    );
+    expect(await fetchFinding(detail.id)).toEqual({ ok: true, data: detail });
   });
 });

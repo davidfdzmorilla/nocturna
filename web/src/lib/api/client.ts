@@ -22,7 +22,7 @@
 
 import { cache } from "react";
 import { apiBaseUrl } from "./config";
-import type { FindingDetail, FindingsPage } from "./types";
+import type { FindingDetail, FindingsPage, FindingType } from "./types";
 import { PAGE_SIZE } from "../pagination";
 
 export type ApiResult<T> =
@@ -76,11 +76,15 @@ async function getJson<T>(path: string): Promise<ApiResult<T>> {
 export async function fetchFindingsPage(
   page: number,
   size: number = PAGE_SIZE,
+  type: FindingType | null = null,
 ): Promise<ApiResult<FindingsPage>> {
   const params = new URLSearchParams({
     page: String(page),
     size: String(size),
   });
+  if (type !== null) {
+    params.set("type", type);
+  }
   return getJson<FindingsPage>(`/findings?${params.toString()}`);
 }
 

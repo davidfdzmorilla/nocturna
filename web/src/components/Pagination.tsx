@@ -1,9 +1,11 @@
 import Link from "next/link";
+import type { FindingType } from "@/lib/api/types";
 import { pageHref } from "@/lib/pagination";
 
 type PaginationProps = {
   page: number;
   totalPages: number;
+  type?: FindingType | null;
 };
 
 /**
@@ -15,7 +17,7 @@ type PaginationProps = {
  * `size` es siempre `PAGE_SIZE`; no aparece en la URL ni como prop
  * aquí, así que no hay forma de que este componente lo exponga.
  */
-export function Pagination({ page, totalPages }: PaginationProps) {
+export function Pagination({ page, totalPages, type = null }: PaginationProps) {
   const hasPrevious = page > 1;
   const hasNext = page < totalPages;
 
@@ -25,7 +27,7 @@ export function Pagination({ page, totalPages }: PaginationProps) {
       className="mt-8 flex items-center justify-between gap-4"
     >
       {hasPrevious ? (
-        <Link href={pageHref(page - 1)}>← Anterior</Link>
+        <Link href={pageHref(page - 1, type)}>← Anterior</Link>
       ) : (
         <span aria-disabled="true" className="text-text-muted">
           ← Anterior
@@ -37,7 +39,7 @@ export function Pagination({ page, totalPages }: PaginationProps) {
       </p>
 
       {hasNext ? (
-        <Link href={pageHref(page + 1)}>Siguiente →</Link>
+        <Link href={pageHref(page + 1, type)}>Siguiente →</Link>
       ) : (
         <span aria-disabled="true" className="text-text-muted">
           Siguiente →

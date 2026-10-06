@@ -265,7 +265,9 @@ class SqlAlchemyFindingRepository:
         row.confidence = finding.confidence
         row.published_at = finding.published_at
 
-    def published_page(self, limit: int, offset: int) -> list[Finding]:
+    def published_page(
+        self, limit: int, offset: int, *, finding_type: FindingType | None = None
+    ) -> list[Finding]:
         """Página de hallazgos publicados para la web de solo lectura.
 
         `published_at IS NOT NULL` es el único filtro de publicación (T50):
@@ -282,20 +284,26 @@ class SqlAlchemyFindingRepository:
         desempate estable, dos páginas consecutivas de la misma consulta
         pueden repetir u omitir filas (la lección de `unpublished_for_run`,
         ver `docs/TECHNICAL_DEBT.md`).
+
+        `finding_type` (T77) añade `type = :t` a la misma sentencia, sin
+        sustituir el filtro de publicación. Sin índice: el volumen es mínimo.
         """
+        stmt = select(FindingRow).where(FindingRow.published_at.is_not(None))
+        if finding_type is not None:
+            stmt = stmt.where(FindingRow.type == finding_type)
         stmt = (
-            select(FindingRow)
-            .where(FindingRow.published_at.is_not(None))
-            .order_by(FindingRow.published_at.desc(), FindingRow.id.desc())
+            stmt.order_by(FindingRow.published_at.desc(), FindingRow.id.desc())
             .limit(limit)
             .offset(offset)
         )
         rows = self._session.execute(stmt).scalars().all()
         return [finding_from_row(row) for row in rows]
 
-    def count_published(self) -> int:
+    def count_published(self, *, finding_type: FindingType | None = None) -> int:
         """Total de hallazgos publicados, mismo filtro que `published_page`."""
         stmt = select(func.count()).where(FindingRow.published_at.is_not(None))
+        if finding_type is not None:
+            stmt = stmt.where(FindingRow.type == finding_type)
         return self._session.execute(stmt).scalar_one()
 
     def get_published(self, finding_id: UUID) -> Finding | None:

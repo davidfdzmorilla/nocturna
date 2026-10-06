@@ -13,8 +13,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from nocturna.api.deps import get_findings_repository, get_items_repository
-from nocturna.api.schemas import FindingDetail, FindingsPageResponse, FindingSummary, source_url
+from nocturna.api.schemas import (
+    CatalogTensionOut,
+    FindingDetail,
+    FindingsPageResponse,
+    FindingSummary,
+    FirstMeasurementOut,
+    IndependentConfirmationOut,
+    source_url,
+)
 from nocturna.application.use_cases.list_findings import GetPublishedFinding, ListPublishedFindings
+from nocturna.domain.entities import FindingType
 from nocturna.domain.repositories import FindingRepository, ItemRepository
 
 router = APIRouter()
@@ -41,6 +50,7 @@ def list_findings(
     findings: _FindingsDep,
     page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     size: Annotated[int, Query(ge=1, le=50)] = 20,
+    finding_type: Annotated[FindingType | None, Query(alias="type")] = None,
 ) -> FindingsPageResponse:
     """Listado paginado, más recientes primero.
 
@@ -48,9 +58,12 @@ def list_findings(
     devuelve `200` con `items` vacío y el `total` real, igual que
     cualquier otra página sin resultados. Por encima de `MAX_PAGE`,
     `422`, igual que `page=0` o `size=51`.
+
+    `type` (T77) filtra por un solo `FindingType`; un valor desconocido o
+    vacío da `422` por el propio enum, y el `total` es el del filtro.
     """
     offset = (page - 1) * size
-    result = ListPublishedFindings(findings)(limit=size, offset=offset)
+    result = ListPublishedFindings(findings)(limit=size, offset=offset, finding_type=finding_type)
     summaries = []
     for finding in result.findings:
         if finding.published_at is None:
@@ -64,6 +77,7 @@ def list_findings(
                 id=finding.id,
                 title=finding.title,
                 published_at=finding.published_at,
+                type=finding.type,
                 level_curious=finding.level_curious,
             )
         )
@@ -105,9 +119,24 @@ def get_finding(
         id=finding.id,
         title=finding.title,
         published_at=finding.published_at,
-        type=finding.type.value,
+        type=finding.type,
         level_curious=finding.level_curious,
         level_amateur=finding.level_amateur,
         level_technical=finding.level_technical,
         source_url=source_url(published.source, published.external_id),
+        catalog_tension=(
+            None
+            if finding.catalog_tension is None
+            else CatalogTensionOut.from_domain(finding.catalog_tension)
+        ),
+        first_measurement=(
+            None
+            if finding.first_measurement is None
+            else FirstMeasurementOut.from_domain(finding.first_measurement)
+        ),
+        independent_confirmation=(
+            None
+            if finding.independent_confirmation is None
+            else IndependentConfirmationOut.from_domain(finding.independent_confirmation)
+        ),
     )

@@ -3,6 +3,9 @@
  * `fetch` vive en `api/client.ts`.
  */
 
+import type { FindingType } from "./api/types";
+import { feedHref } from "./findingTypes";
+
 export const PAGE_SIZE = 20;
 
 /**
@@ -55,7 +58,10 @@ export function totalPages(total: number, size: number): number {
   return Math.max(1, Math.ceil(total / size));
 }
 
-/** `"/"` para la página 1, `"/?page=n"` para el resto. */
-export function pageHref(page: number): string {
-  return page <= 1 ? "/" : `/?page=${page}`;
+/**
+ * `"/"` para la página 1, `"/?page=n"` para el resto; con filtro de tipo
+ * conserva `?tipo=<slug>` (`"/?tipo=x"`, `"/?tipo=x&page=n"`).
+ */
+export function pageHref(page: number, type: FindingType | null = null): string {
+  return feedHref(page, type);
 }

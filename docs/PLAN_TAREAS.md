@@ -214,7 +214,7 @@ Objetivo de la fase: una noche completa corre en local contra la suscripción, p
 
 Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md). Objetivo: publicar como `catalog_tension` las tensiones entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia la calcula Python; Claude solo redacta a partir de números ya calculados. Local, sin despliegue.
 
-**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74, T79, T80, T81, T82, T87, T83, T88, T89, T90 y T91 cerradas; siguiente: T84–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
+**Estado del bloque**: T71, T71.b, T71.c, T72, T73, T74, T79, T80, T81, T82, T87, T83, T88, T89, T90, T91 y T77 cerradas; siguiente: T84–T86 (vía del archivo, decisiones del autor del 2026-10-01). T75 espera 7 noches con `reader-v3`. Vía (c) adoptada en firme por el autor el 2026-09-29 (ADR 0013; cierre de T71.b): la medida del paper y su atribución a un planeta las produce el Reader, y Python calcula σ. El parser determinista de T71 queda como herramienta del experimento, no como base de T73. Plan revisado y aprobado por el autor el 2026-09-29. Orden: T71.c → T73 → T74 → T72 → T75 → T76 → T77 → T78. El criterio de cierre de fase 2 está abierto (decisión del autor, ver T78).
 
 ### T70 · `page` sin tope en `GET /findings`
 - **Estado**: done
@@ -299,12 +299,13 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: tests con `FakeLLMProvider` (sin tensión, cero `AgentCall` del rol; con tensión, una; JSON inválido → reintento → `failed`; presupuesto del rol agotado → ninguna llamada y el resto de la noche sigue; el Editor recibe los dos tipos en una llamada); `test_llm_call_sites.py` con una sola entrada; humo `-m manual` con una tensión real del informe de T74; dos pasadas de `budget-guard-review`; tabla "Agentes" de `CLAUDE.md` actualizada.
 
 ### T77 · API y web: tipo visible, filtro por tipo y etiqueta "candidato"
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T72, T70
 - **Toca agentes y gasto**: no.
 - **Alcance**: API: `type` en el resumen del listado; `GET /findings?type=` validado contra el enum; el campo estructurado de T72 en el detalle. Web: mismo feed, etiqueta visible del tipo en feed y detalle, filtro por tipo en la URL sin estado de cliente, etiqueta "candidato" en `catalog_tension`, valor del paper con su cita literal, soluciones previas con enlace al archivo y σ junto a cada afirmación, en castellano. Banner intacto; cero llamadas a Claude.
 - **Pregunta abierta en la tarea**: textos exactos de las etiquetas.
 - **Hecho cuando**: tests de API `-m db` (filtro, tipo inválido, `404` que sigue siendo indistinguible); tests, lint y build de la web en verde con la API parada; guarda `no-claude-in-web` en verde; Lighthouse de accesibilidad ≥ 90.
+- **Cierre (2026-10-06, pendiente de merge; sin migración)**: plan aprobado por el autor con D1–D9: los cuatro tipos; etiquetas "Artículo explicado", "Tensión con el catálogo", "Primera medida", "Confirmación independiente"; "Candidato" solo en `catalog_tension`; slugs `?tipo=`; `evidence` como cita en inglés en texto plano; ADR 0024. API: filtro `?type=`, `type` en el listado, tres datos estructurados en el detalle por lista blanca, `404` intacto. Web: etiquetas, filtro, bloque "Datos del contraste", enlaces externos validados, sin `dangerouslySetInnerHTML`, test de contrato de claves con la API. La revisión detectó que la web esperaba un `planet_name` por medida que la API no envía (columna "Planeta" vacía con datos reales); corregido. Lighthouse de accesibilidad 100 en `/`, `/?tipo=primera-medida` y dos detalles, con la API local en solo lectura sobre la base real. Suites: backend 2612 passed (369 de `-m db`); web 107 tests.
 
 ### T78 · Cierre de fase 2
 - **Estado**: pending

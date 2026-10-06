@@ -7,6 +7,8 @@ import {
 } from "@/lib/pagination";
 import { FindingCard } from "@/components/FindingCard";
 import { Pagination } from "@/components/Pagination";
+import { TypeFilter } from "@/components/TypeFilter";
+import { feedHref, parseTypeParam } from "@/lib/findingTypes";
 import { Notice } from "@/components/Notice";
 
 /**
@@ -18,14 +20,18 @@ import { Notice } from "@/components/Notice";
 export const dynamic = "force-dynamic";
 
 type HomeProps = {
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<{
+    page?: string | string[];
+    tipo?: string | string[];
+  }>;
 };
 
 export default async function Home({ searchParams }: HomeProps) {
   const params = await searchParams;
   const page = parsePageParam(params.page);
+  const type = parseTypeParam(params.tipo);
 
-  const result = await fetchFindingsPage(page, PAGE_SIZE);
+  const result = await fetchFindingsPage(page, PAGE_SIZE, type);
 
   if (!result.ok) {
     return (
@@ -43,6 +49,20 @@ export default async function Home({ searchParams }: HomeProps) {
 
   const { items, total } = result.data;
 
+  if (total === 0 && type !== null) {
+    return (
+      <>
+        <h1 className="text-2xl font-semibold text-text">Últimos hallazgos</h1>
+        <TypeFilter activeType={type} />
+        <div className="mt-6">
+          <Notice title="No hay hallazgos de este tipo">
+            <Link href="/">Ver todos</Link>
+          </Notice>
+        </div>
+      </>
+    );
+  }
+
   if (total === 0) {
     return (
       <>
@@ -59,7 +79,7 @@ export default async function Home({ searchParams }: HomeProps) {
       <>
         <h1 className="sr-only">Nocturna</h1>
         <Notice title="Esta página no tiene hallazgos.">
-          <Link href="/">Ir a la página 1</Link>
+          <Link href={feedHref(1, type)}>Ir a la página 1</Link>
         </Notice>
       </>
     );
@@ -70,12 +90,13 @@ export default async function Home({ searchParams }: HomeProps) {
   return (
     <>
       <h1 className="text-2xl font-semibold text-text">Últimos hallazgos</h1>
+      <TypeFilter activeType={type} />
       <div className="mt-6 flex flex-col gap-4">
         {items.map((finding) => (
           <FindingCard key={finding.id} finding={finding} />
         ))}
       </div>
-      <Pagination page={page} totalPages={pages} />
+      <Pagination page={page} totalPages={pages} type={type} />
     </>
   );
 }
