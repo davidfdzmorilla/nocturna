@@ -423,3 +423,57 @@ async def test_night_item_un_registro_por_item_y_fase_sin_duplicar_agent_call(ca
             assert payload["outcome"] == "popularized"
             assert "finding_id" in payload
             assert "interest_score" not in payload
+
+
+# --- 22. T90: night.measurement_findings con el logging JSON real a INFO ---
+
+
+def test_night_measurement_findings_con_logging_json_real_a_info(capsys, monkeypatch):
+    """Regresion T90: `extra={"created": ...}` choca con un atributo reservado
+    de `LogRecord` y `Logger.makeRecord` lanza `KeyError` (solo con el log
+    habilitado a INFO; la fixture autouse restaura el raiz al terminar)."""
+    from fakes.work import (
+        InMemoryFindingRepository,
+        InMemoryItemRepository,
+        make_measurement_findings_work_factory,
+    )
+    from helpers.measurement_findings import make_arxiv_item, toi_6981_b
+
+    from nocturna.application.use_cases import generate_measurement_findings as module
+    from nocturna.domain.entities import FindingType, ItemStatus
+
+    monkeypatch.setattr(module._logger, "disabled", False)
+    configure_json_logging(logging.INFO)
+
+    items = InMemoryItemRepository()
+    findings = InMemoryFindingRepository()
+    evaluations = InMemoryTensionEvaluationRepository()
+    item = make_arxiv_item("2609.37597", status=ItemStatus.READ)
+    items.save(item)
+    evaluations.add(toi_6981_b(item.id))
+    run_id = uuid4()
+    generator = module.GenerateMeasurementFindings(
+        work=make_measurement_findings_work_factory(
+            items=items, findings=findings, evaluations=evaluations
+        ),
+        clock=FakeClock(datetime(2026, 10, 5, 3, 0, tzinfo=UTC)),
+        planet_overview_url=lambda name: f"https://archive.test/{name.replace(' ', '_')}",
+        max_candidates=5,
+        max_sigma=2.0,
+        window_days=30,
+        confirmation_enabled=True,
+    )
+
+    report = generator(run_id=run_id, dry_run=False)
+
+    lines = [ln for ln in capsys.readouterr().err.splitlines() if ln.strip()]
+    payloads = [json.loads(ln) for ln in lines]
+    matching = [p for p in payloads if p.get("event") == "night.measurement_findings"]
+    assert len(matching) == 1, f"lineas de log: {payloads}"
+    payload = matching[0]
+    assert payload["findings_created"] == 1
+    assert payload["primera_medida"] == 1
+    assert payload["run_id"] == str(run_id)
+    datetime.fromisoformat(payload["ts"])
+    assert len(report.created) == 1
+    assert report.created[0].type is FindingType.PRIMERA_MEDIDA
