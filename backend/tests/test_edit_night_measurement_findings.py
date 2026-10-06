@@ -12,6 +12,7 @@ from dataclasses import replace
 
 import pytest
 from fakes.llm import FakeLLMProvider
+from helpers.exoplanet import make_own_solution_rule
 from helpers.measurement_findings import hip67522_b, make_arxiv_item, toi_6981_b
 from helpers.run_night import WITHIN_WINDOW, Environment, make_policy
 
@@ -332,6 +333,7 @@ async def test_data_de_una_confirmacion_lleva_referencia_y_sigma():
         max_sigma=2.0,
         window_days=30,
         confirmation_enabled=True,
+        own_solution_rule=make_own_solution_rule(),
     )
     generator(run_id=env.run.id, dry_run=False)
     fake = FakeLLMProvider()

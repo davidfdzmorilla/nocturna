@@ -341,6 +341,16 @@ class TensionPeriodConfig(BaseModel):
     alias_max_harmonic: int = Field(ge=2)
 
 
+class TensionOwnSolutionConfig(BaseModel):
+    """Regla de la solución propia del paper en el archivo (T83, ADR 0023).
+    Sin valores por defecto: se declaran en `[tension.own_solution]`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    value_rel_tolerance: float = Field(gt=0, le=0.1)
+    pubdate_margin_months: int = Field(ge=0, strict=True)
+
+
 class TensionConfig(BaseModel):
     """Umbral de la tensión frente al catálogo (T73/T74) y regla del periodo (T88)."""
 
@@ -348,6 +358,7 @@ class TensionConfig(BaseModel):
 
     threshold_sigma: float = Field(gt=0)
     period: TensionPeriodConfig
+    own_solution: TensionOwnSolutionConfig
 
 
 class LLMConfig(BaseModel):

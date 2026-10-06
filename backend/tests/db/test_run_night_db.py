@@ -26,6 +26,7 @@ import pytest
 from factories import aware, make_agent_call, make_item, make_run
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from helpers.exoplanet import make_own_solution_rule
 from helpers.run_night import approve_items_in_editor, db_finding_ids_by_item
 from sqlalchemy import select
 
@@ -185,6 +186,7 @@ def _build_run_night(
             max_sigma=2.0,
             window_days=30,
             confirmation_enabled=False,
+            own_solution_rule=make_own_solution_rule(),
         ),
         run_id=run_id,
         max_items=policy.max_items_per_night,

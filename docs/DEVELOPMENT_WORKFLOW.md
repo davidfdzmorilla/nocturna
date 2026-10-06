@@ -56,6 +56,8 @@ En T89 (findings de medida), tras migrar y antes de la noche: `uv run nocturna e
 
 En T82 (historia de `Reading`), tras migrar: `uv run nocturna evaluate-tensions --dry-run` y `uv run nocturna run-night --dry-run` deben dar lo mismo que antes de migrar (ninguna lectura sustituida todavía); después, la consulta de candidatos a relectura del ADR 0022 (ítems de astro-ph.EP con `exoplanet_match`, lectura vigente sin medidas, en `read`, `discarded` o `published`) y presentar la lista al autor con su coste (~6.400 tokens por ítem). La relectura (`run-item <id> --reader v3 --force`) solo la lanza el autor, dentro de la ventana y con la noche terminada, ≤ 5 por noche.
 
+En T83 (solución propia, sin migración): `uv run python scripts/t83_link_report.py` y anotar (a)–(d) en el cierre de T83; `uv run nocturna evaluate-tensions --dry-run` sin cambios salvo lo que liste la auditoría (d); `uv run nocturna run-night --dry-run` con HIP 67522 b todavía como confirmación "bloqueado (confirmation_enabled=false)". Activar la confirmación es una decisión aparte del autor.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

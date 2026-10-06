@@ -10,7 +10,7 @@ from factories import make_item, make_reading, make_run
 from fakes.catalog import FakeExoplanetCatalog
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
-from helpers.exoplanet import make_period_rule
+from helpers.exoplanet import make_own_solution_rule, make_period_rule
 
 from nocturna import cli
 from nocturna.application.budget import BudgetPolicy
@@ -89,6 +89,7 @@ async def test_tras_releer_se_evalua_y_se_genera_una_vez_solo_con_la_lectura_nue
                 FakeExoplanetCatalog(),
                 threshold_sigma=3.0,
                 period_rule=make_period_rule(),
+                own_solution_rule=make_own_solution_rule(),
                 clock=FakeClock(NOW),
             ),
         )
@@ -166,6 +167,7 @@ async def test_tras_releer_se_evalua_y_se_genera_una_vez_solo_con_la_lectura_nue
             max_sigma=2.0,
             window_days=30,
             confirmation_enabled=False,
+            own_solution_rule=make_own_solution_rule(),
         )
 
     first = _generate()(run_id=run_id, dry_run=False)

@@ -147,6 +147,7 @@ def v1298_tension_results() -> dict[str, TensionResult]:
             catalog,
             threshold_sigma=V1298_THRESHOLD,
             period_rule=make_period_rule(),
+            own_solution_rule=make_own_solution_rule(),
             clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
         )
         return await compute([(item, reading)])
@@ -179,3 +180,10 @@ def catalog_tension_v1298_b():
         threshold_sigma=V1298_THRESHOLD,
         archive_url=V1298_ARCHIVE_URL,
     )
+
+
+def make_own_solution_rule():
+    """`OwnSolutionRule` con los valores de `[tension.own_solution]` de pipeline.toml (T83)."""
+    from nocturna.domain.own_solution import OwnSolutionRule
+
+    return OwnSolutionRule(value_rel_tolerance=0.01, pubdate_margin_months=6)

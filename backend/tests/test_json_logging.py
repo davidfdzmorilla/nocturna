@@ -30,6 +30,7 @@ from fakes.work import (
     make_measurement_findings_work_factory,
     make_work_factory,
 )
+from helpers.exoplanet import make_own_solution_rule
 
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.application.use_cases import run_night as run_night_module
@@ -370,6 +371,7 @@ async def _run_minimal_night_for_night_item_log() -> None:
             max_sigma=2.0,
             window_days=30,
             confirmation_enabled=False,
+            own_solution_rule=make_own_solution_rule(),
         ),
         run_id=run.id,
         max_items=10,
@@ -462,6 +464,7 @@ def test_night_measurement_findings_con_logging_json_real_a_info(capsys, monkeyp
         max_sigma=2.0,
         window_days=30,
         confirmation_enabled=True,
+        own_solution_rule=make_own_solution_rule(),
     )
 
     report = generator(run_id=run_id, dry_run=False)

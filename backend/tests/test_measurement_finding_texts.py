@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from helpers.exoplanet import make_own_solution_rule
 from helpers.measurement_findings import (
     hip67522_b,
     present_without_reference,
@@ -41,6 +42,8 @@ def _confirmation():
         max_sigma=2.0,
         window_days=30,
         archive_url=URL,
+        item_external_id="2609.35979",
+        own_rule=make_own_solution_rule(),
     )
 
 

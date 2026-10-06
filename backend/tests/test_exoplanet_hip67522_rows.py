@@ -6,7 +6,13 @@ from datetime import UTC, date, datetime
 import pytest
 from fakes.clock import FakeClock
 from helpers.archive import fixture_rows, make_archive, make_catalog
-from helpers.exoplanet import make_item, make_measurement, make_period_rule, make_reading
+from helpers.exoplanet import (
+    make_item,
+    make_measurement,
+    make_own_solution_rule,
+    make_period_rule,
+    make_reading,
+)
 
 from nocturna.application.use_cases.compute_tensions import ComputeTensions
 from nocturna.domain.archive import catalog_solution_from_archive
@@ -68,6 +74,7 @@ async def test_hip67522_b_evaluada_con_chakraborty_y_c_consistente_con_la_cota()
         catalog,
         threshold_sigma=3.0,
         period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
         clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
     )
 

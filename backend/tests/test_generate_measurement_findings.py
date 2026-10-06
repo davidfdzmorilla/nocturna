@@ -15,6 +15,7 @@ from fakes.work import (
     InMemoryItemRepository,
     make_measurement_findings_work_factory,
 )
+from helpers.exoplanet import make_own_solution_rule
 from helpers.measurement_findings import (
     chakraborty_b,
     hip67522_b,
@@ -66,6 +67,7 @@ class _Env:
             max_sigma=2.0,
             window_days=window_days,
             confirmation_enabled=confirmation_enabled,
+            own_solution_rule=make_own_solution_rule(),
         )
 
 

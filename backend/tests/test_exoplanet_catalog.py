@@ -12,6 +12,7 @@ from helpers.archive import ALIAS_URL, alias_handler, make_archive, make_catalog
 from helpers.exoplanet import (
     make_item,
     make_measurement,
+    make_own_solution_rule,
     make_period_rule,
     make_reading,
 )
@@ -37,6 +38,7 @@ def _compute(catalog) -> ComputeTensions:
         catalog,
         threshold_sigma=3.0,
         period_rule=make_period_rule(),
+        own_solution_rule=make_own_solution_rule(),
         clock=FakeClock(datetime(2026, 10, 2, tzinfo=UTC)),
     )
 

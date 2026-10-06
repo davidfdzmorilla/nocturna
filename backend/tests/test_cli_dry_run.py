@@ -125,6 +125,10 @@ min_absolute_difference_hours = 1.0
 alias_tolerance = 0.01
 alias_max_harmonic = 5
 
+[tension.own_solution]
+value_rel_tolerance = 0.01
+pubdate_margin_months = 6
+
 [measurement_findings]
 max_candidates_per_night = 5
 confirmation_max_sigma = 2.0
