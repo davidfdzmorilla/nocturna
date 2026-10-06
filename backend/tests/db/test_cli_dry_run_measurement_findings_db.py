@@ -85,15 +85,20 @@ def _route(monkeypatch: pytest.MonkeyPatch, alias_body: str = NOT_FOUND) -> None
     monkeypatch.setattr(httpx, "AsyncClient", _fake)
 
 
-def _enable_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+def _set_confirmation(monkeypatch: pytest.MonkeyPatch, *, enabled: bool) -> None:
+    # Fija `confirmation_enabled` sin depender del valor del pipeline.toml real.
     real = cli.load_pipeline_config
 
     def _patched(*args: object, **kwargs: object):
         config = real(*args, **kwargs)
-        mf = config.measurement_findings.model_copy(update={"confirmation_enabled": True})
+        mf = config.measurement_findings.model_copy(update={"confirmation_enabled": enabled})
         return config.model_copy(update={"measurement_findings": mf})
 
     monkeypatch.setattr(cli, "load_pipeline_config", _patched)
+
+
+def _enable_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_confirmation(monkeypatch, enabled=True)
 
 
 def _snapshot(factory) -> dict[str, object]:
@@ -153,6 +158,7 @@ def test_el_dry_run_lista_toi_6981_b_y_hip_67522_b_bloqueada_sin_escribir(
     _seed(db_session_factory)
     before = _snapshot(db_session_factory)
     _route(monkeypatch)
+    _set_confirmation(monkeypatch, enabled=False)
 
     code = main(ARGS)
 
@@ -197,6 +203,7 @@ def test_un_dry_run_no_impide_que_la_noche_real_genere_los_mismos_candidatos(
 
     _seed(db_session_factory)
     _route(monkeypatch)
+    _set_confirmation(monkeypatch, enabled=False)
     assert main(ARGS) == 0
     capsys.readouterr()
 

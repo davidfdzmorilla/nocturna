@@ -911,7 +911,7 @@ def test_el_toml_real_trae_measurement_findings_con_los_valores_decididos():
     assert mf.max_candidates_per_night == 5
     assert mf.confirmation_max_sigma == 2.0
     assert mf.confirmation_window_days == 30
-    assert mf.confirmation_enabled is False, "D6: apagada hasta cerrar T83"
+    assert mf.confirmation_enabled is True, "activada por el autor el 2026-10-06 tras T83"
 
 
 def test_falta_la_seccion_measurement_findings_falla(tmp_path):
