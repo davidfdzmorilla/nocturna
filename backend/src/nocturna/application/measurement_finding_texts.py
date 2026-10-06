@@ -8,7 +8,7 @@ exacto lo aprueba el autor antes del commit.
 Formato de números: coma decimal y el valor tal como vino de la medida (la
 representación más corta del `float`, sin redondear más allá). Errores
 simétricos como "± e", asimétricos como "+a / −b". σ con dos decimales.
-Unidades: M_earth -> "M⊕", R_earth -> "R⊕". Si el paper da varias medidas
+Unidades: M_earth -> M⊕, R_earth -> R⊕, M_jup -> M♃, R_jup -> R♃. Si el paper da varias medidas
 del mismo parámetro, amateur y technical las listan todas (separadas por
 "; ", porque la coma ya es el separador decimal); título y nivel curioso usan
 la primera.
@@ -31,8 +31,8 @@ _MINUS = "−"
 _UNIT_LABEL: dict[MeasurementUnit, str] = {
     MeasurementUnit.M_EARTH: "M⊕",
     MeasurementUnit.R_EARTH: "R⊕",
-    MeasurementUnit.M_JUP: "M_Jup",
-    MeasurementUnit.R_JUP: "R_Jup",
+    MeasurementUnit.M_JUP: "M♃",
+    MeasurementUnit.R_JUP: "R♃",
     MeasurementUnit.DAY: "d",
 }
 
