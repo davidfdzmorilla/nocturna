@@ -36,14 +36,45 @@ def _seed_item_and_run(connection) -> tuple[uuid.UUID, uuid.UUID]:
     return item_id, run_id
 
 
+def _seed_evaluation(connection, item_id) -> uuid.UUID:
+    """`TensionEvaluation` para el `tension_evaluation_id` que exige el head (T76)."""
+    reading_id, evaluation_id = uuid.uuid4(), uuid.uuid4()
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    connection.execute(
+        sa.text(
+            "INSERT INTO readings (id, item_id, summary, objects, claims, interest_score, "
+            "tokens_in, tokens_out, model) VALUES (:id, :item, 's', ARRAY[]::text[], "
+            "ARRAY[]::text[], 4, 1, 1, 'm')"
+        ),
+        {"id": reading_id, "item": item_id},
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO tension_evaluation (id, reading_id, item_id, planet_name, parameter, "
+            "status, detail, first_evaluated_at, evaluated_at) VALUES (:id, :reading, :item, "
+            "'p', 'radius', 'awaiting_reference', CAST('{}' AS jsonb), :now, :now)"
+        ),
+        {"id": evaluation_id, "reading": reading_id, "item": item_id, "now": now},
+    )
+    return evaluation_id
+
+
 def _insert_finding(connection, item_id, run_id, type_: str, tension: str | None) -> None:
+    evaluation_id = _seed_evaluation(connection, item_id)
     connection.execute(
         sa.text(
             "INSERT INTO findings (id, item_id, run_id, type, title, level_curious, "
-            "level_amateur, level_technical, catalog_tension) "
-            "VALUES (:id, :item, :run, :type, 't', 'c', 'a', 'te', CAST(:ct AS jsonb))"
+            "level_amateur, level_technical, catalog_tension, tension_evaluation_id) "
+            "VALUES (:id, :item, :run, :type, 't', 'c', 'a', 'te', CAST(:ct AS jsonb), :ev)"
         ),
-        {"id": uuid.uuid4(), "item": item_id, "run": run_id, "type": type_, "ct": tension},
+        {
+            "id": uuid.uuid4(),
+            "item": item_id,
+            "run": run_id,
+            "type": type_,
+            "ct": tension,
+            "ev": evaluation_id,
+        },
     )
 
 
@@ -108,7 +139,7 @@ def test_downgrade_con_fila_catalog_tension_falla_y_deja_fila_y_columna_intactas
             ).scalar_one()
         assert [tuple(r) for r in rows] == [("catalog_tension", "1")]
         # El head actual: el downgrade entero se revierte
-        # (c9e4b2a7d135, f7c2d8e4a951 y e5b3a9d1c746 incluidos).
-        assert version == "c9e4b2a7d135"
+        # (a3f6d9c1b852, c9e4b2a7d135, f7c2d8e4a951 y e5b3a9d1c746 incluidos).
+        assert version == "a3f6d9c1b852"
     finally:
         engine.dispose()

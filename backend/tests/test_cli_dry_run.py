@@ -84,6 +84,7 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+writer = "sonnet"
 
 [reader]
 measurement_categories = ["astro-ph.EP"]
@@ -496,6 +497,8 @@ def _build_run_night_kwargs(**overrides: object) -> dict[str, object]:
         "popularize": object(),
         "edit_night": object(),
         "measurement_findings": object(),
+        "select_tensions": object(),
+        "write_tensions": object(),
         "run_id": "run-a",
         "max_items": 10,
         "max_consecutive_failures": 5,

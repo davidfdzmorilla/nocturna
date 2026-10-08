@@ -16,6 +16,7 @@ from nocturna.domain.entities import (
     ConfirmationReference,
     FirstMeasurement,
     IndependentConfirmation,
+    MeasuredParameter,
     PaperMeasurement,
 )
 from nocturna.domain.errors import InvariantViolation
@@ -134,6 +135,51 @@ def confirmation_eligible(
         rule=own_rule,
     )
     return provenance == SolutionProvenance.INDEPENDENT
+
+
+def catalog_tension_skip_reason(
+    ev: TensionEvaluation,
+    *,
+    threshold_sigma: float,
+    item_external_id: str,
+    item_published_at: datetime,
+    own_rule: OwnSolutionRule,
+) -> str | None:
+    """Por qué una evaluación guardada NO se redacta como `catalog_tension` (T76).
+
+    `None` = elegible. Motivos, en este orden: `not_evaluated` (cualquier
+    estado distinto de `evaluated`; `incompatible_with_limit` queda fuera, OD
+    244), `below_threshold` (σ de referencia < umbral), `reference_not_default`
+    (`catalog_tension_from` solo admite la solución por defecto),
+    `reference_not_independent` (la referencia, reclasificada con
+    `classify_solution`, no es `INDEPENDENT` del paper: no se presenta como
+    tensión la discrepancia con el propio paper ni con una solución ambigua),
+    `period_min_difference` y `period_alias` (periodo).
+    """
+    if ev.status != EvaluationStatus.EVALUATED or ev.result is None:
+        return "not_evaluated"
+    sigma = ev.result.reference_sigma()
+    if sigma is None or sigma < threshold_sigma:
+        return "below_threshold"
+    reference = ev.result.reference()
+    assert reference is not None  # noqa: S101
+    if not reference.is_default:
+        return "reference_not_default"
+    provenance = classify_solution(
+        reference,
+        external_id=item_external_id,
+        published_at=item_published_at,
+        measurements=ev.measurements,
+        rule=own_rule,
+    )
+    if provenance != SolutionProvenance.INDEPENDENT:
+        return "reference_not_independent"
+    if ev.parameter == MeasuredParameter.PERIOD:
+        if ev.period_check is None or not ev.period_check.min_difference_met:
+            return "period_min_difference"
+        if ev.period_check.alias_suspected:
+            return "period_alias"
+    return None
 
 
 def first_measurement_from(ev: TensionEvaluation, *, archive_url: str | None) -> FirstMeasurement:

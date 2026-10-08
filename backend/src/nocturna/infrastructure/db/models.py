@@ -214,7 +214,7 @@ class FindingRow(Base):
             name="independent_confirmation_iff_type",
         ),
         sa.CheckConstraint(
-            "(type IN ('primera_medida', 'confirmacion_independiente')) "
+            "(type IN ('primera_medida', 'confirmacion_independiente', 'catalog_tension')) "
             "= (tension_evaluation_id IS NOT NULL)",
             name="tension_evaluation_id_iff_type",
         ),

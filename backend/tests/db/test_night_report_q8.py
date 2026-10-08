@@ -41,13 +41,15 @@ NIGHT_REPORT_SQL = BACKEND_DIR / "scripts" / "night_report.sql"
 
 def _extract_q8_sql() -> str:
     """Extrae, del propio fichero de producción, la consulta Q8 -- desde su
-    `\\echo` de cabecera hasta el final del fichero (es la última
-    consulta)."""
+    `\\echo` de cabecera hasta la siguiente consulta."""
     text = NIGHT_REPORT_SQL.read_text()
     marker_index = text.index("=== Q8")
     start = text.rfind("\n\\echo", 0, marker_index)
     assert start != -1, "no se encontró la cabecera \\echo de Q8 en night_report.sql"
-    return text[start:]
+    # Hasta la siguiente consulta (Q9 va después de Q8), no hasta el final.
+    next_marker = text.find("=== Q9", marker_index)
+    end = text.rfind("\n\\echo", 0, next_marker) if next_marker != -1 else len(text)
+    return text[start:end]
 
 
 def _psql_url(sqlalchemy_url: str) -> str:

@@ -55,6 +55,7 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+writer = "sonnet"
 
 [reader]
 measurement_categories = ["astro-ph.EP"]
@@ -201,6 +202,18 @@ def test_falta_reader_v3_estimated_tokens_falla(tmp_path):
 
     with pytest.raises(ValidationError):
         load_pipeline_config(path)
+
+
+def test_falta_models_writer_falla(tmp_path):
+    content = BASE_TOML.replace('writer = "sonnet"\n', "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_models_writer_se_carga_del_toml_real():
+    assert load_pipeline_config(REAL_PIPELINE_TOML).models.writer == "sonnet"
 
 
 def test_measurement_categories_con_categoria_ausente_de_arxiv_categories_falla(tmp_path):

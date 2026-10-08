@@ -7,6 +7,7 @@ base y no la validación del dominio o de `sa.Enum`.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -14,6 +15,7 @@ import sqlalchemy as sa
 from factories import make_finding, make_item, make_run
 from helpers.exoplanet import catalog_tension_v1298_b
 from sqlalchemy.exc import IntegrityError
+from test_finding_measurement_types import _seed_evaluation
 from test_schema_constraints import _seed_item, _seed_run, _valid_finding_row
 
 from nocturna.domain.entities import FindingType
@@ -50,7 +52,12 @@ def _seed(db_session):
 
 def test_insert_catalog_tension_con_dato_es_valido(db_session):
     item_id, run_id = _seed(db_session)
-    row = _valid_finding_row(item_id, run_id, type="catalog_tension")
+    row = _valid_finding_row(
+        item_id,
+        run_id,
+        type="catalog_tension",
+        tension_evaluation_id=_seed_evaluation(db_session, item_id),
+    )
 
     _insert_finding_raw(db_session, row, _payload())
 
@@ -118,6 +125,7 @@ def test_repositorio_hace_round_trip_de_un_catalog_tension_publicado(db_session)
         run_id=run.id,
         type=FindingType.CATALOG_TENSION,
         catalog_tension=tension,
+        tension_evaluation_id=_seed_evaluation(db_session, item.id),
     )
     finding.publish(confidence=0.8, at=PUBLISHED_AT)
     repo = SqlAlchemyFindingRepository(db_session)
@@ -143,3 +151,45 @@ def test_nombres_de_los_check_de_findings_en_pg_constraint(db_session):
     )
 
     assert {"ck_findings_finding_type", "ck_findings_catalog_tension_iff_type"} <= names
+
+
+def test_repositorio_hace_round_trip_de_tension_evaluation_id_en_catalog_tension(db_session):
+    item = make_item()
+    run = make_run()
+    SqlAlchemyItemRepository(db_session).add_many([item])
+    SqlAlchemyRunRepository(db_session).add(run)
+    db_session.flush()
+    evaluation_id = uuid.uuid4()
+    reading_id = uuid.uuid4()
+    db_session.execute(
+        sa.text(
+            "INSERT INTO readings (id, item_id, summary, objects, claims, interest_score, "
+            "tokens_in, tokens_out, model) VALUES (:id, :item, 's', ARRAY[]::text[], "
+            "ARRAY[]::text[], 4, 1, 1, 'm')"
+        ),
+        {"id": reading_id, "item": item.id},
+    )
+    db_session.execute(
+        sa.text(
+            "INSERT INTO tension_evaluation (id, reading_id, item_id, planet_name, parameter, "
+            "status, detail, first_evaluated_at, evaluated_at) VALUES (:id, :reading, :item, "
+            "'p', 'mass', 'evaluated', CAST('{}' AS jsonb), :now, :now)"
+        ),
+        {"id": evaluation_id, "reading": reading_id, "item": item.id, "now": PUBLISHED_AT},
+    )
+    finding = make_finding(
+        item_id=item.id,
+        run_id=run.id,
+        type=FindingType.CATALOG_TENSION,
+        catalog_tension=catalog_tension_v1298_b(),
+        tension_evaluation_id=evaluation_id,
+    )
+    finding.publish(confidence=0.8, at=PUBLISHED_AT)
+    repo = SqlAlchemyFindingRepository(db_session)
+    repo.add(finding)
+    db_session.flush()
+    db_session.expire_all()
+
+    loaded = repo.get_published(finding.id)
+
+    assert loaded is not None and loaded.tension_evaluation_id == evaluation_id

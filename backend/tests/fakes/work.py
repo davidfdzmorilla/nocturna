@@ -37,8 +37,13 @@ from nocturna.application.use_cases.generate_measurement_findings import (
     MeasurementFindingsWork,
     MeasurementFindingsWorkFactory,
 )
+from nocturna.application.use_cases.write_tensions import (
+    TensionWriterWork,
+    TensionWriterWorkFactory,
+)
 from nocturna.domain.entities import (
     AgentCall,
+    AgentCallStatus,
     Finding,
     FindingType,
     Item,
@@ -106,6 +111,13 @@ class InMemoryAgentCallRepository:
 
     def count_runs_with_prompt_version(self, prompt_version: str) -> int:
         return len({c.run_id for c in self.calls if c.prompt_version == prompt_version})
+
+    def count_for_item(self, item_id: UUID, agent: AgentRole, status: AgentCallStatus) -> int:
+        return sum(
+            1
+            for call in self.calls
+            if call.item_id == item_id and call.agent is agent and call.status is status
+        )
 
 
 class InMemoryItemRepository:
@@ -317,5 +329,24 @@ def make_measurement_findings_work_factory(
     @contextmanager
     def _work() -> Iterator[MeasurementFindingsWork]:
         yield MeasurementFindingsWork(items=items, findings=findings, evaluations=evaluations)
+
+    return _work
+
+
+def make_tension_writer_work_factory(
+    *,
+    items: InMemoryItemRepository,
+    findings: InMemoryFindingRepository,
+    evaluations: TensionEvaluationRepository,
+    agent_calls: InMemoryAgentCallRepository,
+) -> TensionWriterWorkFactory:
+    """Fábrica en memoria de la selección de tensiones del redactor (T76):
+    solo lectura, sin `BudgetGuard`, como la real."""
+
+    @contextmanager
+    def _work() -> Iterator[TensionWriterWork]:
+        yield TensionWriterWork(
+            items=items, findings=findings, evaluations=evaluations, agent_calls=agent_calls
+        )
 
     return _work

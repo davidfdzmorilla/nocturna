@@ -17,6 +17,7 @@ from fakes.work import (
     InMemoryReadingRepository,
     InMemoryRunRepository,
     make_measurement_findings_work_factory,
+    make_tension_writer_work_factory,
     make_work_factory,
 )
 
@@ -31,6 +32,7 @@ from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
+from nocturna.application.use_cases.write_tensions import SelectTensions, WriteTensions
 from nocturna.domain.entities import Item, Run
 from nocturna.domain.llm import AgentRole
 
@@ -140,6 +142,44 @@ def make_generator(
     )
 
 
+def make_writer(
+    env: Environment,
+    provider: FakeLLMProvider,
+    *,
+    max_attempts: int = 2,
+    estimated_tokens: int = 500,
+) -> WriteTensions:
+    """`WriteTensions` sobre las evaluaciones en memoria de `env` (T76)."""
+    return WriteTensions(
+        work=env.work,
+        provider=provider,
+        system_prompt="prompt del redactor",
+        prompt_version="writer-v1",
+        model="claude-sonnet-test",
+        max_turns=3,
+        max_attempts=max_attempts,
+        estimated_tokens=estimated_tokens,
+    )
+
+
+def make_selector(
+    env: Environment, *, threshold_sigma: float = 3.0, max_attempts: int = 2
+) -> SelectTensions:
+    """`SelectTensions` (solo lectura) sobre las evaluaciones en memoria de `env` (T76)."""
+    return SelectTensions(
+        candidates_work=make_tension_writer_work_factory(
+            items=env.items,
+            findings=env.findings,
+            evaluations=env.evaluations,
+            agent_calls=env.agent_calls,
+        ),
+        own_solution_rule=make_own_solution_rule(),
+        threshold_sigma=threshold_sigma,
+        planet_overview_url=lambda name: f"https://archive.example/overview/{name}",
+        max_attempts=max_attempts,
+    )
+
+
 def make_run_night(
     *,
     env: Environment,
@@ -149,6 +189,8 @@ def make_run_night(
     max_consecutive_failures: int = 5,
     deadline_s: int = 16_200,
     measurement_findings: GenerateMeasurementFindings | None = None,
+    write_tensions: WriteTensions | None = None,
+    select_tensions: SelectTensions | None = None,
 ) -> RunNight:
     read_item = ReadItem(
         work=env.work,
@@ -201,6 +243,8 @@ def make_run_night(
         popularize=popularize,
         edit_night=edit_night,
         measurement_findings=measurement_findings or make_generator(env),
+        select_tensions=select_tensions or make_selector(env),
+        write_tensions=write_tensions or make_writer(env, provider),
         run_id=env.run.id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,

@@ -215,7 +215,7 @@ def test_downgrade_con_lecturas_sustituidas_falla_y_no_toca_nada(scratch_databas
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
             count = connection.execute(sa.text("SELECT count(*) FROM readings")).scalar_one()
-        assert version == "c9e4b2a7d135"  # head actual; el downgrade es una sola transaccion
+        assert version == "a3f6d9c1b852"  # head actual; el downgrade es una sola transaccion
         assert count == 2
         assert "superseded_at" in {c["name"] for c in inspect(engine).get_columns("readings")}
 

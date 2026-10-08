@@ -516,7 +516,7 @@ def _seed_typed_finding(
 ) -> Finding:
     """Siembra un `Finding` de cualquiera de los cuatro tipos con su payload.
 
-    `primera_medida` y `confirmacion_independiente` exigen por FK una
+    `catalog_tension` (desde T76), `primera_medida` y `confirmacion_independiente` exigen por FK una
     `tension_evaluation`, que se siembra con el helper de
     `test_finding_measurement_types.py`.
     """
@@ -524,6 +524,7 @@ def _seed_typed_finding(
     extra: dict[str, object] = {}
     if type_ == FindingType.CATALOG_TENSION:
         extra["catalog_tension"] = catalog_tension_two_priors()
+        extra["tension_evaluation_id"] = _seed_evaluation(db_session, item.id)
     elif type_ == FindingType.PRIMERA_MEDIDA:
         extra["first_measurement"] = first_measurement_absent()
         extra["tension_evaluation_id"] = _seed_evaluation(db_session, item.id)

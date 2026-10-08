@@ -48,6 +48,8 @@ def _finding(type_, catalog_tension=None, **extra):
     )
     if catalog_tension is not None:
         kwargs["catalog_tension"] = catalog_tension
+        # T76: un catalog_tension nace siempre de una TensionEvaluation.
+        kwargs["tension_evaluation_id"] = uuid4()
     kwargs.update(extra)
     return Finding(**kwargs)
 
@@ -98,6 +100,20 @@ def test_finding_catalog_tension_valido_se_construye():
     finding = _finding(FindingType.CATALOG_TENSION, catalog_tension=tension)
 
     assert finding.catalog_tension is tension
+
+
+def test_finding_catalog_tension_sin_tension_evaluation_id_falla():
+    with pytest.raises(InvariantViolation, match="tension_evaluation_id"):
+        _finding(
+            FindingType.CATALOG_TENSION,
+            catalog_tension=catalog_tension_v1298_b(),
+            tension_evaluation_id=None,
+        )
+
+
+def test_finding_paper_explained_con_tension_evaluation_id_falla():
+    with pytest.raises(InvariantViolation, match="tension_evaluation_id"):
+        _finding(FindingType.PAPER_EXPLAINED, tension_evaluation_id=uuid4())
 
 
 def test_finding_paper_explained_sin_dato_sigue_funcionando():

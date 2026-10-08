@@ -146,6 +146,13 @@ class _InMemoryAgentCallRepository:
     def count_for_run(self, run_id: UUID, agent: AgentRole) -> int:
         return sum(1 for call in self.calls if call.run_id == run_id and call.agent is agent)
 
+    def count_for_item(self, item_id: UUID, agent: AgentRole, status: AgentCallStatus) -> int:
+        return sum(
+            1
+            for call in self.calls
+            if call.item_id == item_id and call.agent is agent and call.status is status
+        )
+
 
 def _make_guard(
     *,

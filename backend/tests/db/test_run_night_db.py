@@ -36,6 +36,7 @@ from nocturna.application.agents.prompt_loader import (
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
     READER_V3_PROMPT_VERSION,
+    WRITER_PROMPT_VERSION,
     load_prompt,
 )
 from nocturna.application.budget import BudgetPolicy, effective_nightly_tokens
@@ -47,6 +48,7 @@ from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
+from nocturna.application.use_cases.write_tensions import SelectTensions, WriteTensions
 from nocturna.domain.entities import ItemStatus, RunStatus
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.db.models import FindingRow, ItemRow, RunRow
@@ -189,6 +191,23 @@ def _build_run_night(
             window_days=30,
             confirmation_enabled=False,
             own_solution_rule=make_own_solution_rule(),
+        ),
+        select_tensions=SelectTensions(
+            candidates_work=cli._tension_writer_work_factory(db_session_factory),
+            own_solution_rule=make_own_solution_rule(),
+            threshold_sigma=3.0,
+            planet_overview_url=lambda name: name,
+            max_attempts=policy.max_calls_per_item,
+        ),
+        write_tensions=WriteTensions(
+            work=work,
+            provider=fake,
+            system_prompt=load_prompt(WRITER_PROMPT_VERSION),
+            prompt_version=WRITER_PROMPT_VERSION,
+            model=_MODEL_SONNET,
+            max_turns=policy.max_turns_per_agent,
+            max_attempts=policy.max_calls_per_item,
+            estimated_tokens=1_500,
         ),
         run_id=run_id,
         max_items=policy.max_items_per_night,

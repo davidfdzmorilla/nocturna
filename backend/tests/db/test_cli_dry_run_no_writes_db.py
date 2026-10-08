@@ -197,6 +197,7 @@ def test_dry_run_no_cambia_ninguna_tabla_ni_la_version_de_alembic(
         runs = session.execute(sa.text("select count(*) from runs")).scalar_one()
     assert runs == 1  # solo el Run cerrado sembrado
     assert "fetched=3 new=2 duplicates=1 skipped=0" in out
+    assert "Tensiones pendientes del redactor" in out
     assert MARKER in out
 
 
@@ -326,3 +327,34 @@ def test_la_ingesta_de_la_noche_real_sigue_persistiendo(
     with db_session_factory() as session:
         count = session.execute(sa.text("select count(*) from items")).scalar_one()
     assert count == 3
+
+
+def test_dry_run_lista_la_tension_elegible_sin_construir_el_redactor_ni_escribir(
+    monkeypatch, db_session_factory, capsys
+):
+    """T76: el `--dry-run` solo construye la selección (`SelectTensions`): ni
+    `WriteTensions` ni `AgentRunner` se instancian, la tensión sembrada sale como
+    elegible y la base queda intacta."""
+    from helpers.tension_smoke import seed_v1298_tension
+
+    from nocturna.application.agents import runner as runner_module
+
+    def _forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("el --dry-run no debe construir el redactor ni el runner")
+
+    monkeypatch.setattr(cli, "WriteTensions", _forbidden)
+    monkeypatch.setattr(cli, "write_tensions_from_config", _forbidden)
+    monkeypatch.setattr(runner_module.AgentRunner, "__init__", _forbidden)
+    seed_v1298_tension(db_session_factory, run_budget_tokens=24_000)
+    before = _snapshot(db_session_factory)
+    _route(monkeypatch)
+
+    code = main(ARGS)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Tensiones pendientes del redactor" in out
+    assert "elegibles=1 excluidas=0" in out
+    assert f"elegible · {PAPER_V1298} · V1298 Tau b (mass)" in out
+    assert MARKER in out
+    assert _snapshot(db_session_factory) == before
