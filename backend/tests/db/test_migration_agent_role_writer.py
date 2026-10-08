@@ -16,6 +16,7 @@ from nocturna.infrastructure.db.models import Base
 
 _REVISION = "c9e4b2a7d135"
 _REVISION_BEFORE = "f7c2d8e4a951"
+_HEAD = "a3f6d9c1b852"  # el downgrade es una sola transaccion: el head sigue puesto
 _CHECK = "ck_agent_calls_agent_role"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -106,7 +107,7 @@ def test_downgrade_con_fila_writer_falla_y_no_toca_nada(scratch_database_url):
             )
             assert (
                 connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
-                == _REVISION
+                == _HEAD
             )
     finally:
         engine.dispose()

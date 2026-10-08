@@ -36,6 +36,7 @@ from nocturna.domain.archive import (
 )
 from nocturna.domain.entities import (
     AgentCall,
+    AgentCallStatus,
     Finding,
     FindingType,
     Item,
@@ -428,6 +429,15 @@ class SqlAlchemyAgentCallRepository:
         """
         stmt = select(func.count()).where(
             AgentCallRow.run_id == run_id, AgentCallRow.agent == agent
+        )
+        return self._session.execute(stmt).scalar_one()
+
+    def count_for_item(self, item_id: UUID, agent: AgentRole, status: AgentCallStatus) -> int:
+        """Llamadas de `agent` sobre `item_id` con `status`, en todas las noches y Runs."""
+        stmt = select(func.count()).where(
+            AgentCallRow.item_id == item_id,
+            AgentCallRow.agent == agent,
+            AgentCallRow.status == status,
         )
         return self._session.execute(stmt).scalar_one()
 

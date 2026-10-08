@@ -28,6 +28,7 @@ from fakes.work import (
     InMemoryReadingRepository,
     InMemoryRunRepository,
     make_measurement_findings_work_factory,
+    make_tension_writer_work_factory,
     make_work_factory,
 )
 from helpers.exoplanet import make_own_solution_rule
@@ -42,6 +43,7 @@ from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
+from nocturna.application.use_cases.write_tensions import SelectTensions, WriteTensions
 from nocturna.domain.entities import Item, Run
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.logging import _JsonFormatter, configure_json_logging
@@ -374,6 +376,28 @@ async def _run_minimal_night_for_night_item_log() -> None:
             window_days=30,
             confirmation_enabled=False,
             own_solution_rule=make_own_solution_rule(),
+        ),
+        select_tensions=SelectTensions(
+            candidates_work=make_tension_writer_work_factory(
+                items=items,
+                findings=findings,
+                evaluations=InMemoryTensionEvaluationRepository(),
+                agent_calls=agent_calls,
+            ),
+            own_solution_rule=make_own_solution_rule(),
+            threshold_sigma=3.0,
+            planet_overview_url=lambda name: name,
+            max_attempts=2,
+        ),
+        write_tensions=WriteTensions(
+            work=work,
+            provider=fake,
+            system_prompt="prompt del redactor",
+            prompt_version="writer-v1",
+            model="claude-sonnet-test",
+            max_turns=3,
+            max_attempts=2,
+            estimated_tokens=500,
         ),
         run_id=run.id,
         max_items=10,

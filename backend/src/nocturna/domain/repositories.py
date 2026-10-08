@@ -13,7 +13,15 @@ from typing import Protocol
 from uuid import UUID
 
 from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
-from nocturna.domain.entities import AgentCall, Finding, FindingType, Item, Reading, Run
+from nocturna.domain.entities import (
+    AgentCall,
+    AgentCallStatus,
+    Finding,
+    FindingType,
+    Item,
+    Reading,
+    Run,
+)
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.tension import TensionEvaluation
 
@@ -158,6 +166,10 @@ class AgentCallRepository(Protocol):
 
     def count_runs_with_prompt_version(self, prompt_version: str) -> int:
         """Número de Runs distintos con al menos una llamada de esa `prompt_version` (T74)."""
+        ...
+
+    def count_for_item(self, item_id: UUID, agent: AgentRole, status: AgentCallStatus) -> int:
+        """Llamadas de un rol sobre un ítem con ese estado, en todas las noches (T76)."""
         ...
 
 

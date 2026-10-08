@@ -190,6 +190,8 @@ class ModelsConfig(BaseModel):
     reader: str
     popularizer: str
     editor: str
+    # writer (T76): redactor de `catalog_tension`; obligatorio, sin defecto.
+    writer: str
 
 
 class ArxivConfig(BaseModel):

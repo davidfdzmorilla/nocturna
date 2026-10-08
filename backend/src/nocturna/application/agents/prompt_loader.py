@@ -30,15 +30,21 @@ READER_V3_PROMPT_VERSION: str = "reader-v3"
 #: calibraciones por esta etiqueta.
 POPULARIZER_PROMPT_VERSION: str = "popularizer-v2"
 
+#: Versión a mano del prompt del redactor de tensiones (T76, `writer-v1.md`):
+#: escribe título y tres niveles de un `catalog_tension` a partir de los
+#: números ya calculados. Mismo criterio de subida a mano.
+WRITER_PROMPT_VERSION: str = "writer-v1"
+
 #: Versión a mano del prompt del Editor, mismo criterio que
 #: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al
 #: editar el prompt. `editor-v1` (T43, `editor.md`, que se conserva) decidía
 #: por `item_id`; `editor-v2` (T89, `editor-v2.md`) describe los tres tipos
 #: de candidato (`paper_explained`, `primera_medida`,
-#: `confirmacion_independiente`) y decide por `candidate_id`. Conserva las
+#: `confirmacion_independiente`) y decide por `candidate_id`; `editor-v3`
+#: (T76, `editor-v3.md`) añade `catalog_tension`. Conserva las
 #: lecciones de T42 (nada de fences, nunca un salto de línea real dentro de
 #: una cadena JSON).
-EDITOR_PROMPT_VERSION: str = "editor-v2"
+EDITOR_PROMPT_VERSION: str = "editor-v3"
 
 
 def load_prompt(name: str) -> str:

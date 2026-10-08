@@ -408,6 +408,14 @@ class CatalogTension:
                 "'reference_sigma' debe ser el mínimo de los σ frente a la previa por defecto"
             )
 
+    def default_prior(self) -> CatalogSolution:
+        """La previa `is_default` (la referencia). `__post_init__` garantiza
+        exactamente una; si faltara, falla con un mensaje claro."""
+        for comparison in self.comparisons:
+            if comparison.prior.is_default:
+                return comparison.prior
+        raise InvariantViolation("la tensión no tiene ninguna previa 'is_default'")
+
 
 # --- T89: findings de medidas (ADR 0020) -------------------------------------
 
@@ -785,7 +793,8 @@ class Finding:
     id: UUID = field(default_factory=uuid4)
     catalog_tension: CatalogTension | None = None
     # T89: un payload por tipo y la evaluación de origen (obligatoria en los
-    # dos tipos nuevos, nula en los demás).
+    # tipos de tensión y de medidas, T76 incluye catalog_tension; nula en
+    # paper_explained).
     first_measurement: FirstMeasurement | None = None
     independent_confirmation: IndependentConfirmation | None = None
     tension_evaluation_id: UUID | None = None
@@ -821,13 +830,14 @@ class Finding:
             if payload is not None and not isinstance(payload, payload_class):
                 raise InvariantViolation(f"'{payload_name}' debe ser {payload_class.__name__}")
         needs_evaluation = self.type in (
+            FindingType.CATALOG_TENSION,
             FindingType.PRIMERA_MEDIDA,
             FindingType.CONFIRMACION_INDEPENDIENTE,
         )
         if needs_evaluation != (self.tension_evaluation_id is not None):
             raise InvariantViolation(
                 "'tension_evaluation_id' debe informarse si y solo si 'type' es "
-                "primera_medida o confirmacion_independiente"
+                "catalog_tension, primera_medida o confirmacion_independiente"
             )
         if (self.published_at is None) != (self.confidence is None):
             raise InvariantViolation(

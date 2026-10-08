@@ -26,7 +26,7 @@ from nocturna.application.budget import (
     seconds_until_hard_stop,
     terminal_status_for,
 )
-from nocturna.domain.entities import AgentCall, Run, RunStatus
+from nocturna.domain.entities import AgentCall, AgentCallStatus, Run, RunStatus
 from nocturna.domain.llm import AgentRole
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -94,6 +94,13 @@ class _InMemoryAgentCallRepository:
 
     def count_for_run(self, run_id: UUID, agent: AgentRole) -> int:
         return sum(1 for call in self._calls if call.run_id == run_id and call.agent is agent)
+
+    def count_for_item(self, item_id: UUID, agent: AgentRole, status: AgentCallStatus) -> int:
+        return sum(
+            1
+            for call in self._calls
+            if call.item_id == item_id and call.agent is agent and call.status is status
+        )
 
 
 def _make_guard(*, run: Run, policy: BudgetPolicy, clock: FakeClock) -> BudgetGuard:

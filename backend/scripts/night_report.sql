@@ -1,6 +1,6 @@
 -- night_report.sql — Informe de la mañana (T60).
 --
--- Ocho consultas de solo lectura sobre la última noche ejecutada, pensadas
+-- Nueve consultas (Q1-Q9, más Q9b) de solo lectura sobre la última noche ejecutada, pensadas
 -- para leerse con café en dos minutos en vez de reconstruirse a mano cada
 -- mañana durante las catorce noches de calibración. Uso:
 --
@@ -11,7 +11,7 @@
 --
 -- Cada consulta abre su propio `WITH n AS (...)` porque una CTE no
 -- sobrevive al `;` que separa una sentencia de la siguiente en un script de
--- psql -- no hay forma de compartirla entre las ocho sin repetirla. `n` es
+-- psql -- no hay forma de compartirla entre todas sin repetirla. `n` es
 -- siempre la última fila de `runs` por `started_at`, es decir, la noche que
 -- se quiere revisar esta mañana.
 --
@@ -229,3 +229,43 @@ FROM lecturas l JOIN readings r ON r.item_id = l.item_id AND r.superseded_at IS 
 LEFT JOIN LATERAL jsonb_array_elements(r.measurements) m ON true
 WHERE r.measurements IS NOT NULL
 ORDER BY i.external_id, planeta, parametro;
+
+\echo ''
+\echo '=== Q9 · Tensiones de la noche (redactor, T76) ==='
+-- Los catalog_tension generados con el run_id de la noche, con su estado de
+-- publicación y el gasto del redactor del ítem. El gasto se agrega una sola vez
+-- por ítem (subconsulta `w`) y se muestra solo en la primera tensión del ítem,
+-- para que la suma de las columnas cuadre aunque un ítem tenga dos tensiones.
+WITH n AS (
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
+),
+w AS (
+    SELECT ac.item_id, COUNT(*) AS llamadas, SUM(ac.tokens_in + ac.tokens_out) AS tokens
+    FROM agent_calls ac JOIN n ON ac.run_id = n.id
+    WHERE ac.agent = 'writer' AND ac.item_id IS NOT NULL
+    GROUP BY ac.item_id
+),
+t AS (
+    SELECT f.*, ROW_NUMBER() OVER (PARTITION BY f.item_id ORDER BY f.id) AS rn
+    FROM findings f JOIN n ON f.run_id = n.id
+    WHERE f.type = 'catalog_tension'
+)
+SELECT i.external_id, t.catalog_tension->>'planet_name' AS planeta,
+       t.catalog_tension->>'parameter' AS parametro,
+       ROUND((t.catalog_tension->>'reference_sigma')::numeric, 2) AS sigma_referencia,
+       t.title, t.published_at IS NOT NULL AS publicado, t.confidence,
+       CASE WHEN t.rn = 1 THEN w.llamadas END AS llamadas_writer_del_item,
+       CASE WHEN t.rn = 1 THEN w.tokens END AS tokens_writer_del_item
+FROM t JOIN items i ON i.id = t.item_id LEFT JOIN w ON w.item_id = t.item_id
+ORDER BY sigma_referencia DESC, i.external_id, t.id;
+
+\echo ''
+\echo '=== Q9b · Llamadas del redactor de la noche (incluye las fallidas) ==='
+WITH n AS (
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
+)
+SELECT ac.status, COUNT(*) AS llamadas, COUNT(DISTINCT ac.item_id) AS items,
+       COALESCE(SUM(ac.tokens_in + ac.tokens_out), 0) AS tokens
+FROM agent_calls ac JOIN n ON ac.run_id = n.id
+WHERE ac.agent = 'writer'
+GROUP BY ac.status ORDER BY ac.status;

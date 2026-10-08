@@ -216,6 +216,7 @@ timezone = "Europe/Madrid"
 reader = "sonnet"
 popularizer = "sonnet"
 editor = "opus"
+writer = "sonnet"
 
 [reader]
 # measurement_categories: categorías arXiv sobre las que el Reader usa la

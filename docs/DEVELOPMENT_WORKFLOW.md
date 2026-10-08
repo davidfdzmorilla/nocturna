@@ -60,6 +60,8 @@ En T83 (solución propia, sin migración): `uv run python scripts/t83_link_repor
 
 En T75 (reserva del redactor, migración `c9e4b2a7d135`): tras migrar, `uv run nocturna run-night --dry-run` debe mostrar las tres porciones (Reader/Popularizer 216.000, redactor 24.000 con tope 2 × 12.000, Editor 60.000). El informe de la mañana (`night_report.sql`) calcula ya el pool como B − E − W.
 
+En T76 (redactor de tensiones, migración `a3f6d9c1b852`): migrar el mismo día del merge y antes de las 00:00; con el código nuevo y la base sin migrar, el `catalog_tension` choca con el CHECK después de pagar la llamada. Tras migrar, `SELECT type, count(*) FROM findings GROUP BY type` (ningún `catalog_tension` aún) y `uv run nocturna run-night --dry-run`, que lista las tensiones pendientes del redactor con su motivo de exclusión sin escribir nada. Tras la primera noche: `agent_calls` con `agent = 'writer'` (≤ 2) y los `catalog_tension` con su decisión del Editor (`night_report.sql`).
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

@@ -39,7 +39,7 @@ from fakes.work import (
     InMemoryRunRepository,
     make_work_factory,
 )
-from helpers.run_night import make_generator
+from helpers.run_night import make_generator, make_selector, make_writer
 
 from nocturna import cli
 from nocturna.application.budget import (
@@ -185,6 +185,8 @@ def _make_run_night(
         popularize=popularize,
         edit_night=edit_night,
         measurement_findings=make_generator(env),
+        select_tensions=make_selector(env),
+        write_tensions=make_writer(env, provider),
         run_id=env.run.id,
         max_items=10,
         max_consecutive_failures=5,

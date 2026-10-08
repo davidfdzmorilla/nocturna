@@ -205,6 +205,7 @@ from nocturna.application.agents.prompt_loader import (
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
     READER_V3_PROMPT_VERSION,
+    WRITER_PROMPT_VERSION,
     load_prompt,
 )
 from nocturna.application.budget import (
@@ -254,6 +255,13 @@ from nocturna.application.use_cases.take_archive_snapshot import (
     ArchiveSnapshotReport,
     SnapshotAborted,
     TakeArchiveSnapshot,
+)
+from nocturna.application.use_cases.write_tensions import (
+    PendingTensions,
+    SelectTensions,
+    TensionWriterWork,
+    TensionWriterWorkFactory,
+    WriteTensions,
 )
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
@@ -1339,6 +1347,124 @@ def _print_measurement_findings_section(
     print(_format_measurement_findings_section(report, external_ids=external_ids))
 
 
+def _tension_writer_work_factory(
+    session_factory: sessionmaker[Session],
+) -> TensionWriterWorkFactory:
+    """Unidad de trabajo de solo lectura de `SelectTensions.pending()` contra
+    SQLAlchemy (T76). Sin `BudgetGuard`: seleccionar no gasta tokens."""
+
+    @contextmanager
+    def _open() -> Generator[TensionWriterWork, None, None]:
+        with unit_of_work(session_factory) as session:
+            yield _tension_writer_work(session)
+
+    return _open
+
+
+def _tension_writer_work(session: Session) -> TensionWriterWork:
+    return TensionWriterWork(
+        items=SqlAlchemyItemRepository(session),
+        findings=SqlAlchemyFindingRepository(session),
+        evaluations=SqlAlchemyTensionEvaluationRepository(session),
+        agent_calls=SqlAlchemyAgentCallRepository(session),
+    )
+
+
+def select_tensions_from_config(
+    config: PipelineConfig, *, candidates_work: TensionWriterWorkFactory
+) -> SelectTensions:
+    """`SelectTensions` (solo lectura) con el umbral y los intentos de la
+    configuración; `planet_overview_url` se inyecta aquí, como en T89 (D14)."""
+    return SelectTensions(
+        candidates_work=candidates_work,
+        own_solution_rule=own_solution_rule_from_config(config),
+        threshold_sigma=config.tension.threshold_sigma,
+        planet_overview_url=planet_overview_url,
+        max_attempts=config.limits.max_calls_per_item,
+    )
+
+
+def write_tensions_from_config(
+    config: PipelineConfig,
+    *,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    system_prompt: str,
+) -> WriteTensions:
+    """`WriteTensions` con modelo, turnos, estimación e intentos de la configuración (T76)."""
+    return WriteTensions(
+        work=work,
+        provider=provider,
+        system_prompt=system_prompt,
+        prompt_version=WRITER_PROMPT_VERSION,
+        model=config.models.writer,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_calls_per_item,
+        estimated_tokens=config.budget.writer_estimated_tokens,
+    )
+
+
+# Motivos de exclusión que solo se cuentan en el `--dry-run`: son la mayoría
+# de las evaluaciones y no dicen nada del redactor.
+_WRITER_SKIP_REASONS_COUNTED = frozenset({"not_evaluated", "below_threshold"})
+
+
+def _format_writer_section(
+    pending: PendingTensions, *, labels: dict[UUID, str], estimated_tokens: int
+) -> str:
+    """Sección del `--dry-run` con las tensiones que redactaría el redactor
+    (T76): pura y determinista. Cero tokens. `not_evaluated` y
+    `below_threshold` salen agregados; el resto, una línea por evaluación."""
+    lines = [
+        "",
+        "Tensiones pendientes del redactor (T76, cero tokens en el ensayo):",
+        f"  elegibles={len(pending.candidates)} excluidas={len(pending.skipped)} "
+        f"estimación por llamada={estimated_tokens} tokens",
+    ]
+    for candidate in pending.candidates:
+        tension = candidate.tension
+        lines.append(
+            f"  elegible · {candidate.item.external_id} · {tension.planet_name} "
+            f"({tension.parameter.value}) · σ={tension.reference_sigma:.2f}"
+        )
+    counted = Counter(
+        reason for _, reason in pending.skipped if reason in _WRITER_SKIP_REASONS_COUNTED
+    )
+    for reason in sorted(counted):
+        lines.append(f"  excluidas · {reason}: {counted[reason]}")
+    for evaluation_id, reason in pending.skipped:
+        if reason in _WRITER_SKIP_REASONS_COUNTED:
+            continue
+        lines.append(f"  excluida · {labels.get(evaluation_id, str(evaluation_id))} · {reason}")
+    return "\n".join(lines)
+
+
+def _print_writer_section(session: Session, config: PipelineConfig) -> None:
+    """Imprime las tensiones que redactaría la noche, sin escribir y en la
+    sesión del llamador (`commit=False`)."""
+
+    @contextmanager
+    def _same_session() -> Generator[TensionWriterWork, None, None]:
+        yield _tension_writer_work(session)
+
+    pending = select_tensions_from_config(config, candidates_work=_same_session).pending()
+    items = SqlAlchemyItemRepository(session)
+    labels: dict[UUID, str] = {}
+    skipped_ids = {evaluation_id for evaluation_id, _ in pending.skipped}
+    for evaluation in SqlAlchemyTensionEvaluationRepository(session).all():
+        if evaluation.id in skipped_ids:
+            item = items.get(evaluation.item_id)
+            external_id = item.external_id if item is not None else str(evaluation.item_id)
+            labels[evaluation.id] = (
+                f"{external_id} · {evaluation.planet_name} ({evaluation.parameter.value})"
+            )
+    print(
+        _format_writer_section(
+            pending, labels=labels, estimated_tokens=config.budget.writer_estimated_tokens
+        )
+    )
+
+
 def _current_or_new_run_night(
     session_factory: sessionmaker[Session], policy: BudgetPolicy, clock: SystemClock
 ) -> UUID:
@@ -1432,6 +1558,8 @@ def _build_run_night(
     popularize: PopularizeReading,
     edit_night: EditNight,
     measurement_findings: GenerateMeasurementFindings,
+    select_tensions: SelectTensions,
+    write_tensions: WriteTensions,
     run_id: UUID,
     max_items: int,
     max_consecutive_failures: int,
@@ -1478,6 +1606,8 @@ def _build_run_night(
         popularize=popularize,
         edit_night=edit_night,
         measurement_findings=measurement_findings,
+        select_tensions=select_tensions,
+        write_tensions=write_tensions,
         run_id=run_id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,
@@ -1514,8 +1644,10 @@ def _run_night(args: argparse.Namespace) -> int:
 
 def _run_night_dry_run(args: argparse.Namespace) -> int:
     """Ensayo de la noche que no escribe nada en la base (T87): ingesta real
-    de arXiv, plan de gasto, reparto v3/v2 y cruce de tensiones, sin llamar a
-    ningún agente ni instanciar `RunNight`.
+    de arXiv, plan de gasto, reparto v3/v2, findings de medidas, sección del
+    redactor (T76: solo `SelectTensions`, lista elegibles y excluidas con
+    motivo; no construye `WriteTensions` ni `AgentRunner`) y cruce de
+    tensiones, sin llamar a ningún agente ni instanciar `RunNight`.
 
     Todo lo que toca la base ocurre dentro de una única
     `unit_of_work(commit=False)`, que siempre se deshace (y prohíbe `commit()`):
@@ -1561,6 +1693,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 writer_estimated_tokens=config.budget.writer_estimated_tokens,
             )
             _print_measurement_findings_section(session, config, clock)
+            _print_writer_section(session, config)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
             try:
                 _print_tension_section(session, config, clock, pairs, runs_with_reader_v3)
@@ -1575,8 +1708,9 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
 
 
 def _run_night_for_real(args: argparse.Namespace) -> int:
-    """Ejecuta la noche completa: ingesta, Reader, Popularizer, Editor, en
-    ese orden (T44, paso 3; ver el docstring del módulo, "T44, paso 3").
+    """Ejecuta la noche completa, en este orden: ingesta, Reader, Popularizer,
+    findings de medidas (T89), redactor de tensiones (T76) y Editor (T44,
+    paso 3; ver el docstring del módulo, "T44, paso 3").
 
     Códigos de salida (los de `run-item`, 1–6, no cambian): `0`
     `RunNightResult.status is COMPLETED`, `7` `PARTIAL`, `8` `KILLED`
@@ -1617,6 +1751,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     reader_prompts = _load_reader_prompts()
     popularizer_prompt = load_prompt("popularizer")
     editor_prompt = load_prompt(EDITOR_PROMPT_VERSION)
+    writer_prompt = load_prompt(WRITER_PROMPT_VERSION)
     deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
 
     run_id = _current_or_new_run_night(session_factory, policy, clock)
@@ -1651,6 +1786,15 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     measurement_findings = generate_measurement_findings_from_config(
         config, _measurement_findings_work_factory(session_factory), clock
     )
+    select_tensions = select_tensions_from_config(
+        config, candidates_work=_tension_writer_work_factory(session_factory)
+    )
+    write_tensions = write_tensions_from_config(
+        config,
+        work=work,
+        provider=provider,
+        system_prompt=writer_prompt,
+    )
 
     async def _ingest() -> IngestResult:
         return await _run_ingest(
@@ -1666,6 +1810,8 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         popularize=popularize,
         edit_night=edit_night,
         measurement_findings=measurement_findings,
+        select_tensions=select_tensions,
+        write_tensions=write_tensions,
         run_id=run_id,
         max_items=config.limits.max_items_per_night,
         max_consecutive_failures=config.limits.max_consecutive_failures,

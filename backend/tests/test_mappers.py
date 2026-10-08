@@ -274,7 +274,9 @@ def test_finding_paper_explained_round_trip_deja_la_columna_catalog_tension_en_n
 
 def test_finding_catalog_tension_round_trip_produce_una_entidad_igual():
     tension = catalog_tension_v1298_b()
-    finding = _finding(type=FindingType.CATALOG_TENSION, catalog_tension=tension)
+    finding = _finding(
+        type=FindingType.CATALOG_TENSION, catalog_tension=tension, tension_evaluation_id=uuid4()
+    )
 
     rehydrated = finding_from_row(finding_to_row(finding))
 

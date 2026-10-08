@@ -107,14 +107,17 @@ from nocturna.application.agents.editor_output import (
     EditorOutput,
     parse_editor_output,
 )
+from nocturna.application.agents.prompt_text import inline, num
 from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import (
+    CatalogTension,
     Finding,
     FindingType,
     Item,
     ItemStatus,
+    Measurement,
     PaperMeasurement,
 )
 from nocturna.domain.errors import InvariantViolation
@@ -432,16 +435,16 @@ class EditNight:
         el tipo tiene datos, una línea `data` -- nunca los tres niveles
         completos (~1.100 tokens/candidato) ni `evidence` (texto del
         abstract, superficie de inyección). Todo el bloque viaja envuelto en
-        `<candidates>`/`</candidates>`, que `prompts/editor-v2.md` instruye
-        tratar como dato puro. Los valores se pasan por `_inline`: una sola
+        `<candidates>`/`</candidates>`, que `prompts/editor-v3.md` instruye
+        tratar como dato puro. Los valores se pasan por `inline`: una sola
         línea y sin `<`/`>`, para que ningún dato pueda cerrar el bloque.
         """
         lines = ["<candidates>"]
         for finding, _item in candidates:
             lines.append(f"- candidate_id: {finding.id}")
             lines.append(f"  type: {finding.type.value}")
-            lines.append(f"  title: {_inline(finding.title)}")
-            lines.append(f"  level_curious: {_inline(finding.level_curious)}")
+            lines.append(f"  title: {inline(finding.title)}")
+            lines.append(f"  level_curious: {inline(finding.level_curious)}")
             data = _data_line(finding)
             if data is not None:
                 lines.append(f"  data: {data}")
@@ -449,18 +452,8 @@ class EditNight:
         return "\n".join(lines)
 
 
-def _inline(text: str) -> str:
-    """Una sola línea, sin `<` ni `>`: un dato nunca debe poder cerrar
-    `</candidates>` ni abrir líneas nuevas del bloque."""
-    return " ".join(text.replace("<", " ").replace(">", " ").split())
-
-
-def _num(value: float) -> str:
-    return repr(float(value))
-
-
 def _measurement_data(m: PaperMeasurement) -> str:
-    return f"{_num(m.value)} (+{_num(m.err_plus)}/-{_num(m.err_minus)}) {m.unit.value}"
+    return f"{num(m.value)} (+{num(m.err_plus)}/-{num(m.err_minus)}) {m.unit.value}"
 
 
 def _data_line(finding: Finding) -> str | None:
@@ -469,7 +462,7 @@ def _data_line(finding: Finding) -> str | None:
     first = finding.first_measurement
     if first is not None:
         values = " | ".join(_measurement_data(m) for m in first.measurements)
-        return _inline(
+        return inline(
             f"planet={first.paper_planet_name}; parameter={first.parameter.value}; "
             f"value={values}; reference=none ({first.archive_status.value}); sigma=none"
         )
@@ -477,10 +470,40 @@ def _data_line(finding: Finding) -> str | None:
     if confirmation is not None:
         values = " | ".join(_measurement_data(m) for m in confirmation.measurements)
         ref = confirmation.reference
-        return _inline(
+        return inline(
             f"planet={confirmation.paper_planet_name}; parameter={confirmation.parameter.value}; "
-            f"value={values}; reference={ref.refname} {_num(ref.value)} "
-            f"(+{_num(ref.err_plus)}/-{_num(ref.err_minus)}) {ref.unit.value}; "
+            f"value={values}; reference={ref.refname} {num(ref.value)} "
+            f"(+{num(ref.err_plus)}/-{num(ref.err_minus)}) {ref.unit.value}; "
             f"sigma_max={max(confirmation.sigmas):.2f}"
         )
+    tension = finding.catalog_tension
+    if tension is not None:
+        return _tension_data(tension)
     return None
+
+
+def _tension_data(tension: CatalogTension) -> str:
+    """Línea `data` de un `catalog_tension`: acotada y sin `evidence`."""
+    papers: list[Measurement] = []
+    for comparison in tension.comparisons:
+        if comparison.paper not in papers:
+            papers.append(comparison.paper)
+    values = " | ".join(
+        f"{num(m.value)} (+{num(m.err_plus or 0)}/-{num(m.err_minus or 0)}) {m.unit.value}"
+        for m in papers
+    )
+    reference = tension.default_prior()
+    others = [c for c in tension.comparisons if c.prior != reference]
+    other_priors = len({c.prior for c in others})
+    spread = (
+        f" (sigma {min(c.sigma for c in others):.2f}-{max(c.sigma for c in others):.2f})"
+        if others
+        else ""
+    )
+    return inline(
+        f"planet={tension.planet_name}; parameter={tension.parameter.value}; value={values}; "
+        f"reference={reference.reference} {num(reference.value)} "
+        f"(+{num(reference.err_plus or 0)}/-{num(reference.err_minus or 0)}) "
+        f"{reference.unit.value} [default]; sigma={tension.reference_sigma:.2f}; "
+        f"threshold={tension.threshold_sigma}; other_priors={other_priors}{spread}"
+    )

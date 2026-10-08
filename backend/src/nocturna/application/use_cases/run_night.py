@@ -20,6 +20,11 @@ evaluaciones ya guardadas. Es solo base de datos (cero agentes, cero tokens);
 el Editor los decide junto con los `paper_explained` en su única llamada, y se
 llama aunque los únicos candidatos sean de esa fase.
 
+T76: tras `_phase_measurement_findings` y antes del Editor corre
+`_phase_writer`, que redacta con el redactor (`WriteTensions`, rol `WRITER`,
+siempre vía `AgentRunner`) las tensiones `catalog_tension` que elige
+`SelectTensions` (solo lectura); el Editor las decide en la misma llamada.
+
 ## El modelo de "degradación monótona" que decide `RunNightResult.status`
 
 La noche empieza optimista (`RunStatus.COMPLETED`) y solo empeora: cada
@@ -75,6 +80,13 @@ sucesos que degradan, y a qué:
   `terminal_status_for`, que lanza `ValueError` a propósito para ese
   motivo) degrada a `PARTIAL`; cualquier otro motivo usa
   `terminal_status_for` normalmente.
+- Fase del redactor (T76): el tope `max_writer_calls_per_night`
+  (`CALL_LIMIT_REACHED`) no degrada y sigue al Editor; `BUDGET_EXHAUSTED` ->
+  `PARTIAL` con motivo `writer_budget_exhausted`, sin `terminal_status_for`, y
+  sigue al Editor; un error inesperado -> `PARTIAL` `writer_error`, termina la
+  fase y sigue al Editor; `RATE_LIMITED` -> `PARTIAL` `rate_limited_writer` y
+  salta el Editor; `OUTSIDE_WINDOW` -> `KILLED` sin Editor; `RUN_NOT_RUNNING`
+  -> `terminal_status_for` (`PARTIAL`) como en las demás fases.
 - Ningún suceso arriba -> la noche cierra `COMPLETED` con motivo `edited` o
   `no_candidates`, el valor de `EditOutcome` que produjo el Editor.
 
@@ -160,7 +172,8 @@ anotado como decisión abierta, no resuelto por inventiva.
 No llama nunca a `LLMProvider.run_agent` ni construye ningún
 `AgentRequest`: eso es exclusivo de `AgentRunner`
 (`application/agents/runner.py`), al que llega indirectamente a través de
-`ReadItem`/`PopularizeReading`/`EditNight`. No importa `infrastructure/` ni
+`ReadItem`/`PopularizeReading`/`EditNight`/`WriteTensions` (y `SelectTensions`,
+que solo lee). No importa `infrastructure/` ni
 lee `config/pipeline.toml`: toda la configuración (`max_items`,
 `max_consecutive_failures`, `deadline_s`, y los propios casos de uso ya
 construidos con su modelo/prompt/versión) llega por constructor desde
@@ -198,6 +211,11 @@ from nocturna.application.use_cases.generate_measurement_findings import (
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeOutcome, PopularizeReading
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.write_tensions import (
+    SelectTensions,
+    WriteOutcome,
+    WriteTensions,
+)
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, RunStatus
 from nocturna.domain.errors import InvalidTransition
@@ -275,6 +293,8 @@ class RunNight:
         popularize: PopularizeReading,
         edit_night: EditNight,
         measurement_findings: GenerateMeasurementFindings,
+        select_tensions: SelectTensions,
+        write_tensions: WriteTensions,
         run_id: UUID,
         max_items: int,
         max_consecutive_failures: int,
@@ -288,6 +308,8 @@ class RunNight:
         self._popularize = popularize
         self._edit_night = edit_night
         self._measurement_findings = measurement_findings
+        self._select_tensions = select_tensions
+        self._write_tensions = write_tensions
         self._run_id = run_id
         self._max_items = max_items
         self._max_consecutive_failures = max_consecutive_failures
@@ -407,7 +429,8 @@ class RunNight:
         return self._result(tokens_used=tokens_used, notes=notes)
 
     async def _run_body(self, started_at: float) -> RunNightResult:
-        """Cuerpo de la noche: ingesta, fase A, fase B, fase C, en ese orden.
+        """Cuerpo de la noche, en este orden: ingesta, Reader, Popularizer,
+        findings de medidas (T89), redactor de tensiones (T76) y Editor.
 
         Lanzado como `asyncio.Task` por `__call__`; puede cancelarse a mitad
         de cualquier `await` de aquí abajo (el corte de `hard_stop`). Ningún
@@ -426,6 +449,9 @@ class RunNight:
 
         if not self._skip_editor:
             self._phase_measurement_findings()
+
+        if not self._skip_editor:
+            await self._phase_writer()
 
         if self._skip_editor:
             _logger.info(
@@ -787,6 +813,121 @@ class RunNight:
                 "ok": len(report.created),
                 "failed": 0,
                 "stop_reason": "completed",
+            },
+        )
+
+    # --- fase B3: redactor de tensiones (T76) ---------------------------------
+
+    async def _phase_writer(self) -> None:
+        """Redacta, con el redactor, las tensiones pendientes (`catalog_tension`).
+
+        Corre tras `_phase_measurement_findings` y antes del Editor, y solo si
+        la noche no ha decidido saltarse el Editor. Cada llamada pasa por
+        `WriteTensions` -> `AgentRunner` -> `BudgetGuard`; sin tensión
+        pendiente no hay `authorize` ni llamada. `BudgetDenied`:
+
+        - `OUTSIDE_WINDOW` y `RUN_NOT_RUNNING` -> `terminal_status_for`
+          (`KILLED` / `PARTIAL`); el primero además salta el Editor.
+        - `CALL_LIMIT_REACHED` (tope del redactor) -> termina la fase sin
+          degradar; el Editor sigue.
+        - `BUDGET_EXHAUSTED` -> `PARTIAL` (`writer_budget_exhausted`), sin
+          `terminal_status_for`; el Editor sigue (su reserva está intacta).
+
+        `RATE_LIMITED` -> `PARTIAL` y se salta el Editor. Un fallo
+        inesperado degrada a `PARTIAL` y termina la fase (el Editor sigue). No captura
+        `CancelledError` ni otras `BaseException`.
+        """
+        processed = ok = failed = 0
+        stop_reason: str | None = None
+        try:
+            pending = self._select_tensions.pending()
+        except Exception as exc:
+            self._degrade(RunStatus.PARTIAL, "writer_error")
+            _logger.exception(
+                "night.phase_end",
+                extra={
+                    "event": "night.phase_end",
+                    "run_id": str(self._run_id),
+                    "phase": "writer",
+                    "processed": 0,
+                    "ok": 0,
+                    "failed": 1,
+                    "stop_reason": "error",
+                    "error": type(exc).__name__,
+                },
+            )
+            return
+
+        for candidate in pending.candidates:
+            processed += 1
+            start = monotonic()
+            try:
+                result = await self._write_tensions(candidate)
+            except BudgetDenied as exc:
+                stop_reason = exc.reason.value
+                if exc.reason is DenyReason.CALL_LIMIT_REACHED:
+                    pass
+                elif exc.reason is DenyReason.BUDGET_EXHAUSTED:
+                    self._degrade(RunStatus.PARTIAL, "writer_budget_exhausted")
+                else:
+                    if exc.reason is DenyReason.OUTSIDE_WINDOW:
+                        self._skip_editor = True
+                    self._degrade(terminal_status_for(exc.reason), exc.reason.value)
+                break
+            except Exception:
+                _logger.exception(
+                    "night.item",
+                    extra=self._item_log_fields(
+                        item=candidate.item,
+                        phase="writer",
+                        outcome="exception",
+                        attempts=0,
+                        tokens_spent=0,
+                        duration_ms=_duration_ms(start),
+                    ),
+                )
+                failed += 1
+                # `break`, no `continue`: tras un fallo inesperado la llamada
+                # puede estar ya cobrada y `ok` (p. ej. `IntegrityError` al
+                # guardar el Finding), así que el límite por ítem no la
+                # frenaría y el siguiente candidato volvería a gastar.
+                stop_reason = "error"
+                self._degrade(RunStatus.PARTIAL, "writer_error")
+                break
+
+            log_fields = self._item_log_fields(
+                item=candidate.item,
+                phase="writer",
+                outcome=result.outcome.value,
+                attempts=result.attempts,
+                tokens_spent=result.tokens_spent,
+                duration_ms=_duration_ms(start),
+            )
+            if result.finding is not None:
+                log_fields["finding_id"] = str(result.finding.id)
+            _logger.info("night.item", extra=log_fields)
+
+            if result.outcome is WriteOutcome.WRITTEN:
+                ok += 1
+                continue
+            failed += 1
+            if result.outcome is WriteOutcome.RATE_LIMITED:
+                stop_reason = "rate_limited"
+                self._skip_editor = True
+                self._degrade(RunStatus.PARTIAL, "rate_limited_writer")
+                break
+
+        _logger.info(
+            "night.phase_end",
+            extra={
+                "event": "night.phase_end",
+                "run_id": str(self._run_id),
+                "phase": "writer",
+                "processed": processed,
+                "ok": ok,
+                "failed": failed,
+                "skipped": len(pending.skipped),
+                "stop_reason": stop_reason,
             },
         )
 
