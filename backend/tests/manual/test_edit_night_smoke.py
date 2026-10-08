@@ -195,9 +195,11 @@ def _test_policy(*, max_editor_calls_per_night: int) -> BudgetPolicy:
     return BudgetPolicy(
         nightly_tokens=_TEST_RUN_BUDGET_TOKENS,
         editor_reserve_tokens=_TEST_EDITOR_RESERVE_TOKENS,
+        writer_reserve_tokens=0,
         max_items_per_night=len(_CANDIDATES),
         max_turns_per_agent=1,
         max_editor_calls_per_night=max_editor_calls_per_night,
+        max_writer_calls_per_night=0,
         max_calls_per_item=2,
         item_timeout_s=60,
         # editor_timeout_s: el Editor recibe varios candidatos en una sola

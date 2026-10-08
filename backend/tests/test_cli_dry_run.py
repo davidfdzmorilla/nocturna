@@ -52,6 +52,8 @@ _BASE_TOML = """
 [budget]
 nightly_tokens = 300000
 editor_reserve_tokens = 60000
+writer_reserve_tokens = 24000
+writer_estimated_tokens = 12000
 weekly_reset_weekday = "{weekday}"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
@@ -68,6 +70,7 @@ item_timeout_s = 180
 editor_timeout_s = 300
 run_timeout_s = 16200
 max_editor_calls_per_night = 2
+max_writer_calls_per_night = 2
 max_calls_per_item = 2
 popularizer_min_interest_score = 4
 max_consecutive_failures = 5
@@ -239,6 +242,10 @@ def test_budget_policy_from_config_traduce_todos_los_campos_de_gasto() -> None:
 
     assert policy.nightly_tokens == config.budget.nightly_tokens
     assert policy.editor_reserve_tokens == config.budget.editor_reserve_tokens
+    assert policy.writer_reserve_tokens == config.budget.writer_reserve_tokens
+    assert policy.writer_reserve_tokens == 24_000
+    assert policy.max_writer_calls_per_night == config.limits.max_writer_calls_per_night
+    assert policy.max_writer_calls_per_night == 2
     assert policy.max_items_per_night == config.limits.max_items_per_night
     assert policy.max_turns_per_agent == config.limits.max_turns_per_agent
     assert policy.max_editor_calls_per_night == config.limits.max_editor_calls_per_night
@@ -249,6 +256,24 @@ def test_budget_policy_from_config_traduce_todos_los_campos_de_gasto() -> None:
     assert policy.window_hard_stop == config.window.hard_stop
     assert policy.weekly_reset_hour == config.budget.weekly_reset_hour
     assert policy.reset_day_multiplier == config.budget.reset_day_multiplier
+
+
+def test_budget_policy_from_config_no_confunde_el_tope_del_redactor_con_el_del_editor() -> None:
+    """Con la config real ambos topes valen 2 y una confusión pasaría
+    inadvertida: se fuerzan valores distintos."""
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+    config = config.model_copy(
+        update={
+            "limits": config.limits.model_copy(
+                update={"max_writer_calls_per_night": 3, "max_editor_calls_per_night": 5}
+            )
+        }
+    )
+
+    policy = cli.budget_policy_from_config(config)
+
+    assert policy.max_writer_calls_per_night == 3
+    assert policy.max_editor_calls_per_night == 5
 
 
 def test_budget_policy_from_config_devuelve_una_budget_policy() -> None:
@@ -331,9 +356,11 @@ def _policy(**overrides: object) -> BudgetPolicy:
     defaults: dict[str, object] = {
         "nightly_tokens": 300_000,
         "editor_reserve_tokens": 60_000,
+        "writer_reserve_tokens": 24_000,
         "max_items_per_night": 40,
         "max_turns_per_agent": 3,
         "max_editor_calls_per_night": 2,
+        "max_writer_calls_per_night": 2,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
         "editor_timeout_s": 300,
@@ -354,13 +381,34 @@ def test_print_budget_plan_muestra_el_disponible_de_reader_ya_con_la_reserva_res
     policy = _policy(nightly_tokens=300_000, editor_reserve_tokens=60_000)
     now = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now, would_read=12)
+    cli._print_budget_plan(policy, "UTC", now, would_read=12, writer_estimated_tokens=12_000)
 
     captured = capsys.readouterr().out
     assert "presupuesto nocturno efectivo: 300000 tokens" in captured
-    assert "reserva del Editor: 60000 tokens" in captured
-    assert "disponible para Reader/Popularizer: 240000 tokens" in captured
-    assert "disponible para el Editor: 300000 tokens" in captured
+    assert "porción Reader/Popularizer: 216000 tokens" in captured
+    assert (
+        "porción del redactor: 24000 tokens (ve hasta 240000 acumulados); "
+        "tope 2 llamadas × 12000 estimados"
+    ) in captured
+    assert "porción del Editor: 60000 tokens (ve el presupuesto completo, 300000)" in captured
+
+
+def test_print_budget_plan_delega_el_reparto_en_available_tokens_for(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """El dry-run no tiene su propia copia del reparto anidado: las tres
+    porciones salen de `available_tokens_for`. Con un centinela imposible de
+    obtener por aritmética, una resta propia (`effective - E - W`) no pasa."""
+    sentinel = 123_457
+    monkeypatch.setattr(cli, "available_tokens_for", lambda role, budget, policy: sentinel)
+    now = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
+
+    cli._print_budget_plan(_policy(), "UTC", now, would_read=1, writer_estimated_tokens=12_000)
+
+    captured = capsys.readouterr().out
+    assert f"porción Reader/Popularizer: {sentinel} tokens" in captured
+    assert f"(ve hasta {sentinel} acumulados)" in captured
+    assert f"(ve el presupuesto completo, {sentinel})" in captured
 
 
 def test_print_budget_plan_muestra_cuantos_items_se_leerian_esta_noche(
@@ -372,7 +420,7 @@ def test_print_budget_plan_muestra_cuantos_items_se_leerian_esta_noche(
     policy = _policy()
     now = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now, would_read=17)
+    cli._print_budget_plan(policy, "UTC", now, would_read=17, writer_estimated_tokens=12_000)
 
     captured = capsys.readouterr().out
     assert "ítems que se leerían esta noche: 17" in captured
@@ -384,7 +432,7 @@ def test_print_budget_plan_dentro_de_la_ventana_muestra_los_segundos_restantes(
     policy = _policy(window_start=time(0, 0), window_hard_stop=time(4, 45))
     now = datetime(2026, 1, 1, 4, 44, 30, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now, would_read=0)
+    cli._print_budget_plan(policy, "UTC", now, would_read=0, writer_estimated_tokens=12_000)
 
     captured = capsys.readouterr().out
     assert "dentro de la ventana ahora mismo: sí (quedan 30 s para el hard_stop)" in captured
@@ -396,7 +444,7 @@ def test_print_budget_plan_fuera_de_la_ventana_no_anuncia_segundos_restantes(
     policy = _policy(window_start=time(0, 0), window_hard_stop=time(4, 45))
     now = datetime(2026, 1, 1, 4, 46, 0, tzinfo=UTC)
 
-    cli._print_budget_plan(policy, "UTC", now, would_read=0)
+    cli._print_budget_plan(policy, "UTC", now, would_read=0, writer_estimated_tokens=12_000)
 
     captured = capsys.readouterr().out
     assert "dentro de la ventana ahora mismo: no" in captured
@@ -412,6 +460,7 @@ def test_print_budget_plan_aplica_el_reset_day_multiplier_al_presupuesto_efectiv
     policy = _policy(
         nightly_tokens=300_000,
         editor_reserve_tokens=60_000,
+        writer_reserve_tokens=24_000,
         weekly_reset_weekday=0,
         weekly_reset_hour=0,
         reset_day_multiplier=2.0,
@@ -419,11 +468,12 @@ def test_print_budget_plan_aplica_el_reset_day_multiplier_al_presupuesto_efectiv
     monday = datetime(2026, 1, 5, 10, 0, tzinfo=UTC)
     assert monday.weekday() == 0
 
-    cli._print_budget_plan(policy, "UTC", monday, would_read=0)
+    cli._print_budget_plan(policy, "UTC", monday, would_read=0, writer_estimated_tokens=12_000)
 
     captured = capsys.readouterr().out
     assert "presupuesto nocturno efectivo: 600000 tokens" in captured
-    assert "disponible para Reader/Popularizer: 540000 tokens" in captured
+    assert "porción Reader/Popularizer: 516000 tokens" in captured
+    assert "porción del redactor: 24000 tokens (ve hasta 540000 acumulados)" in captured
 
 
 # --- _build_run_night: EditNight.run_id frente al run_id del guard --------

@@ -27,6 +27,8 @@
 -- `config/pipeline.toml`. Si esa clave cambia, actualizar este valor a
 -- mano -- no hay forma de leer un fichero TOML desde `psql`.
 \set reserva 60000
+-- reserva del redactor (T75): debe seguir a `writer_reserve_tokens`.
+\set reserva_redactor 24000
 
 \echo '=== Q1 · Cabecera de la noche ==='
 WITH n AS (
@@ -78,7 +80,7 @@ GROUP BY ROLLUP (ac.agent, ac.prompt_version, ac.status)
 ORDER BY agent, prompt_version, status;
 
 \echo ''
-\echo '=== Q3 · Pool compartido (Reader+Popularizer) frente a reserva del Editor ==='
+\echo '=== Q3 · Pool compartido (Reader+Popularizer) frente a las reservas del Editor y del redactor ==='
 -- La cifra más importante del informe: la primera noche real acabó al
 -- 97,8% del pool compartido. `:reserva` se define al principio del fichero
 -- y debe seguir a `editor_reserve_tokens` de `config/pipeline.toml`.
@@ -100,9 +102,9 @@ resumen AS (
 SELECT
     n.budget_tokens,
     :reserva AS reserva_tokens,
-    n.budget_tokens - :reserva AS pool_tokens,
+    n.budget_tokens - :reserva - :reserva_redactor AS pool_tokens,
     r.pool_usado,
-    ROUND(100.0 * r.pool_usado / (n.budget_tokens - :reserva), 1) AS pct_pool,
+    ROUND(100.0 * r.pool_usado / (n.budget_tokens - :reserva - :reserva_redactor), 1) AS pct_pool,
     r.reserva_usada,
     ROUND(100.0 * r.reserva_usada / :reserva, 1) AS pct_reserva
 FROM n, resumen r;

@@ -20,6 +20,7 @@ class AgentRole(StrEnum):
     READER = "reader"
     POPULARIZER = "popularizer"
     EDITOR = "editor"
+    WRITER = "writer"
 
 
 @dataclass(frozen=True, slots=True)

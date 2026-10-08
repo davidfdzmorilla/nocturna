@@ -22,6 +22,7 @@ from nocturna.application.budget import (
     EditorAlreadyCalled,
     OutsideExecutionWindow,
     RunNotRunning,
+    available_tokens_for,
 )
 from nocturna.domain.entities import AgentCall, AgentCallStatus, Run, RunStatus
 from nocturna.domain.errors import InvariantViolation
@@ -92,9 +93,11 @@ def _policy(**overrides: object) -> BudgetPolicy:
     defaults: dict[str, object] = {
         "nightly_tokens": 300_000,
         "editor_reserve_tokens": 60_000,
+        "writer_reserve_tokens": 0,
         "max_items_per_night": 40,
         "max_turns_per_agent": 3,
         "max_editor_calls_per_night": 2,
+        "max_writer_calls_per_night": 0,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
         "editor_timeout_s": 300,
@@ -532,3 +535,187 @@ def test_record_call_propaga_una_excepcion_de_record_agent_call_que_no_es_run_al
     # fija, pero confirma que la excepción no se levanta demasiado pronto
     # ni sustituye al comportamiento real de la línea anterior.
     assert agent_calls.calls == [call]
+
+
+# --- T75: reserva anidada del redactor -------------------------------------
+# B = 300_000, E = 60_000, W = 24_000: Reader/Popularizer ven 216_000, el
+# redactor 240_000 y el Editor 300_000.
+
+_B, _E, _W = 300_000, 60_000, 24_000
+
+
+def _wpolicy(**overrides: object) -> BudgetPolicy:
+    defaults: dict[str, object] = {
+        "writer_reserve_tokens": _W,
+        "max_writer_calls_per_night": 2,
+    }
+    defaults.update(overrides)
+    return _policy(**defaults)
+
+
+def _wguard(
+    *,
+    spent: int = 0,
+    spent_role: AgentRole = AgentRole.READER,
+    now: datetime = _WITHIN_WINDOW,
+    policy: BudgetPolicy | None = None,
+    budget: int = _B,
+    extra_calls: list[AgentCall] | None = None,
+) -> tuple[BudgetGuard, _InMemoryAgentCallRepository, Run]:
+    run = _make_run(budget_tokens=budget)
+    runs = _InMemoryRunRepository(run)
+    agent_calls = _InMemoryAgentCallRepository()
+    if spent:
+        agent_calls.add(_make_agent_call(run.id, agent=spent_role, tokens_in=spent, tokens_out=0))
+    for call in extra_calls or []:
+        agent_calls.add(call)
+    guard = _make_guard(
+        run=run, runs=runs, agent_calls=agent_calls, now=now, policy=policy or _wpolicy()
+    )
+    return guard, agent_calls, run
+
+
+@pytest.mark.parametrize("role", [AgentRole.READER, AgentRole.POPULARIZER])
+def test_reader_y_popularizer_ven_b_menos_e_menos_w_con_frontera_exacta(role):
+    pool = _B - _E - _W
+    guard, _, _ = _wguard(spent=pool - 1000)
+
+    assert guard.check(role, 1000)  # spent + est == B-E-W
+    denied = guard.check(role, 1001)  # un token mas
+
+    assert not denied
+    assert denied.reason is DenyReason.BUDGET_EXHAUSTED
+
+
+def test_la_reserva_del_redactor_sigue_intacta_aunque_reader_y_popularizer_agoten_su_pool():
+    guard, _, _ = _wguard(spent=_B - _E - _W)
+
+    assert guard.check(AgentRole.READER, 1).reason is DenyReason.BUDGET_EXHAUSTED
+    assert guard.check(AgentRole.POPULARIZER, 1).reason is DenyReason.BUDGET_EXHAUSTED
+    assert guard.check(AgentRole.WRITER, _W)
+    assert not guard.check(AgentRole.WRITER, _W + 1)
+    assert guard.remaining_for(AgentRole.WRITER) == _W
+
+
+def test_la_reserva_del_editor_sigue_intacta_aunque_el_redactor_agote_la_suya():
+    guard, _, _ = _wguard(spent=_B - _E, spent_role=AgentRole.WRITER)
+
+    denied = guard.check(AgentRole.WRITER, 1)
+
+    assert not denied
+    assert denied.reason is DenyReason.BUDGET_EXHAUSTED
+    assert guard.check(AgentRole.EDITOR, _E)
+    assert not guard.check(AgentRole.EDITOR, _E + 1)
+
+
+def _writer_call(run: Run, status: AgentCallStatus = AgentCallStatus.OK) -> AgentCall:
+    return _make_agent_call(
+        run.id, agent=AgentRole.WRITER, tokens_in=1, tokens_out=1, status=status
+    )
+
+
+def test_el_redactor_se_deniega_con_call_limit_reached_al_llegar_al_tope():
+    guard, calls, run = _wguard()
+    calls.add(_writer_call(run))
+    assert guard.check(AgentRole.WRITER, 100)  # 1 de 2: aun autorizado
+
+    calls.add(_writer_call(run))
+    decision = guard.check(AgentRole.WRITER, 100)  # con presupuesto de sobra
+
+    assert not decision
+    assert decision.reason is DenyReason.CALL_LIMIT_REACHED
+    with pytest.raises(CallLimitReached):
+        guard.authorize(AgentRole.WRITER, 100)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [AgentCallStatus.INVALID_OUTPUT, AgentCallStatus.ERROR, AgentCallStatus.TIMEOUT],
+)
+def test_el_tope_del_redactor_cuenta_intentos_de_cualquier_status(status):
+    guard, calls, run = _wguard()
+    calls.add(_writer_call(run, status))
+    calls.add(_writer_call(run, status))
+
+    assert guard.check(AgentRole.WRITER, 100).reason is DenyReason.CALL_LIMIT_REACHED
+
+
+def test_las_llamadas_de_reader_y_popularizer_no_cuentan_para_el_tope_del_redactor():
+    guard, calls, run = _wguard()
+    for agent in (AgentRole.READER, AgentRole.POPULARIZER, AgentRole.EDITOR):
+        for _ in range(2):
+            calls.add(_make_agent_call(run.id, agent=agent, tokens_in=1, tokens_out=1))
+
+    assert guard.check(AgentRole.WRITER, 100)
+
+
+def test_con_tope_cero_el_redactor_siempre_se_deniega():
+    guard, _, _ = _wguard(policy=_wpolicy(max_writer_calls_per_night=0))
+
+    decision = guard.check(AgentRole.WRITER, 1)
+
+    assert not decision
+    assert decision.reason is DenyReason.CALL_LIMIT_REACHED
+
+
+def test_el_redactor_fuera_de_ventana_recibe_outside_window_antes_que_el_tope():
+    guard, calls, run = _wguard(now=_JUST_AFTER_HARD_STOP, spent=_B)
+    calls.add(_writer_call(run))
+    calls.add(_writer_call(run))
+
+    assert guard.check(AgentRole.WRITER, 100).reason is DenyReason.OUTSIDE_WINDOW
+
+
+def test_remaining_for_redactor_y_reader_con_la_reserva_anidada():
+    guard, _, _ = _wguard(spent=10_000)
+
+    assert guard.remaining_for(AgentRole.WRITER) == _B - _E - 10_000
+    assert guard.remaining_for(AgentRole.READER) == _B - _E - _W - 10_000
+    assert guard.remaining_for(AgentRole.EDITOR) == _B - 10_000
+
+
+def test_timeout_para_el_redactor_es_item_timeout_acotado_por_el_hard_stop():
+    guard, _, _ = _wguard()
+    assert guard.timeout_for_call(AgentRole.WRITER) == 180
+
+    near_stop = datetime(2026, 1, 1, 4, 44, 30, tzinfo=UTC)
+    guard, _, _ = _wguard(now=near_stop)
+    assert guard.timeout_for_call(AgentRole.WRITER) == 30
+
+
+def test_noche_de_reinicio_reader_y_popularizer_ven_bm_menos_e_menos_w():
+    # El multiplicador agranda Run.budget_tokens (B x m); las reservas no escalan.
+    guard, _, _ = _wguard(budget=_B * 2)
+
+    assert guard.remaining_for(AgentRole.READER) == _B * 2 - _E - _W
+    assert guard.remaining_for(AgentRole.POPULARIZER) == _B * 2 - _E - _W
+    assert guard.remaining_for(AgentRole.WRITER) == _B * 2 - _E
+
+
+def test_todo_rol_tiene_reparto_y_tope_explicitos_y_el_reparto_esta_acotado_por_b():
+    policy = _wpolicy()
+    for role in AgentRole:
+        assert 0 <= available_tokens_for(role, _B, policy) <= _B
+        guard, _, _ = _wguard()
+        # no lanza ValueError: tope de llamadas explicito para cada rol
+        guard.check(role, 1)
+
+
+def test_available_tokens_for_reparto_anidado_estricto():
+    policy = _wpolicy()
+
+    assert available_tokens_for(AgentRole.READER, _B, policy) == 216_000
+    assert available_tokens_for(AgentRole.POPULARIZER, _B, policy) == 216_000
+    assert available_tokens_for(AgentRole.WRITER, _B, policy) == 240_000
+    assert available_tokens_for(AgentRole.EDITOR, _B, policy) == 300_000
+
+
+def test_un_rol_no_previsto_falla_cerrado_con_value_error():
+    class _Unknown:
+        value = "unknown"
+
+    guard, _, _ = _wguard()
+    with pytest.raises(ValueError):
+        available_tokens_for(_Unknown(), _B, _wpolicy())  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        guard._call_limit_reason(_Unknown())  # type: ignore[arg-type]

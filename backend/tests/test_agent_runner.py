@@ -65,9 +65,11 @@ def _policy(**overrides: object) -> BudgetPolicy:
     defaults: dict[str, object] = {
         "nightly_tokens": 100_000,
         "editor_reserve_tokens": 10_000,
+        "writer_reserve_tokens": 0,
         "max_items_per_night": 10,
         "max_turns_per_agent": 3,
         "max_editor_calls_per_night": 2,
+        "max_writer_calls_per_night": 0,
         "max_calls_per_item": 5,
         "item_timeout_s": 180,
         "editor_timeout_s": 300,
@@ -1074,7 +1076,8 @@ async def test_role_configurado_viaja_al_agent_request_para_cualquier_rol(role: 
     """No es de la lista mínima, pero fija por qué el runner sirve igual
     para Reader, Popularizer y Editor (docstring de `runner.py`): el rol no
     está cableado en ningún punto de `run()`, viaja desde el constructor."""
-    env = _make_environment()
+    # Tope del redactor > 0: con 0 (redactor apagado) el guard lo deniega.
+    env = _make_environment(policy=_policy(max_writer_calls_per_night=2))
     fake = FakeLLMProvider()
     fake.respond(role, json={"x": 1}, tokens_in=100, tokens_out=10)
     runner = _make_runner(work=env.work, provider=fake, role=role)

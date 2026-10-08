@@ -386,7 +386,7 @@ def test_agent_call_status_contiene_exactamente_los_valores_esperados():
 
 
 def test_agent_role_contiene_exactamente_los_valores_esperados():
-    assert {role.value for role in AgentRole} == {"reader", "popularizer", "editor"}
+    assert {role.value for role in AgentRole} == {"reader", "popularizer", "editor", "writer"}
 
 
 def test_finding_type_contiene_exactamente_los_valores_esperados():

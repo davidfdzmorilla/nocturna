@@ -42,9 +42,11 @@ def _policy(**overrides: object) -> BudgetPolicy:
     defaults: dict[str, object] = {
         "nightly_tokens": 300_000,
         "editor_reserve_tokens": 60_000,
+        "writer_reserve_tokens": 0,
         "max_items_per_night": 40,
         "max_turns_per_agent": 3,
         "max_editor_calls_per_night": 2,
+        "max_writer_calls_per_night": 0,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
         "editor_timeout_s": 300,
