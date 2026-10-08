@@ -433,6 +433,14 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: lo fija el plan; merge antes de las 00:00 del 2026-10-07.
 - **Cierre (2026-10-06; mergeada el mismo día, sin migración; `run-night --dry-run` muestra M♃/R♃ en las cinco `primera_medida`)**: plan aprobado por el autor. En `_UNIT_LABEL` de `measurement_finding_texts.py`, `M_jup` → "M♃" y `R_jup` → "R♃" (las etiquetas provisionales "M_Jup"/"R_Jup" eran escritas a mano, no el código del enum). La línea `data` del Editor sigue con el código del enum (es entrada para el modelo, no texto publicado). Test de cobertura sobre todas las unidades. Consulta de solo lectura en la base real: 0 hallazgos guardados con la etiqueta antigua, nada que reparar. Suite: 2580 passed (349 de `-m db`).
 
+### T92 · Solución propia para todos los parámetros del planeta
+- **Estado**: pending
+- **Depende de**: T83
+- **Toca agentes y gasto**: no (regla determinista en Python, sin LLM). Revisión normal.
+- **Origen**: revisión de la noche del 2026-10-08. Primer `closed_loop` real: HD 715 b. T83 reconoce como propia la solución `62b8938e48…` por masa y radio, pero el periodo del mismo paper se evaluó contra esa misma solución, con σ = 0. La coincidencia por valor solo se comprueba en masa y radio (ADR 0023), así que el periodo nunca la detecta. La evaluación está guardada como `evaluated`, sin `Finding`. Solo `awaiting_reference` se reevalúa, así que no se corrige sola.
+- **Alcance**: propuesta del orquestador aceptada por el autor: si una solución del archivo es propia para un parámetro de la `Reading` (por `arxiv_id` o por valor), lo es para todos los parámetros de ese planeta en esa `Reading`. Queda excluida como referencia también para el periodo. El plan decide qué hacer con la evaluación ya guardada de HD 715 b (periodo): reevaluarla, marcarla `closed_loop` o dejarla. También decide si hace falta un ADR que amplíe ADR 0023.
+- **Hecho cuando**: lo fija el plan. Como mínimo: test con el caso de HD 715 b (masa y radio propios por valor, periodo evaluado) que falla antes del arreglo, y consulta de solo lectura en la base real sobre cuántas evaluaciones cambian.
+
 ---
 
 ## Decisiones abiertas al arrancar
