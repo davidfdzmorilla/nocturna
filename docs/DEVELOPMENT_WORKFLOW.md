@@ -58,6 +58,8 @@ En T82 (historia de `Reading`), tras migrar: `uv run nocturna evaluate-tensions 
 
 En T83 (solución propia, sin migración): `uv run python scripts/t83_link_report.py` y anotar (a)–(d) en el cierre de T83; `uv run nocturna evaluate-tensions --dry-run` sin cambios salvo lo que liste la auditoría (d); `uv run nocturna run-night --dry-run` con HIP 67522 b todavía como confirmación "bloqueado (confirmation_enabled=false)". Activar la confirmación es una decisión aparte del autor.
 
+En T75 (reserva del redactor, migración `c9e4b2a7d135`): tras migrar, `uv run nocturna run-night --dry-run` debe mostrar las tres porciones (Reader/Popularizer 216.000, redactor 24.000 con tope 2 × 12.000, Editor 60.000). El informe de la mañana (`night_report.sql`) calcula ya el pool como B − E − W.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

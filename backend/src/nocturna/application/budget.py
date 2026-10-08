@@ -19,9 +19,11 @@ Reglas de este módulo, cada una explicada donde se aplica en el código:
    ventana va antes que el presupuesto porque el motivo de denegación
    determina si T44 cierra la noche como `killed` o como `partial`
    (`terminal_status_for`), y esos dos casos no pueden confundirse.
-4. La reserva del Editor se resta del presupuesto disponible para Reader y
-   Popularizer desde la primera llamada de la noche, no "cuando se acerque
-   el final".
+4. Las reservas son anidadas y se restan desde la primera llamada de la
+   noche, no "cuando se acerque el final": Reader y Popularizer ven
+   `B - E - W`, el redactor ve `B - E` y el Editor ve `B` (`B` presupuesto,
+   `E` reserva del Editor, `W` reserva del redactor). Única implementación:
+   `available_tokens_for`, compartida con el `--dry-run`.
 5. `estimated_tokens <= 0` lanza `ValueError` de inmediato: aceptar `0`
    convertiría el guard en un pasapuertas hasta agotar el límite exacto.
 6. `timeout_for_call` nunca deja sobrevivir una llamada al corte de
@@ -34,6 +36,10 @@ Reglas de este módulo, cada una explicada donde se aplica en el código:
    la noche.
 9. El tope de llamadas por rol es un cortacircuitos independiente de los
    tokens: rompe un bucle aunque las estimaciones de coste sean mínimas.
+   Cada rol tiene el suyo: el Editor `max_editor_calls_per_night`, el
+   redactor `max_writer_calls_per_night` (0 lo apaga) y Reader/Popularizer
+   `max_calls_per_item * max_items_per_night`; un rol sin tope definido
+   lanza `ValueError`.
 10. `record_call` es el único camino de contabilización, y no abre ni
     cierra transacción: `unit_of_work` (ADR 0003) es la única frontera.
 11. `BudgetDenied` no hereda de `DomainError`, para que un `except
@@ -87,9 +93,11 @@ class BudgetPolicy:
 
     nightly_tokens: int
     editor_reserve_tokens: int
+    writer_reserve_tokens: int
     max_items_per_night: int
     max_turns_per_agent: int
     max_editor_calls_per_night: int
+    max_writer_calls_per_night: int
     max_calls_per_item: int
     item_timeout_s: int
     editor_timeout_s: int
@@ -169,14 +177,14 @@ class OutsideExecutionWindow(BudgetDenied):
 
 
 class BudgetExceeded(BudgetDenied):
-    """El presupuesto disponible para el rol (con la reserva del Editor ya restada) no alcanza."""
+    """El presupuesto disponible para el rol (techo del reparto anidado) no alcanza."""
 
     def __init__(self, role: AgentRole, remaining_tokens: int) -> None:
         super().__init__(DenyReason.BUDGET_EXHAUSTED, role, remaining_tokens)
 
 
 class CallLimitReached(BudgetDenied):
-    """Se alcanzó el tope de llamadas de Reader/Popularizer de esta noche."""
+    """Se alcanzó el tope de llamadas de esta noche para Reader/Popularizer o para el redactor."""
 
     def __init__(self, role: AgentRole, remaining_tokens: int) -> None:
         super().__init__(DenyReason.CALL_LIMIT_REACHED, role, remaining_tokens)
@@ -280,6 +288,31 @@ def seconds_until_hard_stop(now: datetime, start: time, hard_stop: time) -> int:
 
     remaining = (hard_stop_dt.astimezone(UTC) - now.astimezone(UTC)).total_seconds()
     return max(int(remaining), 0)
+
+
+def available_tokens_for(role: AgentRole, budget_tokens: int, policy: BudgetPolicy) -> int:
+    """Presupuesto que ve `role` antes de restar lo ya gastado (reparto anidado).
+
+    Pura y única implementación del reparto: la usan `BudgetGuard` y
+    `cli.py::_print_budget_plan`, ninguno tiene su propia copia (mismo
+    criterio que `seconds_until_hard_stop`). Los techos son crecientes por
+    rol, así que el gasto de un rol nunca puede comerse la reserva de los
+    que van después:
+
+    - EDITOR: `B` (él es quien tiene la reserva final).
+    - WRITER: `B - E`.
+    - READER, POPULARIZER: `B - E - W` (el más restrictivo).
+
+    Cualquier otro rol lanza `ValueError`: un rol nuevo sin reparto
+    explícito no puede pasar el guard.
+    """
+    if role is AgentRole.EDITOR:
+        return budget_tokens
+    if role is AgentRole.WRITER:
+        return budget_tokens - policy.editor_reserve_tokens
+    if role in (AgentRole.READER, AgentRole.POPULARIZER):
+        return budget_tokens - policy.editor_reserve_tokens - policy.writer_reserve_tokens
+    raise ValueError(f"rol sin reparto de presupuesto definido: {role!r}")
 
 
 def terminal_status_for(reason: DenyReason) -> RunStatus:
@@ -497,7 +530,11 @@ class BudgetGuard:
         return self._agent_calls.tokens_used_for_run(self._run_id)
 
     def remaining_for(self, role: AgentRole) -> int:
-        """Presupuesto que le queda a `role`, con la reserva del Editor ya aplicada si toca.
+        """Presupuesto que le queda a `role`, con el reparto anidado de reservas ya aplicado.
+
+        El techo de cada rol sale de `available_tokens_for` (Reader y
+        Popularizer `B - E - W`, redactor `B - E`, Editor `B`), no solo de la
+        reserva del Editor.
 
         Coherente con `check`: un Run que no está `RUNNING` no tiene
         presupuesto disponible para nadie, así que un Run `KILLED` o
@@ -548,9 +585,9 @@ class BudgetGuard:
 
         Regla 6: `min(timeout_base, seconds_until_hard_stop())`, sin
         excepción -- el `min` con `seconds_until_hard_stop()` se conserva
-        tal cual para los tres roles, el Editor incluido. `timeout_base` es
+        tal cual para todos los roles, el Editor incluido. `timeout_base` es
         `editor_timeout_s` si `role is AgentRole.EDITOR`, `item_timeout_s`
-        en cualquier otro caso (Reader, Popularizer, o `role=None`):
+        en cualquier otro caso (Reader, Popularizer, WRITER o `role=None`):
         `item_timeout_s` está pensado para una llamada sobre un único
         abstract, mientras que el Editor recibe, en una sola llamada a
         Opus, hasta `max_items_per_night` candidatos de la noche entera, y
@@ -579,14 +616,10 @@ class BudgetGuard:
     def _available_tokens(self, run: Run, role: AgentRole) -> int:
         """Presupuesto disponible para `role` antes de restar lo ya gastado.
 
-        Regla 4: la reserva del Editor se resta para Reader y Popularizer
-        desde el minuto cero de la noche, no solo cuando el presupuesto se
-        acerca a agotarse; el Editor ve el presupuesto completo, porque él
-        es quien tiene la reserva.
+        Regla 4: delega en `available_tokens_for`, la única implementación
+        del reparto anidado de reservas.
         """
-        if role is AgentRole.EDITOR:
-            return run.budget_tokens
-        return run.budget_tokens - self._policy.editor_reserve_tokens
+        return available_tokens_for(role, run.budget_tokens, self._policy)
 
     def _remaining(self, run: Run, role: AgentRole) -> int:
         available = self._available_tokens(run, role)
@@ -616,9 +649,16 @@ class BudgetGuard:
         if role is AgentRole.EDITOR:
             limit = self._policy.max_editor_calls_per_night
             reason = DenyReason.EDITOR_ALREADY_CALLED
-        else:
+        elif role is AgentRole.WRITER:
+            # Tope propio del redactor (T75): cuenta intentos de cualquier
+            # status, independiente de los tokens. 0 = redactor apagado.
+            limit = self._policy.max_writer_calls_per_night
+            reason = DenyReason.CALL_LIMIT_REACHED
+        elif role in (AgentRole.READER, AgentRole.POPULARIZER):
             limit = self._policy.max_calls_per_item * self._policy.max_items_per_night
             reason = DenyReason.CALL_LIMIT_REACHED
+        else:
+            raise ValueError(f"rol sin tope de llamadas definido: {role!r}")
 
         count = self._agent_calls.count_for_run(self._run_id, role)
         return reason if count >= limit else None

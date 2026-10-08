@@ -562,7 +562,7 @@ def test_denegacion_de_presupuesto_en_el_popularizer_devuelve_4_y_nombra_el_rol_
 ) -> None:
     """Presupuesto suficiente para que el Reader se autorice
     (`reader_estimated_tokens=6000` de `config/pipeline.toml` cabe en los
-    6500 tokens disponibles tras la reserva del Editor) pero no para el
+    6500 tokens disponibles tras las reservas del Editor y del redactor, T75) pero no para el
     Popularizer (`popularizer_estimated_tokens=7000` no cabe en los 5400
     tokens que quedan tras el gasto real del Reader). `_print_budget_denial`
     debe nombrar "Popularizer" en su mensaje, no "Reader" a pelo.
@@ -579,7 +579,7 @@ def test_denegacion_de_presupuesto_en_el_popularizer_devuelve_4_y_nombra_el_rol_
         tokens_in=1000,
         tokens_out=100,
     )
-    _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=66_500)
+    _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=90_500)
     item_id = _seed_item(db_session_factory, categories=["astro-ph.GA"])
 
     code = main(["run-item", str(item_id)])
@@ -901,7 +901,7 @@ def test_item_astro_ph_ep_con_presupuesto_entre_v2_y_v3_se_deniega_sin_llamar_al
     `reader_v3_estimated_tokens` (13.000), esta llamada sí cabría en el
     presupuesto y llegaría a autorizarse, y este test lo distinguiría.
 
-    `available = run.budget_tokens - editor_reserve_tokens` para el Reader
+    `available = run.budget_tokens - editor_reserve_tokens - writer_reserve_tokens` para el Reader
     (`BudgetGuard._available_tokens`), así que `budget_tokens` se fija en
     `editor_reserve_tokens + 10_000` (10.000 está estrictamente entre las
     dos estimaciones) para que el presupuesto disponible para el Reader
@@ -914,7 +914,9 @@ def test_item_astro_ph_ep_con_presupuesto_entre_v2_y_v3_se_deniega_sin_llamar_al
         "las dos estimaciones reales de config/pipeline.toml; si esa relación deja de "
         "cumplirse, el test hay que recalibrarlo, no confiar en un margen que ya no existe"
     )
-    budget_tokens = config.budget.editor_reserve_tokens + 10_000
+    budget_tokens = (
+        config.budget.editor_reserve_tokens + config.budget.writer_reserve_tokens + 10_000
+    )
     _seed_running_run(db_session_factory, started_at=_WITHIN_WINDOW, budget_tokens=budget_tokens)
     item_id = _seed_item(db_session_factory, categories=["astro-ph.EP"], exoplanet_match=True)
 

@@ -43,6 +43,13 @@ class BudgetConfig(BaseModel):
 
     nightly_tokens: int = Field(gt=0)
     editor_reserve_tokens: int = Field(ge=0)
+    # writer_reserve_tokens (T75): reserva anidada del redactor, entre el pool
+    # de Reader/Popularizer y la del Editor (B-E-W / B-E / B). Sin default.
+    writer_reserve_tokens: int = Field(ge=0)
+    # writer_estimated_tokens: estimación por llamada del redactor para
+    # `BudgetGuard.authorize` (como las de Reader y Popularizer, no vive en
+    # `BudgetPolicy`). Sin default.
+    writer_estimated_tokens: int = Field(gt=0)
     weekly_reset_weekday: _WeeklyResetWeekday
     weekly_reset_hour: int = Field(ge=0, le=23)
     reset_day_multiplier: float = Field(ge=1.0)
@@ -89,8 +96,10 @@ class BudgetConfig(BaseModel):
 
     @model_validator(mode="after")
     def _reserve_within_nightly_budget(self) -> "BudgetConfig":
-        if self.editor_reserve_tokens >= self.nightly_tokens:
-            raise ValueError("editor_reserve_tokens debe ser menor que nightly_tokens")
+        if self.editor_reserve_tokens + self.writer_reserve_tokens >= self.nightly_tokens:
+            raise ValueError(
+                "editor_reserve_tokens + writer_reserve_tokens debe ser menor que nightly_tokens"
+            )
         return self
 
 
@@ -113,6 +122,9 @@ class LimitsConfig(BaseModel):
     # Cuenta intentos, no éxitos: lo que gasta presupuesto es la llamada, no
     # el acierto. Ver comentario en config/pipeline.toml.
     max_editor_calls_per_night: int = Field(ge=1)
+    # Tope de llamadas del redactor por noche (T75), intentos de cualquier
+    # status. 0 = redactor apagado. Ver comentario en config/pipeline.toml.
+    max_writer_calls_per_night: int = Field(ge=0)
     # Tope de llamadas de Reader/Popularizer por ítem (intento + reintento
     # por JSON inválido). `BudgetGuard` lo multiplica por max_items_per_night
     # para obtener el tope de llamadas de esos roles en toda la noche. Ver
@@ -518,7 +530,9 @@ class PipelineConfig(BaseModel):
         aquí y no en `BudgetConfig` por eso. El peor caso es que los
         `limits.max_items_per_night` ítems de la noche lleguen todos como
         candidatos al Editor, más los `measurement_findings.
-        max_candidates_per_night` de T89: si `editor_base_tokens +
+        max_candidates_per_night` de T89, más `limits.max_writer_calls_per_night`
+        (T75: cota superior de los candidatos `catalog_tension`, cada uno
+        exige al menos una llamada del redactor): si `editor_base_tokens +
         (max_items_per_night + max_candidates_per_night) *
         editor_tokens_per_candidate` no cabe en
         `editor_reserve_tokens`, quien calibre `max_items_per_night` o las
@@ -528,7 +542,9 @@ class PipelineConfig(BaseModel):
         para publicar nada.
         """
         max_candidates = (
-            self.limits.max_items_per_night + self.measurement_findings.max_candidates_per_night
+            self.limits.max_items_per_night
+            + self.measurement_findings.max_candidates_per_night
+            + self.limits.max_writer_calls_per_night
         )
         worst_case = (
             self.budget.editor_base_tokens
@@ -538,11 +554,26 @@ class PipelineConfig(BaseModel):
             raise ValueError(
                 "editor_reserve_tokens "
                 f"({self.budget.editor_reserve_tokens}) no cubre el peor caso de "
-                "editor_base_tokens + (max_items_per_night + max_candidates_per_night) * "
+                "editor_base_tokens + (max_items_per_night + max_candidates_per_night + "
+                "max_writer_calls_per_night) * "
                 f"editor_tokens_per_candidate ({self.budget.editor_base_tokens} + "
                 f"({self.limits.max_items_per_night} + "
-                f"{self.measurement_findings.max_candidates_per_night}) * "
+                f"{self.measurement_findings.max_candidates_per_night} + "
+                f"{self.limits.max_writer_calls_per_night}) * "
                 f"{self.budget.editor_tokens_per_candidate} = {worst_case})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _writer_reserve_covers_call_cap(self) -> "PipelineConfig":
+        """`max_writer_calls_per_night x writer_estimated_tokens` cabe en la reserva."""
+        worst_case = self.limits.max_writer_calls_per_night * self.budget.writer_estimated_tokens
+        if worst_case > self.budget.writer_reserve_tokens:
+            raise ValueError(
+                f"writer_reserve_tokens ({self.budget.writer_reserve_tokens}) no cubre "
+                "max_writer_calls_per_night * writer_estimated_tokens "
+                f"({self.limits.max_writer_calls_per_night} * "
+                f"{self.budget.writer_estimated_tokens} = {worst_case})"
             )
         return self
 

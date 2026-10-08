@@ -212,6 +212,7 @@ from nocturna.application.budget import (
     BudgetGuard,
     BudgetPolicy,
     DenyReason,
+    available_tokens_for,
     effective_nightly_tokens,
     is_within_window,
     seconds_until_hard_stop,
@@ -359,9 +360,11 @@ def budget_policy_from_config(config: PipelineConfig) -> BudgetPolicy:
     return BudgetPolicy(
         nightly_tokens=config.budget.nightly_tokens,
         editor_reserve_tokens=config.budget.editor_reserve_tokens,
+        writer_reserve_tokens=config.budget.writer_reserve_tokens,
         max_items_per_night=config.limits.max_items_per_night,
         max_turns_per_agent=config.limits.max_turns_per_agent,
         max_editor_calls_per_night=config.limits.max_editor_calls_per_night,
+        max_writer_calls_per_night=config.limits.max_writer_calls_per_night,
         max_calls_per_item=config.limits.max_calls_per_item,
         item_timeout_s=config.limits.item_timeout_s,
         editor_timeout_s=config.limits.editor_timeout_s,
@@ -781,6 +784,7 @@ def _print_budget_plan(
     *,
     would_read: int,
     would_read_v3: int | None = None,
+    writer_estimated_tokens: int,
 ) -> None:
     """Plan de gasto de la noche, que imprime `--dry-run` ("ingesta + plan de
     gasto, sin llamar a agentes"; no escribe nada en la base), sin instanciar el
@@ -795,22 +799,27 @@ def _print_budget_plan(
     resuelta para que esta función se mantenga pura y determinista.
     """
     effective_tokens = effective_nightly_tokens(policy, now)
-    reader_popularizer_available = effective_tokens - policy.editor_reserve_tokens
+    reader_popularizer_available = available_tokens_for(AgentRole.READER, effective_tokens, policy)
+    writer_available = available_tokens_for(AgentRole.WRITER, effective_tokens, policy)
+    editor_available = available_tokens_for(AgentRole.EDITOR, effective_tokens, policy)
     within_window = is_within_window(now, policy.window_start, policy.window_hard_stop)
     seconds_left = seconds_until_hard_stop(now, policy.window_start, policy.window_hard_stop)
 
     print()
     print("Plan de gasto de la noche:")
+    print(f"  presupuesto nocturno efectivo: {effective_tokens} tokens")
     print(
-        f"  presupuesto nocturno efectivo: {effective_tokens} tokens "
-        f"(reserva del Editor: {policy.editor_reserve_tokens} tokens)"
+        f"  porción Reader/Popularizer: {reader_popularizer_available} tokens "
+        f"(presupuesto − reserva del Editor − reserva del redactor)"
     )
     print(
-        f"  disponible para Reader/Popularizer: {reader_popularizer_available} tokens "
-        f"(ya con la reserva del Editor restada)"
+        f"  porción del redactor: {policy.writer_reserve_tokens} tokens "
+        f"(ve hasta {writer_available} acumulados); tope "
+        f"{policy.max_writer_calls_per_night} llamadas × {writer_estimated_tokens} estimados"
     )
     print(
-        f"  disponible para el Editor: {effective_tokens} tokens (presupuesto completo, sin restar)"
+        f"  porción del Editor: {policy.editor_reserve_tokens} tokens "
+        f"(ve el presupuesto completo, {editor_available})"
     )
     print(f"  ítems que se leerían esta noche: {would_read}")
     if would_read_v3 is not None:
@@ -1549,6 +1558,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 clock.now(),
                 would_read=len(to_read),
                 would_read_v3=would_read_v3,
+                writer_estimated_tokens=config.budget.writer_estimated_tokens,
             )
             _print_measurement_findings_section(session, config, clock)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)

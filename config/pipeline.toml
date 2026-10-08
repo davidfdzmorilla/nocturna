@@ -7,6 +7,18 @@
 nightly_tokens = 300000
 # editor_reserve_tokens: propuesto, se calibra en T60 con Settings > Usage.
 editor_reserve_tokens = 60000
+# writer_reserve_tokens (T75): reserva anidada del redactor de tensiones
+# (ADR 0025). Reparto: Reader+Popularizer ven B-E-W = 300.000 - 60.000 -
+# 24.000 = 216.000; el redactor ve B-E = 240.000; el Editor ve B. 24.000 =
+# max_writer_calls_per_night x writer_estimated_tokens = 2 x 12.000 (el
+# validador de PipelineConfig lo exige). Fija, no escala con
+# reset_day_multiplier.
+writer_reserve_tokens = 24000
+# writer_estimated_tokens: estimación por llamada del redactor. Su salida
+# (titular y tres niveles) es como la del Popularizer (5.290 de media, 11.492
+# de máximo); la entrada añade previas, sigma y evidencia, sin abstract. Real
+# esperado ~6.300; 12.000 ~ 1,9x esa media y cubre el máximo del Popularizer.
+writer_estimated_tokens = 12000
 # weekly_reset_weekday / weekly_reset_hour: PLACEHOLDER, decisión abierta (docs/OPEN_DECISIONS.md).
 weekly_reset_weekday = "monday"
 weekly_reset_hour = 0
@@ -48,25 +60,26 @@ reader_v3_estimated_tokens = 13000
 # en T60, con popularizer-v1 como baseline.
 #
 # Aritmética del pool Reader+Popularizer = nightly_tokens -
-# editor_reserve_tokens = 300.000 - 60.000 = 240.000. T71.c introdujo
+# editor_reserve_tokens - writer_reserve_tokens = 300.000 - 60.000 - 24.000
+# = 216.000 (T75; antes eran 240.000). T71.c introdujo
 # reader-v3 (más caro) solo para los ítems de astro-ph.EP
 # ([reader] measurement_categories); el resto de categorías sigue con
 # reader-v2. Con los 30 ítems de max_items_per_night repartidos entre EP y
 # no-EP, y usando lo MEDIDO (no la estimación conservadora de arriba): 6.400
 # tokens/llamada en EP (reader-v3, T71.b) y 3.056 tokens/ítem en no-EP
 # (reader-v2, ver CLAUDE.md). Caso esperado (mezcla ilustrativa, 11 EP de
-# 30): 11 x 6.400 + 19 x 3.056 ≈ 128.500 de Reader, dejando ≈ 111.500 para
-# el Popularizer -- a ~4.560 tokens/candidato medidos (CLAUDE.md), ≈ 24
+# 30): 11 x 6.400 + 19 x 3.056 ≈ 128.500 de Reader, dejando ≈ 87.500 para
+# el Popularizer -- a ~4.560 tokens/candidato medidos (CLAUDE.md), ≈ 19
 # candidatos, sin reintento. Peor caso, los 30 ítems siendo EP: 30 x 6.400 =
-# 192.000 de Reader, dejando solo 48.000 para el Popularizer:
+# 192.000 de Reader, dejando solo 24.000 para el Popularizer:
 # BudgetGuard.authorize exige que el presupuesto restante cubra la
 # ESTIMACIÓN (popularizer_estimated_tokens = 7.000), no el gasto medido de
 # 4.560/9.120, así que admite menos candidatos de los que daría
-# 48.000 / 4.560 sin más: ≈ 9 sin reintento (con ~4.560 medidos gastados
-# por cada uno de los 9 anteriores, a la 10ª llamada ya no quedan 7.000
-# libres) y ≈ 5 con reintento a 9.120 (mismo motivo, con el coste doblado
-# de cada candidato ya gastado). La noche cierra `partial`, con la reserva
-# del Editor (60.000) intacta -- el fallo es "se publica menos", no "se
+# 24.000 / 4.560 sin más: ≈ 4 sin reintento (con ~4.560 medidos gastados
+# por cada uno de los 4 anteriores, a la 5ª llamada ya no quedan 7.000
+# libres) y ≈ 2 con reintento a 9.120 (mismo motivo, con el coste doblado
+# de cada candidato ya gastado). La noche cierra `partial`, con las reservas
+# del redactor (24.000) y del Editor (60.000) intactas -- el fallo es "se publica menos", no "se
 # rebasa el presupuesto".
 # Qué fracción de la ingesta real es EP sigue siendo la incógnita de T60;
 # este cálculo es orientativo, a recalibrar con datos de campo. Si algún
@@ -75,8 +88,9 @@ reader_v3_estimated_tokens = 13000
 popularizer_estimated_tokens = 7000
 # editor_base_tokens: parte fija de la estimación de coste del Editor, la
 # única llamada de la noche a Opus, sobre la que `PipelineConfig` exige que
-# `editor_base_tokens + max_items_per_night * editor_tokens_per_candidate`
-# quepa en `editor_reserve_tokens` (ver el validador de `PipelineConfig`).
+# `editor_base_tokens + (max_items_per_night + max_candidates_per_night +
+# max_writer_calls_per_night) * editor_tokens_per_candidate` quepa en
+# `editor_reserve_tokens` (ver el validador de `PipelineConfig`).
 # T60: con dos observaciones reales del coste del Editor -- T43 humo,
 # N=3 -> 3.381 tokens; primera noche real (2026-09-18), N=14 -> 11.890
 # tokens -- se ajusta la recta que pasa por ambos puntos: ~774
@@ -155,6 +169,14 @@ editor_timeout_s = 300
 # (una edición publicada) y deja vivo el reintento por JSON inválido que
 # concede CLAUDE.md. Valor a calibrar en T60.
 max_editor_calls_per_night = 2
+# max_writer_calls_per_night (T75): tope de intentos del redactor por noche,
+# de cualquier estado, independiente de los tokens; 0 apaga el redactor. 2 =
+# una tensión con su reintento por JSON inválido, o dos sin reintento (los
+# datos dan 0-1 tensiones por noche). Con writer_estimated_tokens = 12.000
+# cabe exacto en writer_reserve_tokens (24.000). Además entra como cota
+# superior de candidatos en el validador de la reserva del Editor:
+# 2.500 + (30 + 5 + 2) x 850 = 33.950 <= 60.000.
+max_writer_calls_per_night = 2
 # max_calls_per_item: tope de llamadas de Reader/Popularizer por ítem (el
 # intento más el reintento por JSON inválido que concede CLAUDE.md). El tope
 # de llamadas de Reader/Popularizer en toda la noche sale de multiplicar
@@ -407,8 +429,9 @@ pubdate_margin_months = 6
 # decide el Editor junto con el resto de candidatos de la noche.
 # max_candidates_per_night: tope de candidatos de T89 por noche (D9). Entra en
 # la reserva del Editor: editor_base_tokens + (max_items_per_night +
-# max_candidates_per_night) * editor_tokens_per_candidate <= editor_reserve_tokens
-# (2500 + (30 + 5) * 850 = 32250 <= 60000; validado al cargar).
+# max_candidates_per_night + max_writer_calls_per_night) *
+# editor_tokens_per_candidate <= editor_reserve_tokens
+# (2500 + (30 + 5 + 2) * 850 = 33950 <= 60000; validado al cargar, T75).
 max_candidates_per_night = 5
 # confirmation_max_sigma: una confirmación exige todas las medidas del paper a
 # σ <= este valor de la referencia del archivo (D4).

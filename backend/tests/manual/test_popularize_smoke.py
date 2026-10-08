@@ -165,9 +165,11 @@ def _test_policy(*, max_calls_per_item: int) -> BudgetPolicy:
     return BudgetPolicy(
         nightly_tokens=_TEST_RUN_BUDGET_TOKENS,
         editor_reserve_tokens=_TEST_EDITOR_RESERVE_TOKENS,
+        writer_reserve_tokens=0,
         max_items_per_night=1,
         max_turns_per_agent=1,
         max_editor_calls_per_night=1,
+        max_writer_calls_per_night=0,
         max_calls_per_item=max_calls_per_item,
         # 60s es cómodo para una respuesta con tres niveles de texto (más
         # larga que la de una Reading); el timeout real que se pasa a la

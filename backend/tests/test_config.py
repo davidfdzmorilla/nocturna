@@ -23,6 +23,8 @@ BASE_TOML = """
 [budget]
 nightly_tokens = 300000
 editor_reserve_tokens = 60000
+writer_reserve_tokens = 24000
+writer_estimated_tokens = 12000
 weekly_reset_weekday = "monday"
 weekly_reset_hour = 0
 reset_day_multiplier = 1.0
@@ -39,6 +41,7 @@ item_timeout_s = 180
 editor_timeout_s = 300
 run_timeout_s = 16200
 max_editor_calls_per_night = 2
+max_writer_calls_per_night = 2
 max_calls_per_item = 2
 popularizer_min_interest_score = 4
 max_consecutive_failures = 5
@@ -126,6 +129,9 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.limits.max_items_per_night == 30
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
+    assert config.budget.writer_reserve_tokens == 24000
+    assert config.budget.writer_estimated_tokens == 12000
+    assert config.limits.max_writer_calls_per_night == 2
     assert config.limits.max_calls_per_item == 2
     assert config.limits.max_consecutive_failures == 5
     assert config.window.start == time(0, 0)
@@ -153,7 +159,9 @@ def test_la_reserva_del_editor_cubre_el_peor_caso_en_el_toml_real():
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
     worst_case = config.budget.editor_base_tokens + (
-        config.limits.max_items_per_night + config.measurement_findings.max_candidates_per_night
+        config.limits.max_items_per_night
+        + config.measurement_findings.max_candidates_per_night
+        + config.limits.max_writer_calls_per_night
     ) * (config.budget.editor_tokens_per_candidate)
 
     assert worst_case <= config.budget.editor_reserve_tokens
@@ -969,9 +977,10 @@ def test_clave_desconocida_en_measurement_findings_falla(tmp_path):
 def test_la_reserva_del_editor_incluye_los_candidatos_de_t89(tmp_path):
     """editor_base (4000) + (max_items (40) + K) * por_candidato (700) <= reserva
     (60000). El mayor K que cabe se deduce de la fórmula, no de un literal: K
-    cabe y K + 1 hace fallar la carga."""
-    base, per, items, reserve = 4000, 700, 40, 60000
-    max_ok = (reserve - base) // per - items
+    cabe y K + 1 hace fallar la carga. Desde T75 también suma
+    max_writer_calls_per_night (2) como cota de candidatos catalog_tension."""
+    base, per, items, reserve, writer_calls = 4000, 700, 40, 60000, 2
+    max_ok = (reserve - base) // per - items - writer_calls
 
     ok = BASE_TOML.replace("max_candidates_per_night = 5", f"max_candidates_per_night = {max_ok}")
     assert load_pipeline_config(_write_toml(tmp_path, ok, "ok.toml"))
@@ -994,3 +1003,88 @@ def test_con_k_el_validador_rechaza_lo_que_antes_cabia(tmp_path):
 
     sin_k = content.replace("max_candidates_per_night = 5", "max_candidates_per_night = 0")
     assert load_pipeline_config(_write_toml(tmp_path, sin_k, "sin_k.toml"))
+
+
+# --- T75: reserva anidada del redactor --------------------------------------
+
+
+def test_reservas_igual_al_presupuesto_falla(tmp_path):
+    # E + W == B (frontera): 60000 + 240000 == 300000.
+    content = BASE_TOML.replace("writer_reserve_tokens = 24000", "writer_reserve_tokens = 240000")
+    content = content.replace("max_writer_calls_per_night = 2", "max_writer_calls_per_night = 0")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="writer_reserve_tokens"):
+        load_pipeline_config(path)
+
+
+def test_reservas_un_token_por_debajo_del_presupuesto_cargan(tmp_path):
+    # E + W == B - 1.
+    content = BASE_TOML.replace("writer_reserve_tokens = 24000", "writer_reserve_tokens = 239999")
+    content = content.replace("max_writer_calls_per_night = 2", "max_writer_calls_per_night = 0")
+    path = _write_toml(tmp_path, content)
+
+    assert load_pipeline_config(path).budget.writer_reserve_tokens == 239999
+
+
+def test_tope_por_estimacion_mayor_que_la_reserva_del_redactor_falla(tmp_path):
+    # 2 * 12000 = 24000; la reserva a 23999 deja el producto en W + 1.
+    content = BASE_TOML.replace("writer_reserve_tokens = 24000", "writer_reserve_tokens = 23999")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="writer_reserve_tokens"):
+        load_pipeline_config(path)
+
+
+def test_tope_por_estimacion_igual_a_la_reserva_del_redactor_carga(tmp_path):
+    path = _write_toml(tmp_path, BASE_TOML)
+
+    config = load_pipeline_config(path)
+
+    assert (
+        config.limits.max_writer_calls_per_night * config.budget.writer_estimated_tokens
+        == config.budget.writer_reserve_tokens
+    )
+
+
+def test_solo_el_termino_del_redactor_hace_que_el_editor_no_quepa(tmp_path):
+    # Con max_writer_calls_per_night = 2: 4000 + (40 + 5 + 2) * 700 = 36900.
+    # Reserva del Editor = 36899: sin el término del redactor (36200) cabría.
+    content = BASE_TOML.replace("editor_reserve_tokens = 60000", "editor_reserve_tokens = 36899")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="editor_reserve_tokens"):
+        load_pipeline_config(path)
+
+    ok = BASE_TOML.replace("editor_reserve_tokens = 60000", "editor_reserve_tokens = 36900")
+    assert load_pipeline_config(_write_toml(tmp_path, ok, "ok.toml")).budget.editor_reserve_tokens
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "writer_reserve_tokens = 24000\n",
+        "writer_estimated_tokens = 12000\n",
+        "max_writer_calls_per_night = 2\n",
+    ],
+)
+def test_falta_una_clave_del_redactor_falla(tmp_path, line):
+    path = _write_toml(tmp_path, BASE_TOML.replace(line, ""))
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("writer_reserve_tokens = 24000", "writer_reserve_tokens = -1"),
+        ("max_writer_calls_per_night = 2", "max_writer_calls_per_night = -1"),
+        ("writer_estimated_tokens = 12000", "writer_estimated_tokens = 0"),
+    ],
+)
+def test_valores_invalidos_del_redactor_fallan(tmp_path, old, new):
+    path = _write_toml(tmp_path, BASE_TOML.replace(old, new))
+
+    with pytest.raises(ValidationError):
+        load_pipeline_config(path)

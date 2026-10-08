@@ -47,9 +47,11 @@ def _policy(**overrides: object) -> BudgetPolicy:
     defaults: dict[str, object] = {
         "nightly_tokens": 300_000,
         "editor_reserve_tokens": 60_000,
+        "writer_reserve_tokens": 0,
         "max_items_per_night": 40,
         "max_turns_per_agent": 3,
         "max_editor_calls_per_night": 2,
+        "max_writer_calls_per_night": 0,
         "max_calls_per_item": 2,
         "item_timeout_s": 180,
         "editor_timeout_s": 300,
@@ -597,3 +599,40 @@ def test_tope_de_llamadas_del_editor_deniega_a_la_tercera_de_cualquier_estado(db
     third_decision = guard.check(AgentRole.EDITOR, 8_000)
     assert not third_decision
     assert third_decision.reason is DenyReason.EDITOR_ALREADY_CALLED
+
+
+def test_el_tope_del_redactor_sobrevive_a_un_reinicio(db_session_factory):
+    """T75: el tope `max_writer_calls_per_night` se lee de `agent_calls`; un
+    guard nuevo sobre una sesión nueva lo ve igual que el anterior."""
+    with db_session_factory() as setup_session:
+        runs = SqlAlchemyRunRepository(setup_session)
+        agent_calls = SqlAlchemyAgentCallRepository(setup_session)
+        run = make_run(budget_tokens=300_000)
+        runs.add(run)
+        setup_session.flush()
+        for _ in range(2):
+            agent_calls.add(
+                make_agent_call(
+                    run_id=run.id,
+                    agent=AgentRole.WRITER,
+                    tokens_in=10,
+                    tokens_out=10,
+                    status=AgentCallStatus.INVALID_OUTPUT,
+                )
+            )
+        setup_session.commit()
+        run_id = run.id
+
+    with db_session_factory() as restarted_session:
+        restarted_guard = BudgetGuard(
+            run_id=run_id,
+            policy=_policy(writer_reserve_tokens=24_000, max_writer_calls_per_night=2),
+            runs=SqlAlchemyRunRepository(restarted_session),
+            agent_calls=SqlAlchemyAgentCallRepository(restarted_session),
+            clock=FakeClock(_WITHIN_WINDOW),
+        )
+
+        decision = restarted_guard.check(AgentRole.WRITER, 100)
+
+    assert not decision
+    assert decision.reason is DenyReason.CALL_LIMIT_REACHED
