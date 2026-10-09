@@ -49,6 +49,7 @@ from nocturna.domain.entities import (
     Reading,
     Run,
 )
+from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.tension import (
     EvaluationStatus,
     LimitComparison,
@@ -536,7 +537,24 @@ def archive_default_change_to_row(
     )
 
 
+def archive_lost_default_to_row(
+    pl_name: str, old_key: str, *, snapshot_id: UUID, detected_at: datetime
+) -> ArchiveDefaultChangeRow:
+    """Fila de pérdida de default (T84): `new_solution_key` nulo."""
+    return ArchiveDefaultChangeRow(
+        id=uuid4(),
+        pl_name=pl_name,
+        old_solution_key=old_key,
+        new_solution_key=None,
+        snapshot_id=snapshot_id,
+        detected_at=detected_at,
+    )
+
+
 def archive_default_change_from_row(row: ArchiveDefaultChangeRow) -> DefaultChange:
+    """Solo para filas con `new_solution_key`; una pérdida no es un `DefaultChange`."""
+    if row.new_solution_key is None:
+        raise InvariantViolation("archive_default_change sin new_solution_key (pérdida de default)")
     return DefaultChange(
         pl_name=row.pl_name,
         old_key=row.old_solution_key,

@@ -364,11 +364,28 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-10-06; mergeada el mismo día, sin migración; informe en la base real: (a) 130 altas desde 2026-08-01, 27 con `arxiv_id`, 0 cruces con ítems; (b) retraso preprint → archivo de 0 a 71 meses, mediana 2,5; (c) 103 filas de revista, 0 propias por valor, 0 ambiguas; (d) 21 evaluaciones, 0 cambios; 2 confirmaciones bloqueadas, HIP 67522 b y TOI-2158 b, ambas con referencia independiente)**: plan aprobado por el autor (D1–D8 con las recomendaciones; título nuevo). Al ver los tests, el autor decidió además que la coincidencia por valor solo vale para masa y radio y que la tolerancia se mide sobre el valor del archivo. `domain/own_solution.py` (`classify_solution`), exclusión en `ComputeTensions`, confirmación solo con referencia independiente, `[tension.own_solution]` (0,01 y 6 meses), `scripts/t83_link_report.py` de solo lectura; ADR 0023. `confirmation_enabled` sigue en `false`. Suite: 2573 passed (349 de `-m db`).
 
 ### T84 · Resumen semanal de cambios de solución por defecto
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T81; el texto del redactor, de T75/T76
 - **Toca agentes y gasto**: solo a través del redactor.
 - **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b): producto semanal nuevo; es la sección fija del producto y las tensiones son la sección rara.
 - **Alcance**: resumen determinista de los cambios de solución por defecto del archivo (planeta, paper, parámetros que cambian), sin LLM salvo el redactor.
+- **Hecho cuando**: lo fija el plan.
+- **Cierre (2026-10-09; pendiente de merge con migración `d8b1e4f7a203`, que se aplica a la base real el mismo día del merge, fuera de 00:00–04:45 y antes del viernes a las 10:00)**: plan aprobado por el autor con las recomendaciones D1–D9 (ADR 0028). Sin LLM: resumen determinista calculado al leer, no `Finding`. Fila de pérdida de solución por defecto en `save_snapshot`; `domain/archive_digest.py` (cuatro secciones, cambios por parámetro, semana ISO); `ArchiveDigestReader`; `ListDigestWeeks`/`GetWeeklyDigest`; `nocturna archive-digest`; `GET /archive/weeks` y `GET /archive/weeks/{week}` por lista blanca. Base real (solo lectura, 2026-10-09): 1 cambio de verdad en dos snapshots (TOI-2427 b), 73 planetas nuevos (70 el 2026-10-09), ninguna pérdida en los logs. Cinco mutantes muertos; revisión normal aprobada con sus correcciones aplicadas. Suite: 2873 passed (446 de `-m db`).
+
+### T84.w · Página web del resumen semanal
+- **Estado**: pending
+- **Depende de**: T84
+- **Toca agentes y gasto**: no.
+- **Origen**: partición de T84 (D9, ADR 0028).
+- **Alcance**: `/archivo` (lista de semanas) y `/archivo/[semana]` (secciones por tipo) en Next.js sobre `GET /archive/weeks` y `GET /archive/weeks/{week}`, con `lib/api/client.ts` como única vía de IO; cero llamadas a Claude. Textos y forma en la OD de T84.w.
+- **Hecho cuando**: tests de las dos rutas con la API simulada, guardas `no-claude-in-web` y `no-raw-html`, `pnpm lint` y `pnpm build` con la API parada, y Lighthouse de accesibilidad ≥ 90 en `/archivo` y en una semana.
+
+### T84.r · Redactor del resumen semanal
+- **Estado**: pending
+- **Depende de**: T84, T84.w y al menos 4 semanas de resúmenes
+- **Toca agentes y gasto**: sí. **Dos pasadas de revisión con `budget-guard-review`.**
+- **Origen**: partición de T84 (D1 c, D9, ADR 0028).
+- **Alcance**: texto del redactor sobre el resumen semanal. Decide dónde corre (OD de T84.r: dentro de `run-night` compartiendo la reserva y el tope del redactor, o en un `Run` propio) y si pasa por el Editor.
 - **Hecho cuando**: lo fija el plan.
 
 ### T85 · Tensiones solución contra solución

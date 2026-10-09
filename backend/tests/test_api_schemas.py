@@ -291,3 +291,115 @@ def test_los_esquemas_de_payload_son_inmutables_y_tienen_from_domain() -> None:
 
 def test_all_keys_recorre_listas_y_dicts_anidados() -> None:
     assert all_keys({"a": [{"b": {"c": 1}}, [{"d": 2}]]}) == {"a", "b", "c", "d"}
+
+
+# --- Resumen semanal del archivo (T84): lista blanca de claves ------------
+
+_DIGEST_FORBIDDEN_KEYS = {
+    "solution_key",
+    "old_solution_key",
+    "new_solution_key",
+    "old_key",
+    "new_key",
+    "snapshot_id",
+    "payload_sha256",
+    "pl_refname",
+    "ref_key",
+    "arxiv_id",
+    "soltype",
+    "id",
+    "confidence",
+    "run_id",
+    "item_id",
+}
+
+
+def _digest_domain():
+    from fakes.archive_source import make_solution
+
+    from nocturna.domain.archive_digest import build_weekly_digest
+
+    a = make_solution("Kepler-1 b", "Ref A", default=True, mass=1.0)
+    b = make_solution("Kepler-1 b", "Ref B", default=True, mass=2.0)
+    n = make_solution("Kepler-2 b", "Ref C", default=True)
+    at = datetime(2026, 10, 9, 3, tzinfo=UTC)
+    from nocturna.domain.archive_digest import DefaultTransition
+
+    return build_weekly_digest(
+        "2026-W41",
+        2,
+        [
+            DefaultTransition("Kepler-1 b", a.solution_key, b.solution_key, at, True),
+            DefaultTransition("Kepler-2 b", None, n.solution_key, at, False),
+            DefaultTransition("Kepler-3 b", a.solution_key, None, at, True),
+        ],
+        {s.solution_key: s for s in (a, b, n)},
+    )
+
+
+def test_digest_week_out_y_respuesta_de_semanas_tienen_claves_exactas() -> None:
+    from nocturna.api.schemas import DigestWeekOut, DigestWeeksResponse
+
+    week = DigestWeekOut(week="2026-W41", snapshots=2, changed=1, new_planet=2, regained=0, lost=3)
+    assert set(week.model_dump(mode="json")) == {
+        "week",
+        "snapshots",
+        "changed",
+        "new_planet",
+        "regained",
+        "lost",
+    }
+    page = DigestWeeksResponse(weeks=[week]).model_dump(mode="json")
+    assert set(page) == {"weeks"}
+
+
+def test_weekly_digest_out_claves_exactas_en_cada_nivel() -> None:
+    from nocturna.api.schemas import WeeklyDigestOut
+
+    out = WeeklyDigestOut.from_domain(
+        _digest_domain(), planet_url=lambda name: f"https://x.test/{name}"
+    ).model_dump(mode="json")
+
+    assert set(out) == {"week", "snapshots", "entries"}
+    changed, new, lost = out["entries"]
+    entry_keys = {"kind", "pl_name", "planet_url", "detected_at", "old", "new", "parameter_changes"}
+    for entry in (changed, new, lost):
+        assert set(entry) == entry_keys
+    assert (changed["kind"], new["kind"], lost["kind"]) == ("changed", "new_planet", "lost")
+    assert changed["planet_url"] == "https://x.test/Kepler-1 b"
+    assert set(changed["old"]) == {"reference", "pl_pubdate", "releasedate"}
+    assert new["old"] is None and lost["new"] is None
+    (change,) = changed["parameter_changes"]
+    assert set(change) == {
+        "parameter",
+        "old",
+        "new",
+        "old_mass_provenance",
+        "new_mass_provenance",
+    }
+    assert set(change["old"]) == {"value", "err_plus", "err_minus", "bound", "unit"}
+    assert change["parameter"] == "mass" and change["old"]["unit"] == "M_earth"
+
+
+def test_weekly_digest_out_no_filtra_ninguna_clave_interna_a_ningun_nivel() -> None:
+    from nocturna.api.schemas import WeeklyDigestOut
+
+    out = WeeklyDigestOut.from_domain(_digest_domain(), planet_url=lambda n: "https://x.test/")
+    dumped = out.model_dump(mode="json")
+    assert all_keys(dumped).isdisjoint(_DIGEST_FORBIDDEN_KEYS), all_keys(dumped)
+    solution = _digest_domain().entries[0].old
+    assert solution is not None and solution.solution_key not in str(dumped)
+
+
+def test_archive_value_out_errores_en_valor_absoluto_y_unidad() -> None:
+    from nocturna.api.schemas import ArchiveValueOut
+    from nocturna.domain.archive import ArchiveParameterValue
+    from nocturna.domain.entities import MeasuredParameter
+
+    out = ArchiveValueOut.from_domain(
+        ArchiveParameterValue(value=5.2, err1=0.3, err2=-0.4, lim=1), MeasuredParameter.RADIUS
+    )
+    assert out is not None
+    assert (out.err_plus, out.err_minus) == (0.3, 0.4)
+    assert out.unit.value == "R_earth" and out.bound is not None
+    assert ArchiveValueOut.from_domain(None, MeasuredParameter.MASS) is None

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from nocturna.infrastructure.db.models import Base
 
 _REVISION = "a3f6d9c1b852"
+_HEAD = "d8b1e4f7a203"  # el downgrade fallido es una sola transaccion: el head sigue puesto
 _REVISION_BEFORE = "c9e4b2a7d135"
 _CHECK = "ck_findings_tension_evaluation_id_iff_type"
 _UNIQUE = "uq_findings_tension_evaluation_id_type"
@@ -150,7 +151,7 @@ def test_downgrade_con_fila_catalog_tension_falla_y_no_toca_nada(scratch_databas
             )
             assert (
                 connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
-                == _REVISION
+                == _HEAD
             )
     finally:
         engine.dispose()

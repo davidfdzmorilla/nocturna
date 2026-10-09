@@ -140,6 +140,6 @@ def test_downgrade_con_fila_catalog_tension_falla_y_deja_fila_y_columna_intactas
         assert [tuple(r) for r in rows] == [("catalog_tension", "1")]
         # El head actual: el downgrade entero se revierte
         # (a3f6d9c1b852, c9e4b2a7d135, f7c2d8e4a951 y e5b3a9d1c746 incluidos).
-        assert version == "a3f6d9c1b852"
+        assert version == "d8b1e4f7a203"
     finally:
         engine.dispose()
