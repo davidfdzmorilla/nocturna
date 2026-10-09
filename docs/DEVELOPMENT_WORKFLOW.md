@@ -64,6 +64,8 @@ En T76 (redactor de tensiones, migración `a3f6d9c1b852`): migrar el mismo día 
 
 En T92 (solución propia en todos los parámetros, sin migración): tras el merge, `uv run python scripts/t83_link_report.py` debe dar `d.changed=1` (HD 715 b periodo, que se deja como está; ADR 0027) y `uv run nocturna run-night --dry-run` las mismas tensiones elegibles que antes.
 
+En T84 (resumen semanal, migración `d8b1e4f7a203`): migrar el mismo día del merge, fuera de 00:00–04:45 y antes del viernes a las 10:00; con el código nuevo y la base sin migrar, un snapshot con alguna pérdida de solución por defecto falla entero. Tras migrar, `uv run nocturna archive-digest --week 2026-W40` y `--week 2026-W41` (solo lectura) para que el autor revise el texto, y con la API arrancada `curl localhost:8000/archive/weeks`.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

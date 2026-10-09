@@ -203,3 +203,8 @@ def render_confirmacion_independiente(
         level_amateur=level_amateur,
         level_technical=level_technical,
     )
+
+
+def unit_label(unit: MeasurementUnit) -> str:
+    """Etiqueta visible de una unidad (M⊕, R⊕, M♃, R♃, d); la misma que los textos de T89/T91."""
+    return _UNIT_LABEL[unit]

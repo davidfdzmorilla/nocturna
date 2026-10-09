@@ -416,13 +416,18 @@ class ArchiveDefaultChangeRow(Base):
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
     pl_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     old_solution_key: Mapped[str | None] = mapped_column(sa.CHAR(64), nullable=True)
-    new_solution_key: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
+    new_solution_key: Mapped[str | None] = mapped_column(sa.CHAR(64), nullable=True)
     snapshot_id: Mapped[uuid.UUID] = mapped_column(
         PgUUID(as_uuid=True), sa.ForeignKey("archive_snapshot.id"), nullable=False
     )
     detected_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (sa.Index("ix_archive_default_change_snapshot_id", "snapshot_id"),)
+    __table_args__ = (
+        sa.Index("ix_archive_default_change_snapshot_id", "snapshot_id"),
+        sa.CheckConstraint(
+            "num_nonnulls(old_solution_key, new_solution_key) >= 1", name="old_or_new"
+        ),
+    )
 
 
 class TensionEvaluationRow(Base):

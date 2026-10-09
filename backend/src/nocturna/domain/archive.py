@@ -72,16 +72,21 @@ class ArchiveSolution:
         """
         parts = [self.pl_name, self.ref_key, self.soltype or ""]
         for p in (self.mass, self.radius, self.period):
-            parts += [
-                _canon_float(p.value),
-                _canon_float(p.err1),
-                _canon_float(p.err2),
-                "" if p.lim is None else str(int(p.lim)),
-            ]
+            parts += canon_parameter(p)
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
-def _canon_float(x: float | None) -> str:
+def canon_parameter(p: ArchiveParameterValue) -> list[str]:
+    """Valores canónicos de un parámetro: `value`, `err1`, `err2`, `lim`."""
+    return [
+        canon_float(p.value),
+        canon_float(p.err1),
+        canon_float(p.err2),
+        "" if p.lim is None else str(int(p.lim)),
+    ]
+
+
+def canon_float(x: float | None) -> str:
     if x is None:
         return ""
     value = float(x)
@@ -103,6 +108,16 @@ _LIMIT_BY_FLAG: dict[int, MeasurementLimit] = {
 }
 
 
+def parameter_unit(parameter: MeasuredParameter) -> MeasurementUnit:
+    """Unidad en que el archivo da el parámetro (M⊕, R⊕, días)."""
+    return _UNIT_BY_PARAMETER[parameter]
+
+
+def limit_of(p: ArchiveParameterValue) -> MeasurementLimit | None:
+    """Límite del valor (`lim`: 0 valor, 1 cota superior, -1 inferior); `None` si es desconocido."""
+    return MeasurementLimit.NONE if p.lim is None else _LIMIT_BY_FLAG.get(p.lim)
+
+
 def catalog_solution_from_archive(
     sol: ArchiveSolution, parameter: MeasuredParameter, *, is_default: bool
 ) -> CatalogSolution | None:
@@ -122,7 +137,7 @@ def catalog_solution_from_archive(
     }[parameter]
     if p.value is None or not math.isfinite(p.value) or p.value <= 0:
         return None
-    limit = MeasurementLimit.NONE if p.lim is None else _LIMIT_BY_FLAG.get(p.lim)
+    limit = limit_of(p)
     if limit is None:
         return None
 
@@ -135,7 +150,7 @@ def catalog_solution_from_archive(
         value=p.value,
         err_plus=_err(p.err1),
         err_minus=_err(p.err2),
-        unit=_UNIT_BY_PARAMETER[parameter],
+        unit=parameter_unit(parameter),
         limit=limit,
         reference=sol.ref_text.strip() or "(sin referencia)",
         is_default=is_default,
@@ -253,6 +268,8 @@ def diff_snapshot(
 
     changes: list[DefaultChange] = []
     lost: list[str] = []
+    # Tras una caída total de defaults no se registran transiciones; no puede ocurrir sin
+    # edición manual porque la guarda del 10 % aborta antes.
     if previous_defaults:
         for name in sorted(seen_defaults):
             old = previous_defaults.get(name)

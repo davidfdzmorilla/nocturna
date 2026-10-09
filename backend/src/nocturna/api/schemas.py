@@ -26,11 +26,19 @@ Ningún esquema envuelve un `Reading` ni un `Run`: ninguno de los dos se
 publica nunca.
 """
 
+from collections.abc import Callable
 from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from nocturna.domain.archive import ArchiveParameterValue, ArchiveSolution, limit_of, parameter_unit
+from nocturna.domain.archive_digest import (
+    DigestEntry,
+    ParameterChange,
+    TransitionKind,
+    WeeklyDigest,
+)
 from nocturna.domain.entities import (
     ArchiveStatus,
     CatalogSolution,
@@ -42,6 +50,7 @@ from nocturna.domain.entities import (
     IndependentConfirmation,
     MeasuredParameter,
     Measurement,
+    MeasurementLimit,
     MeasurementUnit,
     PaperMeasurement,
 )
@@ -300,6 +309,146 @@ class FindingsPageResponse(BaseModel):
     page: int
     size: int
     total: int
+
+
+class DigestReferenceOut(BaseModel):
+    """Referencia (solución por defecto) de un lado de un cambio del archivo (T84).
+
+    Lista blanca: texto visible de la referencia y sus fechas; nunca la clave
+    de la solución ni metadatos internos del snapshot.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    reference: str
+    pl_pubdate: str | None
+    releasedate: date
+
+    @classmethod
+    def from_domain(cls, solution: ArchiveSolution) -> "DigestReferenceOut":
+        return cls(
+            reference=solution.ref_text.strip() or "(sin referencia)",
+            pl_pubdate=solution.pl_pubdate,
+            releasedate=solution.releasedate,
+        )
+
+
+class ArchiveValueOut(BaseModel):
+    """Valor de masa, radio o periodo del archivo, con errores en valor absoluto,
+    cota (`bound`) y unidad. `value` nulo si el archivo no lo da."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: float | None
+    err_plus: float | None
+    err_minus: float | None
+    bound: MeasurementLimit | None
+    unit: MeasurementUnit
+
+    @classmethod
+    def from_domain(
+        cls, value: ArchiveParameterValue | None, parameter: MeasuredParameter
+    ) -> "ArchiveValueOut | None":
+        if value is None:
+            return None
+        return cls(
+            value=value.value,
+            err_plus=None if value.err1 is None else abs(value.err1),
+            err_minus=None if value.err2 is None else abs(value.err2),
+            bound=limit_of(value),
+            unit=parameter_unit(parameter),
+        )
+
+
+class ParameterChangeOut(BaseModel):
+    """Cambio de un parámetro entre la referencia anterior y la nueva. La
+    procedencia de la masa (Mass, Msini...) solo se informa en `mass`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    parameter: MeasuredParameter
+    old: ArchiveValueOut | None
+    new: ArchiveValueOut | None
+    old_mass_provenance: str | None
+    new_mass_provenance: str | None
+
+    @classmethod
+    def from_domain(cls, change: ParameterChange) -> "ParameterChangeOut":
+        return cls(
+            parameter=change.parameter,
+            old=ArchiveValueOut.from_domain(change.old, change.parameter),
+            new=ArchiveValueOut.from_domain(change.new, change.parameter),
+            old_mass_provenance=change.old_mass_provenance,
+            new_mass_provenance=change.new_mass_provenance,
+        )
+
+
+class DigestEntryOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    kind: TransitionKind
+    pl_name: str
+    planet_url: str
+    detected_at: datetime
+    old: DigestReferenceOut | None
+    new: DigestReferenceOut | None
+    parameter_changes: list[ParameterChangeOut]
+
+    @classmethod
+    def from_domain(cls, entry: DigestEntry, *, planet_url: str) -> "DigestEntryOut":
+        return cls(
+            kind=entry.kind,
+            pl_name=entry.pl_name,
+            planet_url=planet_url,
+            detected_at=entry.snapshot_taken_at,
+            old=None if entry.old is None else DigestReferenceOut.from_domain(entry.old),
+            new=None if entry.new is None else DigestReferenceOut.from_domain(entry.new),
+            parameter_changes=[ParameterChangeOut.from_domain(c) for c in entry.parameter_changes],
+        )
+
+
+class WeeklyDigestOut(BaseModel):
+    """`GET /archive/weeks/{week}`: cambios de referencia de una semana ISO."""
+
+    model_config = ConfigDict(frozen=True)
+
+    week: str
+    snapshots: int
+    entries: list[DigestEntryOut]
+
+    @classmethod
+    def from_domain(
+        cls, digest: WeeklyDigest, *, planet_url: Callable[[str], str]
+    ) -> "WeeklyDigestOut":
+        return cls(
+            week=digest.week,
+            snapshots=digest.snapshots,
+            entries=[
+                DigestEntryOut.from_domain(e, planet_url=planet_url(e.pl_name))
+                for e in digest.entries
+            ],
+        )
+
+
+class DigestWeekOut(BaseModel):
+    """Una semana con snapshot y el recuento de transiciones por tipo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    week: str
+    snapshots: int
+    changed: int
+    new_planet: int
+    regained: int
+    lost: int
+
+
+class DigestWeeksResponse(BaseModel):
+    """`GET /archive/weeks`: semanas con snapshot, más recientes primero."""
+
+    model_config = ConfigDict(frozen=True)
+
+    weeks: list[DigestWeekOut]
 
 
 class HealthResponse(BaseModel):

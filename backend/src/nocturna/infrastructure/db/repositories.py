@@ -21,10 +21,12 @@ transacción, sin cerrarla), nunca confirman la transacción.
 """
 
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from itertools import batched
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -34,6 +36,7 @@ from nocturna.domain.archive import (
     SnapshotDiff,
     SnapshotKind,
 )
+from nocturna.domain.archive_digest import DefaultTransition, iso_week_of
 from nocturna.domain.entities import (
     AgentCall,
     AgentCallStatus,
@@ -52,6 +55,7 @@ from nocturna.infrastructure.db.mappers import (
     agent_call_to_row,
     apply_tension_evaluation,
     archive_default_change_to_row,
+    archive_lost_default_to_row,
     archive_snapshot_from_row,
     archive_snapshot_to_row,
     archive_solution_from_row,
@@ -68,6 +72,7 @@ from nocturna.infrastructure.db.mappers import (
 )
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
+    ArchiveDefaultChangeRow,
     ArchiveSnapshotRow,
     ArchiveSolutionRow,
     FindingRow,
@@ -577,6 +582,17 @@ class SqlAlchemyArchiveRepository:
         # FK de las soluciones: el snapshot debe existir antes que ellas.
         self._session.flush()
 
+        # T84: el default vigente de cada planeta perdido se lee ANTES de
+        # limpiar `is_default_current` (las bajas y los cambios de default lo
+        # apagan mas abajo).
+        lost_old_keys: dict[str, str] = {}
+        for chunk in batched(sorted(diff.lost_defaults), _UPSERT_CHUNK):
+            lost_stmt = select(ArchiveSolutionRow.pl_name, ArchiveSolutionRow.solution_key).where(
+                ArchiveSolutionRow.pl_name.in_(chunk),
+                ArchiveSolutionRow.is_default_current.is_(True),
+            )
+            lost_old_keys.update({name: key for name, key in self._session.execute(lost_stmt)})
+
         # Una sola sentencia compilada y ejecutada por bloques de parametros
         # (insertmanyvalues): compilar un `VALUES` de 1.000 filas por bloque
         # costaba ~0,3 s cada vez.
@@ -620,7 +636,76 @@ class SqlAlchemyArchiveRepository:
             archive_default_change_to_row(c, snapshot_id=snapshot.id, detected_at=snapshot.taken_at)
             for c in diff.default_changes
         )
+        # `lost_defaults` sale de `current_defaults`: un planeta sin clave vigente
+        # en la base es una incoherencia, no algo que omitir en silencio.
+        missing = [n for n in sorted(diff.lost_defaults) if n not in lost_old_keys]
+        if missing:
+            raise InvariantViolation(
+                f"default perdido sin clave vigente en la base para {missing[:5]!r}"
+            )
+        self._session.add_all(
+            archive_lost_default_to_row(
+                name, lost_old_keys[name], snapshot_id=snapshot.id, detected_at=snapshot.taken_at
+            )
+            for name in sorted(diff.lost_defaults)
+        )
         self._session.flush()
+
+
+class SqlAlchemyArchiveDigestReader:
+    """Lectura del resumen semanal (T84). Cumple `domain.repositories.ArchiveDigestReader`;
+    solo emite SELECT."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def snapshot_weeks(self, tz: ZoneInfo) -> list[tuple[str, int]]:
+        taken = self._session.execute(select(ArchiveSnapshotRow.taken_at)).scalars()
+        counts: dict[str, int] = {}
+        for at in taken:
+            week = iso_week_of(at, tz)
+            counts[week] = counts.get(week, 0) + 1
+        return sorted(counts.items())
+
+    def transitions_between(self, start: datetime, end: datetime) -> list[DefaultTransition]:
+        change = ArchiveDefaultChangeRow
+        snap = ArchiveSnapshotRow
+        earlier = ArchiveSnapshotRow.__table__.alias("earlier")
+        seen_before = exists().where(
+            ArchiveSolutionRow.pl_name == change.pl_name,
+            ArchiveSolutionRow.first_seen_snapshot_id == earlier.c.id,
+            earlier.c.taken_at < snap.taken_at,
+        )
+        stmt = (
+            select(
+                change.pl_name,
+                change.old_solution_key,
+                change.new_solution_key,
+                snap.taken_at,
+                seen_before,
+            )
+            .join(snap, snap.id == change.snapshot_id)
+            .where(snap.taken_at >= start, snap.taken_at < end)
+            .order_by(snap.taken_at, change.pl_name, change.id)
+        )
+        return [
+            DefaultTransition(
+                pl_name=name,
+                old_key=old,
+                new_key=new,
+                snapshot_taken_at=at,
+                planet_seen_before=bool(seen),
+            )
+            for name, old, new, at, seen in self._session.execute(stmt)
+        ]
+
+    def solutions_by_key(self, keys: Collection[str]) -> dict[str, ArchiveSolution]:
+        result: dict[str, ArchiveSolution] = {}
+        for chunk in batched(sorted(set(keys)), _UPSERT_CHUNK):
+            stmt = select(ArchiveSolutionRow).where(ArchiveSolutionRow.solution_key.in_(chunk))
+            for row in self._session.execute(stmt).scalars():
+                result[row.solution_key] = archive_solution_from_row(row)
+        return result
 
 
 class SqlAlchemyTensionEvaluationRepository:

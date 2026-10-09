@@ -9,10 +9,13 @@ interfaz.
 """
 
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
+from nocturna.domain.archive_digest import DefaultTransition
 from nocturna.domain.entities import (
     AgentCall,
     AgentCallStatus,
@@ -211,6 +214,22 @@ class ArchiveRepository(Protocol):
 
     def active_solutions(self, pl_name: str) -> list[tuple[ArchiveSolution, bool]]:
         """Soluciones activas del planeta, cada una con `is_default_current`."""
+        ...
+
+
+class ArchiveDigestReader(Protocol):
+    """Lectura del resumen semanal de cambios de referencia (T84). Solo lectura."""
+
+    def snapshot_weeks(self, tz: ZoneInfo) -> list[tuple[str, int]]:
+        """(semana ISO, nº de snapshots) de cada semana con snapshot, ascendente."""
+        ...
+
+    def transitions_between(self, start: datetime, end: datetime) -> list[DefaultTransition]:
+        """Transiciones de default de los snapshots con `start <= taken_at < end`."""
+        ...
+
+    def solutions_by_key(self, keys: Collection[str]) -> dict[str, ArchiveSolution]:
+        """Soluciones (activas o dadas de baja) por `solution_key`."""
         ...
 
 

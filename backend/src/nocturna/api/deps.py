@@ -19,26 +19,32 @@ add(...)` a un endpoint sin darse cuenta de que eso persistiría. Por eso
 nunca con `commit()`: aunque un repositorio de lectura no debería modificar
 nada, esta función no depende de esa promesa para ser segura.
 
-## Por qué no lee `pipeline.toml`
+## Qué toma de `pipeline.toml`
 
-`PipelineConfig` (presupuesto, ventana de ejecución, modelos por rol) es
-configuración del pipeline nocturno; la API de lectura no llama a ningún
-agente y no le incumbe. `load_pipeline_config` no se importa aquí.
+Solo `window.timezone` (T84), vía `get_digest_timezone`, cacheada: define la
+semana ISO del resumen semanal. Se lee la primera vez que se llama a una ruta
+`/archive/*`, no al arrancar. Si el fichero falta o no valida, esas rutas
+devuelven 500 por el manejador genérico; `/health` y `/findings` siguen
+funcionando. El resto de `PipelineConfig` (presupuesto, ventana, modelos por
+rol) es del pipeline nocturno y no incumbe a la API.
 """
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from functools import lru_cache
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends
 from sqlalchemy.orm import Session, sessionmaker
 
-from nocturna.infrastructure.config import Settings
+from nocturna.infrastructure.config import Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
+    SqlAlchemyArchiveDigestReader,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
 )
 from nocturna.infrastructure.db.session import create_db_engine, create_session_factory
+from nocturna.infrastructure.exoplanet_archive.mappers import planet_overview_url
 
 
 @lru_cache
@@ -88,3 +94,19 @@ def get_findings_repository(session: _SessionDep) -> SqlAlchemyFindingRepository
 
 def get_items_repository(session: _SessionDep) -> SqlAlchemyItemRepository:
     return SqlAlchemyItemRepository(session)
+
+
+def get_archive_digest_reader(session: _SessionDep) -> SqlAlchemyArchiveDigestReader:
+    return SqlAlchemyArchiveDigestReader(session)
+
+
+@lru_cache
+def get_digest_timezone() -> ZoneInfo:
+    """`window.timezone` de `pipeline.toml` (T84): define la semana ISO del resumen.
+    Es lo único que la API toma de esa configuración."""
+    return ZoneInfo(load_pipeline_config().window.timezone)
+
+
+def get_planet_overview_url() -> Callable[[str], str]:
+    """Enlace a la ficha del planeta, inyectado como en T89 (D14)."""
+    return planet_overview_url

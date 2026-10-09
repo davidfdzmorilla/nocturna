@@ -208,6 +208,7 @@ from nocturna.application.agents.prompt_loader import (
     WRITER_PROMPT_VERSION,
     load_prompt,
 )
+from nocturna.application.archive_digest_text import format_archive_value, parameter_label
 from nocturna.application.budget import (
     BudgetDenied,
     BudgetGuard,
@@ -220,6 +221,7 @@ from nocturna.application.budget import (
     terminal_status_for,
 )
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
+from nocturna.application.use_cases.archive_digest import GetWeeklyDigest, ListDigestWeeks
 from nocturna.application.use_cases.compute_tensions import (
     ComputeTensions,
     ResolutionFailure,
@@ -263,6 +265,8 @@ from nocturna.application.use_cases.write_tensions import (
     TensionWriterWorkFactory,
     WriteTensions,
 )
+from nocturna.domain.archive import ArchiveSolution
+from nocturna.domain.archive_digest import TransitionKind, WeeklyDigest, week_bounds
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition, InvariantViolation
@@ -285,6 +289,7 @@ from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
+    SqlAlchemyArchiveDigestReader,
     SqlAlchemyArchiveRepository,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
@@ -611,6 +616,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "Consulta el archivo y calcula el diff, pero no escribe nada en la base de datos. "
             "Sí hace las peticiones HTTP."
         ),
+    )
+
+    archive_digest = subparsers.add_parser(
+        "archive-digest",
+        help="Muestra el resumen semanal de cambios de referencia del archivo (sin LLM, sin red).",
+        description=(
+            "Lee de la base los cambios de la solución por defecto del NASA Exoplanet Archive "
+            "detectados por los snapshots de una semana ISO (lunes-domingo, zona de "
+            "window.timezone). Solo lectura: no escribe, no usa red ni Claude."
+        ),
+    )
+    archive_digest.add_argument(
+        "--week",
+        default=None,
+        metavar="YYYY-Www",
+        help="Semana ISO (p. ej. 2026-W41). Por defecto, la última con snapshot.",
     )
 
     evaluate_tensions = subparsers.add_parser(
@@ -953,6 +974,85 @@ def _format_archive_snapshot_report(report: ArchiveSnapshotReport, *, dry_run: b
     lines.append(f"  planetas que pierden default: {len(diff.lost_defaults)}")
     lines.extend(f"    {name}" for name in diff.lost_defaults)
     return "\n".join(lines)
+
+
+_DIGEST_SECTIONS: tuple[tuple[TransitionKind, str], ...] = (
+    (TransitionKind.CHANGED, "Referencia cambiada"),
+    (TransitionKind.NEW_PLANET, "Planetas nuevos"),
+    (TransitionKind.REGAINED, "Planetas recuperados"),
+    (TransitionKind.LOST, "Planetas que pierden la referencia"),
+)
+
+
+def _digest_reference(sol: ArchiveSolution | None) -> str:
+    if sol is None:
+        return "-"
+    text = sol.ref_text.strip() or "(sin referencia)"
+    return (
+        f"{text} · pl_pubdate {sol.pl_pubdate or '-'} · releasedate {sol.releasedate.isoformat()}"
+    )
+
+
+def _format_archive_digest(digest: WeeklyDigest, tz: ZoneInfo) -> str:
+    """Resumen semanal: puro y determinista. Secciones por tipo; una línea por
+    planeta nuevo."""
+    lines = [
+        f"Resumen semanal del NASA Exoplanet Archive {digest.week}: "
+        f"{digest.snapshots} snapshot(s), {len(digest.entries)} transición(es)"
+    ]
+    for kind, title in _DIGEST_SECTIONS:
+        entries = [e for e in digest.entries if e.kind == kind]
+        lines.append(f"{title}: {len(entries)}")
+        for entry in entries:
+            day = entry.snapshot_taken_at.astimezone(tz).date().isoformat()
+            if kind == TransitionKind.NEW_PLANET:
+                lines.append(f"  {entry.pl_name} ({day}): {_digest_reference(entry.new)}")
+                continue
+            lines.append(f"  {entry.pl_name} ({day})")
+            if entry.old is not None:
+                lines.append(f"    anterior: {_digest_reference(entry.old)}")
+            if entry.new is not None:
+                lines.append(f"    nueva:    {_digest_reference(entry.new)}")
+            if kind != TransitionKind.CHANGED:
+                continue
+            if not entry.parameter_changes:
+                lines.append("    sin cambios en masa, radio ni periodo")
+            for change in entry.parameter_changes:
+                label = parameter_label(change.parameter)
+                lines.append(
+                    f"    {label}: {format_archive_value(change.old, change.parameter)}"
+                    f" -> {format_archive_value(change.new, change.parameter)}"
+                )
+                if change.old_mass_provenance != change.new_mass_provenance:
+                    lines.append(
+                        f"      procedencia de la masa: {change.old_mass_provenance or '-'}"
+                        f" -> {change.new_mass_provenance or '-'}"
+                    )
+    return "\n".join(lines)
+
+
+def _archive_digest(args: argparse.Namespace) -> int:
+    """`archive-digest`: `0` ok; `1` no hay snapshots o la semana no tiene
+    ninguno. Formato de `--week` inválido: `2` (en `main`). Solo lectura."""
+    settings = Settings()
+    config = load_pipeline_config()
+    tz = ZoneInfo(config.window.timezone)
+    session_factory = create_session_factory(create_db_engine(settings))
+    with unit_of_work(session_factory, commit=False) as session:
+        reader = SqlAlchemyArchiveDigestReader(session)
+        week = args.week
+        if week is None:
+            weeks = ListDigestWeeks(reader, tz)()
+            if not weeks:
+                print("archive-digest: no hay ningún snapshot guardado", file=sys.stderr)
+                return 1
+            week = weeks[0].week
+        digest = GetWeeklyDigest(reader, tz)(week)
+    if digest is None:
+        print(f"archive-digest: la semana {week} no tiene ningún snapshot", file=sys.stderr)
+        return 1
+    print(_format_archive_digest(digest, tz))
+    return 0
 
 
 async def _take_archive_snapshot(
@@ -2594,6 +2694,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_item(args)
     if args.command == "archive-snapshot":
         return _archive_snapshot(args)
+    if args.command == "archive-digest":
+        if args.week is not None:
+            try:
+                week_bounds(args.week, ZoneInfo("UTC"))
+            except ValueError as exc:
+                parser.error(f"--week: {exc}")
+        return _archive_digest(args)
     if args.command == "evaluate-tensions":
         return _evaluate_tensions(args)
     return _run_night(args)

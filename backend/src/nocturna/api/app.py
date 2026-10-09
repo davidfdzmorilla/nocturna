@@ -1,6 +1,6 @@
 """Fábrica de la aplicación FastAPI de la API de lectura (T50 paso 3).
 
-`create_app` monta CORS, registra los dos routers (`health`, `findings`) y
+`create_app` monta CORS, registra los routers (`health`, `findings`, `archive`) y
 un manejador de excepción genérico. Es lo que arranca `uvicorn
 nocturna.api.app:create_app --factory` (ver `pyproject.toml`, grupo `dev`).
 
@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from nocturna.api.deps import get_settings
+from nocturna.api.routes.archive import router as archive_router
 from nocturna.api.routes.findings import router as findings_router
 from nocturna.api.routes.health import router as health_router
 from nocturna.infrastructure.config import Settings
@@ -48,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(findings_router)
+    app.include_router(archive_router)
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

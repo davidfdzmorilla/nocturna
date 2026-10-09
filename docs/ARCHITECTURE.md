@@ -222,7 +222,7 @@ Pydantic se usa solo en las fronteras: `infrastructure/config.py` para el TOML t
 
 ## API de lectura (fase 1)
 
-Implementada en T50. FastAPI con tres endpoints expuestos:
+Implementada en T50. FastAPI con tres endpoints expuestos (más dos del resumen semanal del archivo desde T84, ver § Histórico del NASA Exoplanet Archive):
 
 - `GET /health`: comprobación de vivacidad. Devuelve `200` si el servicio y PostgreSQL responden. `503` si la base de datos no está disponible. Contrato: `{"status": "ok"}`.
 - `GET /findings?page=<int>&size=<int>[&type=<tipo>]`: feed paginado de hallazgos publicados; desde T77, `type` filtra por un valor de `FindingType` (fuera del enum, `422`) y cada elemento lleva `type`. `page` base 1 (1–999999, por defecto 1; tope `MAX_PAGE` en `api/routes/findings.py`, igual al de la web, T70), `size` (1–50, por defecto 20). Respuesta: `{"items": [<finding>, ...], "page": <int>, "size": <int>, "total": <int>}`. Página sin resultados dentro de 1–999999 devuelve `200` con `items` vacía; `page` por encima del tope, `0` o `size` fuera de 1–50 devuelven `422`. `total` es `COUNT` exacto, económico a este volumen.
@@ -314,6 +314,7 @@ Implementado en T81 ([ADR 0019](adr/0019-historico-del-nasa-exoplanet-archive.md
 - **`application/use_cases/take_archive_snapshot.py`**: elige completo (primer snapshot del mes natural o `--full`) o incremental, salta a completo si los lotes no caben, aplica la guarda de cambios masivos y persiste o, en dry-run, solo informa.
 - **`infrastructure/exoplanet_archive/snapshot.py`**: `ArchiveSnapshotSource` sobre `ArchiveHttpClient` (cuatro consultas ADQL, lotes por planeta); el cliente admite un tope de respuesta configurable (64 MiB para el snapshot; el catálogo de T74 conserva 20 MB).
 - **Tablas** `archive_snapshot`, `archive_solution` y `archive_default_change` (migración `b4d7f1a26c93`), escritas en una sola transacción por `SqlAlchemyArchiveRepository` con upsert por bloques.
+- **Resumen semanal (T84, [ADR 0028](adr/0028-resumen-semanal-del-archivo.md))**, sin LLM ni Editor y calculado al leer: desde la migración `d8b1e4f7a203`, `save_snapshot` escribe también una fila por planeta que pierde su solución por defecto (`new_solution_key` nulo, CHECK de al menos una clave). `domain/archive_digest.py` clasifica cada transición (`changed`, `new_planet`, `regained`, `lost`), compara masa, radio y periodo con la canonización de `solution_key` (pública en `domain/archive.py`) y agrupa por semana ISO en `window.timezone`. Puerto de solo lectura `ArchiveDigestReader` (`SqlAlchemyArchiveDigestReader`), casos de uso `ListDigestWeeks` y `GetWeeklyDigest`, `nocturna archive-digest [--week YYYY-Www]` (solo lectura) y en la API `GET /archive/weeks` y `GET /archive/weeks/{week}` (`422` formato, `404` sin snapshot; lista blanca, sin `solution_key`). La API lee de `pipeline.toml` solo `window.timezone`, en esas rutas (`api/deps.py::get_digest_timezone`); si falta, dan `500` y el resto sigue. Web en T84.w; redactor en T84.r.
 
 ## Lo que no existe en fase 1 (a propósito)
 

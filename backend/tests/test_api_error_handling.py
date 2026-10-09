@@ -22,8 +22,9 @@ contrario de lo que un cliente real recibiría.
 import httpx
 import pytest
 
+from nocturna.api import deps
 from nocturna.api.app import create_app
-from nocturna.api.deps import get_findings_repository
+from nocturna.api.deps import get_archive_digest_reader, get_findings_repository
 
 # Mensaje deliberadamente parecido a lo que un driver real filtraría: SQL,
 # un nombre de tabla del proyecto y algo con forma de DSN.
@@ -83,3 +84,32 @@ def test_create_app_no_activa_debug() -> None:
     # evitar. Si alguien lo activara, este test es el único que lo nota sin
     # tener que forzar una excepción de verdad.
     assert create_app().debug is False
+
+
+class _OkSession:
+    def execute(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+@pytest.mark.anyio
+async def test_sin_pipeline_toml_archive_da_500_y_health_sigue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _missing(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("pipeline.toml")
+
+    monkeypatch.setattr(deps, "load_pipeline_config", _missing)
+    deps.get_digest_timezone.cache_clear()
+    try:
+        app = create_app()
+        app.dependency_overrides[get_archive_digest_reader] = lambda: object()
+        app.dependency_overrides[deps.get_session] = lambda: _OkSession()
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            archive = await client.get("/archive/weeks")
+            health = await client.get("/health")
+        assert archive.status_code == 500
+        assert archive.json() == {"detail": "internal error"}
+        assert health.status_code == 200
+    finally:
+        deps.get_digest_timezone.cache_clear()

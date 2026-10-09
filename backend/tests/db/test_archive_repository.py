@@ -19,6 +19,7 @@ from nocturna.domain.archive import (
     SnapshotKind,
     diff_snapshot,
 )
+from nocturna.domain.errors import InvariantViolation
 from nocturna.infrastructure.db import repositories as repositories_module
 from nocturna.infrastructure.db.mappers import archive_solution_from_row
 from nocturna.infrastructure.db.models import (
@@ -260,7 +261,10 @@ def test_planeta_nuevo_registra_cambio_con_old_nulo(db_session):
     fresh = solution("HD 9 b", "Z", is_default=True)
     save(repo, snapshot(kind=SnapshotKind.INCREMENTAL, offset_days=1), [fresh])
 
-    change = db_session.execute(sa.select(ArchiveDefaultChangeRow)).scalar_one()
+    # T84: el planeta que desaparece del snapshot (alcance completo) deja su fila de pérdida.
+    change = db_session.execute(
+        sa.select(ArchiveDefaultChangeRow).where(ArchiveDefaultChangeRow.pl_name == "HD 9 b")
+    ).scalar_one()
     assert (change.pl_name, change.old_solution_key) == ("HD 9 b", None)
 
 
@@ -370,3 +374,12 @@ def test_carga_sintetica_de_40000_soluciones(db_session_factory, capsys):
             f"\n[T81] 40.000 soluciones: primer snapshot {first_elapsed:.1f}s, "
             f"segundo (todo upsert) {second_elapsed:.1f}s"
         )
+
+
+def test_default_perdido_sin_clave_vigente_lanza_invariant_violation(db_session):
+    repo = SqlAlchemyArchiveRepository(db_session)
+    save(repo, snapshot(), [solution(is_default=False)])
+    bad = SnapshotDiff(lost_defaults=("WASP-12 b",))  # diff incoherente con la base
+
+    with pytest.raises(InvariantViolation, match="WASP-12 b"):
+        repo.save_snapshot(snapshot(offset_days=1), [], bad)

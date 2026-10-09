@@ -75,7 +75,7 @@ def test_downgrade_con_filas_falla_ruidosamente_y_no_toca_nada(scratch_database_
             version = connection.execute(
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-        assert version == "a3f6d9c1b852"
+        assert version == "d8b1e4f7a203"
 
         with engine.begin() as connection:
             connection.execute(sa.text("DELETE FROM tension_evaluation"))
