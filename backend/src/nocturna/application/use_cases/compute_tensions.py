@@ -14,9 +14,12 @@ Flujo por par (`Item`, `Reading`):
 4. Las restantes se agrupan por (`planet_name` del Reader, parámetro).
 5. `resolve_planet` devuelve `None`: `AWAITING_REFERENCE` sin planeta de
    archivo (no se llama a `solutions`).
-6. Se pide `solutions` una vez por grupo. Las del propio paper (`classify_solution`:
-   `arxiv_id` igual o, en masa y radio, valores casados; ADR 0023) se excluyen
-   siempre y se anota su `solution_key`. Las ambiguas siguen siendo previas.
+6. Se pide `solutions` una vez por grupo y se clasifican (`classify_solution`:
+   `arxiv_id` igual o, en masa y radio, valores casados; ADR 0023). Una fila
+   del archivo propia en algún parámetro de la lectura lo es en todos (T92):
+   se excluye siempre, también en los grupos de otro parámetro donde no casa
+   por valor, y se anota su `solution_key` (la menor presente en la lista del
+   grupo). Las ambiguas siguen siendo previas.
 7. Periodo con `ttv_flag` en alguna solución del planeta: `PERIOD_TTV`, sin
    evaluación.
 8. Con referencia (`select_reference` sobre las previas utilizables):
@@ -39,6 +42,7 @@ from uuid import UUID
 from nocturna.domain.catalog import ExoplanetCatalog
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import (
+    CatalogSolution,
     Item,
     MeasuredParameter,
     Measurement,
@@ -46,9 +50,11 @@ from nocturna.domain.entities import (
 )
 from nocturna.domain.errors import InvariantViolation, PlanetResolutionFailed
 from nocturna.domain.own_solution import (
+    OWN_PROVENANCES,
     OwnSolutionRule,
     SolutionProvenance,
     classify_solution,
+    own_solution_keys,
 )
 from nocturna.domain.tension import (
     EvaluationStatus,
@@ -147,26 +153,80 @@ class ComputeTensions:
                 measurement
             )
 
-        for (planet_name, parameter), measurements in groups.items():
+        resolved: dict[str, str | None] = {}
+        failed: set[str] = set()
+        for planet_name in dict.fromkeys(name for name, _ in groups):
             try:
-                evaluation = await self._evaluate_group(
-                    item, reading, planet_name, parameter, tuple(measurements), skipped
-                )
+                resolved[planet_name] = await self._catalog.resolve_planet(planet_name)
             except PlanetResolutionFailed as exc:
-                failures.append(ResolutionFailure(item.id, planet_name, parameter, str(exc)))
-                continue
-            if evaluation is not None:
-                evaluations.append(evaluation)
+                failed.add(planet_name)
+                failures.extend(
+                    ResolutionFailure(item.id, name, parameter, str(exc))
+                    for name, parameter in groups
+                    if name == planet_name
+                )
 
-    async def _evaluate_group(
+        # Fase 1: soluciones y procedencia de cada grupo.
+        prepared: dict[
+            tuple[str, MeasuredParameter],
+            list[tuple[CatalogSolution, SolutionProvenance]],
+        ] = {}
+        for (planet_name, parameter), measurements in groups.items():
+            canonical = resolved.get(planet_name)
+            if planet_name in failed or canonical is None:
+                continue
+            solutions = await self._catalog.solutions(canonical, parameter)
+            if parameter == MeasuredParameter.PERIOD and any(s.ttv_flag for s in solutions):
+                skipped.extend(
+                    SkippedMeasurement(item.id, m, SkipReason.PERIOD_TTV) for m in measurements
+                )
+                continue
+            prepared[(planet_name, parameter)] = [
+                (
+                    s,
+                    classify_solution(
+                        s,
+                        external_id=item.external_id,
+                        published_at=item.published_at,
+                        measurements=tuple(measurements),
+                        rule=self._own_rule,
+                    ),
+                )
+                for s in solutions
+            ]
+        own_keys = own_solution_keys(c for group in prepared.values() for c in group)
+
+        # Fase 2: evaluación con las filas propias excluidas en todos los parámetros.
+        for (planet_name, parameter), measurements in groups.items():
+            if planet_name in failed:
+                continue
+            canonical = resolved.get(planet_name)
+            classified = prepared.get((planet_name, parameter))
+            if canonical is not None and classified is None:
+                continue  # descartado por TTV
+            evaluation = self._evaluate_group(
+                item,
+                reading,
+                planet_name,
+                parameter,
+                tuple(measurements),
+                canonical,
+                classified or [],
+                own_keys,
+            )
+            evaluations.append(evaluation)
+
+    def _evaluate_group(
         self,
         item: Item,
         reading: Reading,
         planet_name: str,
         parameter: MeasuredParameter,
         measurements: tuple[Measurement, ...],
-        skipped: list[SkippedMeasurement],
-    ) -> TensionEvaluation | None:
+        canonical: str | None,
+        classified: list[tuple[CatalogSolution, SolutionProvenance]],
+        own_keys: frozenset[str],
+    ) -> TensionEvaluation:
         def build(
             status: EvaluationStatus,
             *,
@@ -191,34 +251,15 @@ class ComputeTensions:
                 own_solution_key=own_solution_key,
             )
 
-        canonical = await self._catalog.resolve_planet(planet_name)
         if canonical is None:
             return build(EvaluationStatus.AWAITING_REFERENCE)
 
-        solutions = await self._catalog.solutions(canonical, parameter)
-        if parameter == MeasuredParameter.PERIOD and any(s.ttv_flag for s in solutions):
-            skipped.extend(
-                SkippedMeasurement(item.id, m, SkipReason.PERIOD_TTV) for m in measurements
-            )
-            return None
+        def is_own(solution: CatalogSolution, kind: SolutionProvenance) -> bool:
+            return kind in OWN_PROVENANCES or solution.solution_key in own_keys
 
-        own_provenance = (SolutionProvenance.OWN_ARXIV_ID, SolutionProvenance.OWN_VALUE_MATCH)
-        classified = [
-            (
-                s,
-                classify_solution(
-                    s,
-                    external_id=item.external_id,
-                    published_at=item.published_at,
-                    measurements=measurements,
-                    rule=self._own_rule,
-                ),
-            )
-            for s in solutions
-        ]
-        own = sorted(s.solution_key or "" for s, kind in classified if kind in own_provenance)
-        own_key = own[0] if own else None
-        others = [s for s, kind in classified if kind not in own_provenance]
+        present = sorted(s.solution_key or "" for s, kind in classified if is_own(s, kind))
+        own_key = present[0] if present else None
+        others = [s for s, kind in classified if not is_own(s, kind)]
         priors = [s for s in others if s.usable_as_prior]
 
         result: TensionResult | None = None

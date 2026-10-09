@@ -12,17 +12,29 @@ from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
-from helpers.exoplanet import make_measurement, make_own_solution_rule
+from helpers.exoplanet import (
+    make_measurement,
+    make_own_solution_rule,
+    make_period_rule,
+    make_solution,
+)
 from helpers.measurement_findings import chakraborty_b, hip67522_b
 
-from nocturna.domain.entities import MeasurementUnit
+from nocturna.domain.entities import MeasuredParameter, MeasurementUnit
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.measurement_findings import (
+    catalog_tension_skip_reason,
     confirmation_eligible,
     independent_confirmation_from,
 )
 from nocturna.domain.own_solution import SolutionProvenance, classify_solution
-from nocturna.domain.tension import EvaluationStatus, TensionEvaluation, TensionResult, compare
+from nocturna.domain.tension import (
+    EvaluationStatus,
+    TensionEvaluation,
+    TensionResult,
+    check_period,
+    compare,
+)
 
 NOW = datetime(2026, 10, 5, 3, 0, tzinfo=UTC)
 PUBLISHED = datetime(2026, 10, 2, 8, 0, tzinfo=UTC)
@@ -184,3 +196,62 @@ def test_los_parametros_nuevos_son_obligatorios():
         confirmation_eligible(  # type: ignore[call-arg]
             ev, item_published_at=PUBLISHED, now=NOW, max_sigma=2.0, window_days=30
         )
+
+
+def test_t92_periodo_evaluated_contra_la_fila_r_con_sigma_cero_no_es_tension_ni_confirmacion():
+    """Forma de HD 715 b guardada antes de T92: el periodo salió `evaluated` contra la
+    fila R del propio paper (sin `arxiv_id`, `pl_pubdate` plausible), referencia
+    `is_default`, σ = 0 y sin `own_solution_key`."""
+    paper = make_measurement(
+        6.0,
+        0.01,
+        0.01,
+        planet_name="HD 715 b",
+        parameter=MeasuredParameter.PERIOD,
+        unit=MeasurementUnit.DAY,
+    )
+    row_r = make_solution(
+        6.0,
+        0.01,
+        0.01,
+        planet_name="HD 715 b",
+        parameter=MeasuredParameter.PERIOD,
+        unit=MeasurementUnit.DAY,
+        is_default=True,
+        arxiv_id=None,
+        pl_pubdate="2026-10",
+        releasedate=date(2026, 10, 3),
+        solution_key="fila-R",
+    )
+    result = TensionResult(
+        item_id=uuid4(),
+        planet_name="HD 715 b",
+        parameter=paper.parameter,
+        comparisons=(compare(paper, row_r),),
+    )
+    ev = TensionEvaluation(
+        reading_id=uuid4(),
+        item_id=result.item_id,
+        planet_name="HD 715 b",
+        parameter=paper.parameter,
+        measurements=(paper,),
+        status=EvaluationStatus.EVALUATED,
+        evaluated_at=NOW,
+        archive_planet_name="HD 715 b",
+        result=result,
+        period_check=check_period((paper,), row_r, make_period_rule()),
+        own_solution_key=None,
+    )
+
+    reason = catalog_tension_skip_reason(
+        ev,
+        threshold_sigma=3.0,
+        item_external_id=HIP_PAPER,
+        item_published_at=PUBLISHED,
+        own_rule=RULE,
+    )
+
+    assert ev.result.reference_sigma() == 0.0
+    assert reason is not None
+    assert reason in ("below_threshold", "reference_not_independent")
+    assert not confirmation_eligible(ev, **_kwargs())

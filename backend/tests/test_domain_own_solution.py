@@ -22,6 +22,7 @@ from nocturna.domain.own_solution import (
     OwnSolutionRule,
     SolutionProvenance,
     classify_solution,
+    own_solution_keys,
 )
 from nocturna.domain.tension import M_JUP_IN_M_EARTH
 
@@ -307,3 +308,39 @@ def test_periodo_con_valor_identico_sin_arxiv_id_y_pubdate_posterior_es_ambiguo(
     assert _classify(
         solution(arxiv_id=EXTERNAL_ID, pl_pubdate="2026-10"), measurements=[paper]
     ) == (SolutionProvenance.OWN_ARXIV_ID)
+
+
+# --- own_solution_keys (T92) ---------------------------------------------------
+
+
+def test_own_solution_keys_une_las_claves_de_own_arxiv_id_y_own_value_match():
+    by_id = _solution(arxiv_id=EXTERNAL_ID, solution_key="k-id")
+    by_value = _solution(14.0, parameter=MASS, solution_key="k-valor")
+
+    keys = own_solution_keys(
+        [
+            (by_id, SolutionProvenance.OWN_ARXIV_ID),
+            (by_value, SolutionProvenance.OWN_VALUE_MATCH),
+        ]
+    )
+
+    assert keys == frozenset({"k-id", "k-valor"})
+
+
+def test_own_solution_keys_ignora_ambiguas_independientes_y_claves_none():
+    classified = [
+        (_solution(solution_key="k-ambigua"), SolutionProvenance.AMBIGUOUS),
+        (_solution(solution_key="k-ajena"), SolutionProvenance.INDEPENDENT),
+        (_solution(solution_key=None), SolutionProvenance.OWN_ARXIV_ID),
+        (_solution(solution_key=None), SolutionProvenance.OWN_VALUE_MATCH),
+        (_solution(solution_key="k-propia"), SolutionProvenance.OWN_VALUE_MATCH),
+    ]
+
+    assert own_solution_keys(classified) == frozenset({"k-propia"})
+
+
+def test_own_solution_keys_acepta_un_generador_y_vacio_da_conjunto_vacio():
+    assert own_solution_keys(iter(())) == frozenset()
+    assert own_solution_keys(
+        (_solution(solution_key="k"), SolutionProvenance.OWN_ARXIV_ID) for _ in range(2)
+    ) == frozenset({"k"})
