@@ -301,3 +301,97 @@ async def test_grupo_de_periodo_con_ttv_no_hace_recalcular_la_lectura_cada_noche
 
     assert cat.total_calls == 0
     assert second.kept_terminal == 1 and second.created == 0
+
+
+# --- T92: el periodo hereda la procedencia de la fila propia ------------------
+
+M_E = MeasurementUnit.M_EARTH
+DAY = MeasurementUnit.DAY
+PERIOD = MeasuredParameter.PERIOD
+R_KEY = "fila-R"
+
+
+def _t92_world():
+    item = make_item("2609.35979")
+    reading = make_reading(
+        item.id,
+        (
+            make_measurement(13.8, 1.0, 1.0, unit=M_E),
+            make_measurement(6.0, 0.01, 0.01, parameter=PERIOD, unit=DAY),
+        ),
+    )
+    readings = InMemoryReadingRepository()
+    readings.add(reading)
+    return InMemoryItemRepository(item), readings
+
+
+def _row_r(parameter, value, err, unit):
+    """Fila R: sin `arxiv_id`, `pl_pubdate` plausible, misma `solution_key` en cada parámetro."""
+    return make_solution(
+        value,
+        err,
+        err,
+        parameter=parameter,
+        unit=unit,
+        is_default=True,
+        solution_key=R_KEY,
+        pl_pubdate="2026-10",
+    )
+
+
+def _t92_catalog(*, mass_row: bool, period_row: bool) -> FakeExoplanetCatalog:
+    return FakeExoplanetCatalog(
+        aliases={V1298: V1298},
+        solutions={
+            (V1298, MASS): [_row_r(MASS, 13.8, 1.0, M_E)] if mass_row else [],
+            (V1298, PERIOD): [_row_r(PERIOD, 6.0, 0.01, DAY)] if period_row else [],
+        },
+    )
+
+
+def _by_parameter(evaluations):
+    return {e.parameter: e for e in evaluations.all()}
+
+
+async def test_periodo_awaiting_reference_se_reevalua_a_closed_loop_al_entrar_la_fila_propia():
+    items, readings = _t92_world()
+    evaluations = InMemoryTensionEvaluationRepository()
+    await _use_case(items, readings, evaluations, _t92_catalog(mass_row=False, period_row=False))(
+        dry_run=False
+    )
+    before = _by_parameter(evaluations)
+    assert {e.status for e in before.values()} == {EvaluationStatus.AWAITING_REFERENCE}
+
+    report = await _use_case(
+        items, readings, evaluations, _t92_catalog(mass_row=True, period_row=True)
+    )(dry_run=False)
+
+    after = _by_parameter(evaluations)
+    assert (report.created, report.reevaluated, report.kept_terminal) == (0, 2, 0)
+    assert after[PERIOD].id == before[PERIOD].id
+    assert after[PERIOD].status == EvaluationStatus.CLOSED_LOOP
+    assert after[PERIOD].own_solution_key == R_KEY
+    assert after[MASS].status == EvaluationStatus.CLOSED_LOOP
+    assert report.by_status == {EvaluationStatus.CLOSED_LOOP: 2}
+
+
+async def test_periodo_ya_evaluated_contra_la_fila_r_no_se_toca_cuando_la_masa_la_marca_propia():
+    items, readings = _t92_world()
+    evaluations = InMemoryTensionEvaluationRepository()
+    await _use_case(items, readings, evaluations, _t92_catalog(mass_row=False, period_row=True))(
+        dry_run=False
+    )
+    before = _by_parameter(evaluations)
+    assert before[PERIOD].status == EvaluationStatus.EVALUATED
+    assert before[MASS].status == EvaluationStatus.AWAITING_REFERENCE
+
+    report = await _use_case(
+        items, readings, evaluations, _t92_catalog(mass_row=True, period_row=True)
+    )(dry_run=False)
+
+    after = _by_parameter(evaluations)
+    assert after[PERIOD] == before[PERIOD]
+    assert report.kept_terminal == 1
+    assert report.reevaluated == 1
+    assert after[MASS].id == before[MASS].id
+    assert after[MASS].status == EvaluationStatus.CLOSED_LOOP

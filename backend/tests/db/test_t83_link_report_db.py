@@ -67,6 +67,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import ModuleType
@@ -80,13 +81,14 @@ from helpers.exoplanet import make_measurement, make_own_solution_rule, make_per
 from test_archive_repository import save, snapshot, solution
 
 from nocturna.application.use_cases.compute_tensions import ComputeTensions
-from nocturna.domain.archive import catalog_solution_from_archive
+from nocturna.domain.archive import ArchiveParameterValue, catalog_solution_from_archive
 from nocturna.domain.entities import MeasuredParameter, MeasurementUnit
 from nocturna.domain.own_solution import SolutionProvenance
 from nocturna.domain.tension import (
     EvaluationStatus,
     TensionEvaluation,
     TensionResult,
+    check_period,
     compare,
 )
 from nocturna.infrastructure.db.repositories import (
@@ -481,3 +483,91 @@ def test_el_script_solo_abre_unidades_de_trabajo_sin_commit():
 
     assert "commit=False" in source
     assert "session.commit(" not in source and ".add(" not in source
+
+
+def test_t92_el_periodo_evaluated_contra_la_fila_r_pasa_a_closed_loop_con_masa_radio_y_periodo(
+    db_session, script
+):
+    """Forma de HD 715 b: la fila R trae masa, radio y periodo del propio paper (sin
+    `arxiv_id`). Masa y radio casan por valor; el periodo, guardado `evaluated` contra R
+    con σ = 0, debe verse como cambio `evaluated -> closed_loop` en el apartado (d)."""
+    planet = "HD 715 b"
+    row_r = _row(
+        planet,
+        "2026AJ....1..9A",
+        14.0,
+        arxiv_id=None,
+        pubdate="2026-10",
+        released=date(2026, 10, 3),
+    )
+    row_r = replace(
+        row_r,
+        is_default=True,
+        radius=ArchiveParameterValue(value=0.9, err1=0.05, err2=-0.05, lim=0),
+        period=ArchiveParameterValue(value=6.0, err1=0.01, err2=-0.01, lim=0),
+    )
+    archive = SqlAlchemyArchiveRepository(db_session)
+    save(archive, snapshot(), [row_r])
+    db_session.flush()
+
+    items = SqlAlchemyItemRepository(db_session)
+    item = make_item(external_id="2609.00004", published_at=datetime(2026, 9, 28, 8, 0, tzinfo=UTC))
+    items.add_many([item])
+    db_session.flush()
+    mass = make_measurement(14.0, 1.0, 1.0, planet_name=planet, unit=M_E)
+    radius = make_measurement(
+        0.95,
+        0.05,
+        0.05,
+        planet_name=planet,
+        parameter=MeasuredParameter.RADIUS,
+        unit=MeasurementUnit.R_EARTH,
+    )
+    period = make_measurement(
+        6.0,
+        0.01,
+        0.01,
+        planet_name=planet,
+        parameter=MeasuredParameter.PERIOD,
+        unit=MeasurementUnit.DAY,
+    )
+    reading = make_reading(item.id, measurements=(mass, radius, period))
+    SqlAlchemyReadingRepository(db_session).add(reading)
+    db_session.flush()
+
+    prior = catalog_solution_from_archive(row_r, MeasuredParameter.PERIOD, is_default=True)
+    assert prior is not None
+    stored = TensionEvaluation(
+        reading_id=reading.id,
+        item_id=item.id,
+        planet_name=planet,
+        parameter=MeasuredParameter.PERIOD,
+        measurements=(period,),
+        status=EvaluationStatus.EVALUATED,
+        evaluated_at=NOW,
+        archive_planet_name=planet,
+        result=TensionResult(
+            item_id=item.id,
+            planet_name=planet,
+            parameter=MeasuredParameter.PERIOD,
+            comparisons=(compare(period, prior),),
+            reading_id=reading.id,
+        ),
+        period_check=check_period((period,), prior, make_period_rule()),
+    )
+    SqlAlchemyTensionEvaluationRepository(db_session).add(stored)
+    db_session.flush()
+
+    report = script.build_report(db_session, **_kwargs())
+
+    (change,) = report.d_changed
+    assert change.evaluation_id == stored.id
+    assert (change.external_id, change.planet_name, change.parameter) == (
+        "2609.00004",
+        planet,
+        MeasuredParameter.PERIOD,
+    )
+    assert change.old_status == EvaluationStatus.EVALUATED
+    assert change.new_status == EvaluationStatus.CLOSED_LOOP
+    assert change.old_own_solution_key is None
+    assert change.new_own_solution_key == row_r.solution_key

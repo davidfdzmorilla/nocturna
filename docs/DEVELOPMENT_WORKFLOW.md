@@ -62,6 +62,8 @@ En T75 (reserva del redactor, migración `c9e4b2a7d135`): tras migrar, `uv run n
 
 En T76 (redactor de tensiones, migración `a3f6d9c1b852`): migrar el mismo día del merge y antes de las 00:00; con el código nuevo y la base sin migrar, el `catalog_tension` choca con el CHECK después de pagar la llamada. Tras migrar, `SELECT type, count(*) FROM findings GROUP BY type` (ningún `catalog_tension` aún) y `uv run nocturna run-night --dry-run`, que lista las tensiones pendientes del redactor con su motivo de exclusión sin escribir nada. Tras la primera noche: `agent_calls` con `agent = 'writer'` (≤ 2) y los `catalog_tension` con su decisión del Editor (`night_report.sql`).
 
+En T92 (solución propia en todos los parámetros, sin migración): tras el merge, `uv run python scripts/t83_link_report.py` debe dar `d.changed=1` (HD 715 b periodo, que se deja como está; ADR 0027) y `uv run nocturna run-night --dry-run` las mismas tensiones elegibles que antes.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

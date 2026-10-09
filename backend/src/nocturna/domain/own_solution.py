@@ -8,7 +8,7 @@ previas; solo bloquean `confirmacion_independiente`.
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -32,6 +32,11 @@ class SolutionProvenance(StrEnum):
     OWN_VALUE_MATCH = "own_value_match"
     AMBIGUOUS = "ambiguous"
     INDEPENDENT = "independent"
+
+
+OWN_PROVENANCES: frozenset[SolutionProvenance] = frozenset(
+    {SolutionProvenance.OWN_ARXIV_ID, SolutionProvenance.OWN_VALUE_MATCH}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,3 +117,17 @@ def classify_solution(
     ):
         return SolutionProvenance.OWN_VALUE_MATCH
     return SolutionProvenance.AMBIGUOUS
+
+
+def own_solution_keys(
+    classified: Iterable[tuple[CatalogSolution, SolutionProvenance]],
+) -> frozenset[str]:
+    """Claves de las filas del archivo propias del paper (en algún parámetro).
+
+    Ignora ambiguas, independientes y soluciones sin `solution_key`.
+    """
+    return frozenset(
+        solution.solution_key
+        for solution, kind in classified
+        if kind in OWN_PROVENANCES and solution.solution_key is not None
+    )

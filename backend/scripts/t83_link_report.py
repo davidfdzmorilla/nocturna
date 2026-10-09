@@ -182,7 +182,16 @@ def _recompute(
     reading_row = session.get(ReadingRow, evaluation.reading_id)
     if item_row is None or reading_row is None:
         return None
-    reading = replace(reading_from_row(reading_row), measurements=evaluation.measurements)
+    # T92: todas las medidas de la lectura para el planeta, de todos los parámetros.
+    # Filtra por el nombre exacto del Reader: _StoredNameCatalog resuelve cualquier
+    # nombre al planeta guardado. Dos alias del mismo planeta no se unen aquí, como
+    # sí hace ComputeTensions en producción.
+    base = reading_from_row(reading_row)
+    same_planet = (
+        tuple(m for m in (base.measurements or ()) if m.planet_name == evaluation.planet_name)
+        or evaluation.measurements
+    )
+    reading = replace(base, measurements=same_planet)
     inner = ExoplanetArchiveCatalog(SqlAlchemyArchiveRepository(session), None)  # type: ignore[arg-type]
     catalog = _StoredNameCatalog(inner, evaluation.archive_planet_name)
 
@@ -202,7 +211,14 @@ def _recompute(
         return await compute([(item_from_row(item_row), reading)])
 
     report = anyio.run(run)
-    return report.evaluations[0] if report.evaluations else None
+    return next(
+        (
+            e
+            for e in report.evaluations
+            if e.planet_name == evaluation.planet_name and e.parameter == evaluation.parameter
+        ),
+        None,
+    )
 
 
 def build_report(
