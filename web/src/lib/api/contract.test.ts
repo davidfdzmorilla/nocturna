@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
   ArchiveValue,
@@ -16,6 +18,9 @@ import type {
   ParameterChange,
   PaperMeasurementWithEvidence,
   PriorSolution,
+  SolutionTension,
+  SolutionTensionComparison,
+  SolutionTensionSolution,
   TensionComparison,
   WeeklyDigest,
 } from "./types";
@@ -81,6 +86,29 @@ const confirmation: IndependentConfirmation = {
   sigmas: [0.3],
   max_sigma: 0.3,
 };
+const solutionRef: SolutionTensionSolution = {
+  reference: "Doe et al. 2020",
+  ...measurement,
+  is_default: true,
+  arxiv_id: null,
+};
+const solutionComparison: SolutionTensionComparison = {
+  solution: solutionRef,
+  sigma: 2.1,
+};
+const solutionTension: SolutionTension = {
+  planet_name: "X b",
+  parameter: "mass",
+  archive_url: ficha,
+  threshold_sigma: 3,
+  sigma: 8.2,
+  reference_role: "default",
+  labels: ["model_dependent"],
+  new: solutionRef,
+  reference: solutionRef,
+  others: [solutionComparison],
+  new_releasedate: "2026-08-20",
+};
 const summary: FindingSummary = {
   id: "1a2b3c4d-1111-2222-3333-444455556666",
   type: "paper_explained",
@@ -96,6 +124,7 @@ const detail: FindingDetail = {
   catalog_tension: tension,
   first_measurement: first,
   independent_confirmation: confirmation,
+  solution_tension: solutionTension,
 };
 const page: FindingsPage = { items: [summary], page: 1, size: 20, total: 1 };
 
@@ -113,6 +142,7 @@ describe("contrato de la API (claves exactas)", () => {
         "id", "title", "published_at", "type", "level_curious",
         "level_amateur", "level_technical", "source_url",
         "catalog_tension", "first_measurement", "independent_confirmation",
+        "solution_tension",
       ),
     );
   });
@@ -129,6 +159,20 @@ describe("contrato de la API (claves exactas)", () => {
       expected("planet_name", "value", "err_plus", "err_minus", "unit", "evidence"),
     );
     expect(keys(prior)).toEqual(
+      expected("reference", "value", "err_plus", "err_minus", "unit", "is_default", "arxiv_id"),
+    );
+  });
+
+  it("SolutionTension y anidados", () => {
+    expect(keys(solutionTension)).toEqual(
+      expected(
+        "planet_name", "parameter", "archive_url", "threshold_sigma", "sigma",
+        "reference_role", "labels", "new", "reference", "others",
+        "new_releasedate",
+      ),
+    );
+    expect(keys(solutionComparison)).toEqual(expected("solution", "sigma"));
+    expect(keys(solutionRef)).toEqual(
       expected("reference", "value", "err_plus", "err_minus", "unit", "is_default", "arxiv_id"),
     );
   });
@@ -234,5 +278,42 @@ describe("contrato del resumen semanal (claves exactas)", () => {
     expect(keys(archiveValue)).toEqual(
       expected("value", "err_plus", "err_minus", "bound", "unit"),
     );
+  });
+});
+
+describe("contrato con el backend (lectura de api/schemas.py)", () => {
+  const schemas = readFileSync(
+    join(__dirname, "../../../../backend/src/nocturna/api/schemas.py"),
+    "utf8",
+  );
+
+  function fieldsOf(cls: string): string[] {
+    const start = schemas.indexOf(`class ${cls}(BaseModel):`);
+    expect(start).toBeGreaterThan(-1);
+    const rest = schemas.slice(start + 1);
+    const next = rest.search(/\nclass /);
+    const body = next === -1 ? rest : rest.slice(0, next);
+    return [...body.matchAll(/^    (\w+): [^\n=]+$/gm)]
+      .map((m) => m[1])
+      .filter((n) => n !== "model_config")
+      .sort();
+  }
+
+  it("SolutionTensionOut y anidados: mismas claves que los tipos", () => {
+    expect(fieldsOf("SolutionTensionOut")).toEqual(keys(solutionTension));
+    expect(fieldsOf("SolutionTensionComparisonOut")).toEqual(
+      keys(solutionComparison),
+    );
+    expect(fieldsOf("SolutionTensionSolutionOut")).toEqual(keys(solutionRef));
+  });
+
+  it("new_releasedate es date (YYYY-MM-DD) o null en el backend", () => {
+    expect(schemas).toMatch(/new_releasedate: date \| None/);
+    expect(solutionTension.new_releasedate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const test = readFileSync(
+      join(__dirname, "../../../../backend/tests/test_api_schemas.py"),
+      "utf8",
+    );
+    expect(test).toMatch(/dumped\["new_releasedate"\] == "\d{4}-\d{2}-\d{2}"/);
   });
 });

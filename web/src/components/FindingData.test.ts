@@ -21,6 +21,7 @@ const base: FindingDetail = {
   catalog_tension: null,
   first_measurement: null,
   independent_confirmation: null,
+  solution_tension: null,
 };
 
 const render = (el: Parameters<typeof renderToStaticMarkup>[0]) =>
@@ -91,6 +92,7 @@ describe("FindingData", () => {
     const html = render(createElement(FindingData, { finding }));
     expect(html).toContain("Datos del contraste");
     expect(html).toContain("<caption");
+    expect(html).toContain(">Masa de HIP 67522 c medida en el artículo<");
     expect(html).toContain('scope="col"');
     expect(html).toContain('scope="row"');
     expect(html).toContain("13,8 ± 1 M⊕");
@@ -150,6 +152,12 @@ describe("FindingData", () => {
       },
     };
     const html = render(createElement(FindingData, { finding }));
+    expect(html).toContain(
+      "Candidato: discrepancia calculada automáticamente frente al NASA Exoplanet Archive; ninguna persona la ha verificado.",
+    );
+    expect(html).toContain(
+      ">Masa de X b: medida del artículo frente a soluciones previas del archivo<",
+    );
     expect(html).toContain("3,37 σ");
     expect(html).toContain("Candidato: discrepancia calculada automáticamente");
     expect(html).toContain("Solución por defecto del archivo");
@@ -186,6 +194,9 @@ describe("FindingData", () => {
       },
     };
     const html = render(createElement(FindingData, { finding }));
+    expect(html).toContain(
+      ">Radio de X b: medida del artículo frente a la referencia del archivo<",
+    );
     expect(html).toContain("0,969 ± 0,017 R♃");
     expect(html).toContain("0,70 σ");
     expect(html).toContain("Smith et al. 2019");
@@ -202,7 +213,7 @@ describe("TypeBadge y TypeFilter", () => {
     );
   });
 
-  it("el filtro marca aria-current en el activo y enlaza los cinco", () => {
+  it("el filtro marca aria-current en el activo y enlaza los seis", () => {
     const html = render(createElement(TypeFilter, { activeType: "primera_medida" }));
     expect(html).toContain('aria-label="Filtrar por tipo"');
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
@@ -210,7 +221,7 @@ describe("TypeBadge y TypeFilter", () => {
       /<a aria-current="page"[^>]*href="\/\?tipo=primera-medida">Primera medida<\/a>/,
     );
     expect(html).toContain('href="/"');
-    expect(html.match(/<a /g)).toHaveLength(5);
+    expect(html.match(/<a /g)).toHaveLength(6);
   });
 
   it("sin tipo activo, Todos es el actual", () => {

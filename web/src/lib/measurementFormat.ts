@@ -110,3 +110,9 @@ export function formatArchiveValue(p: ArchiveValue | null): string {
   }
   return `${number} +${formatArchive(p.err_plus)} / ${MINUS}${formatArchive(p.err_minus)} ${unit}`;
 }
+
+/** Etiqueta de parámetro con mayúscula inicial, para inicio de frase. */
+export function parameterTitle(parameter: Parameter): string {
+  const label = PARAMETER_LABELS[parameter];
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}

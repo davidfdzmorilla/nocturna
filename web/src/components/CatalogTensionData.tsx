@@ -1,8 +1,8 @@
 import type { CatalogTension } from "@/lib/api/types";
-import { CANDIDATE_LEGEND } from "@/lib/findingTypes";
+import { candidateLegend } from "@/lib/findingTypes";
 import { arxivAbsUrl, safeArchiveUrl } from "@/lib/externalLinks";
 import {
-  PARAMETER_LABELS,
+  parameterTitle,
   formatNumber,
   formatSigma,
   formatWithErrors,
@@ -16,11 +16,11 @@ type Props = {
 
 export function CatalogTensionData({ data, sourceUrl }: Props) {
   const archiveUrl = safeArchiveUrl(data.archive_url);
-  const caption = `${PARAMETER_LABELS[data.parameter]} de ${data.planet_name}: medida del artículo frente a soluciones previas del archivo`;
+  const caption = `${parameterTitle(data.parameter)} de ${data.planet_name}: medida del artículo frente a soluciones previas del archivo`;
 
   return (
     <>
-      <p className="mt-2 text-sm text-text">{CANDIDATE_LEGEND}</p>
+      <p className="mt-2 text-sm text-text">{candidateLegend("catalog_tension")}</p>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full border-collapse text-left text-sm">
           <caption className="pb-2 text-left text-text-muted">{caption}</caption>

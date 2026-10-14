@@ -110,6 +110,13 @@ export default async function FindingPage({
 
       <FindingData finding={finding} />
 
+      {finding.type === "solution_tension" ? (
+        <p className="mt-6 text-sm text-text-muted">
+          Este hallazgo no procede de un artículo de arXiv: compara dos
+          soluciones publicadas en el NASA Exoplanet Archive.
+        </p>
+      ) : null}
+
       {arxivUrl ? (
         <p className="mt-6">
           <a href={arxivUrl} rel="noopener noreferrer">

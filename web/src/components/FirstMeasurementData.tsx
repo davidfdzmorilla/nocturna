@@ -1,6 +1,6 @@
 import type { FirstMeasurement } from "@/lib/api/types";
 import { safeArchiveUrl } from "@/lib/externalLinks";
-import { PARAMETER_LABELS, formatWithErrors } from "@/lib/measurementFormat";
+import { formatWithErrors, parameterTitle } from "@/lib/measurementFormat";
 
 type Props = {
   data: FirstMeasurement;
@@ -14,7 +14,7 @@ const STATUS_TEXT: Record<FirstMeasurement["archive_status"], string> = {
 
 export function FirstMeasurementData({ data }: Props) {
   const archiveUrl = safeArchiveUrl(data.archive_url);
-  const caption = `${PARAMETER_LABELS[data.parameter]} de ${data.paper_planet_name} medida en el artículo`;
+  const caption = `${parameterTitle(data.parameter)} de ${data.paper_planet_name} medida en el artículo`;
 
   return (
     <>
