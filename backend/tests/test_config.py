@@ -110,6 +110,11 @@ confirmation_max_sigma = 2.0
 confirmation_window_days = 30
 confirmation_enabled = false
 
+[solution_tensions]
+since = "2026-08-01"
+max_pubdate_age_months = 24
+writer_enabled = false
+
 [llm]
 provider = "agent_sdk"
 """
@@ -922,7 +927,7 @@ def test_el_archivo_solo_cabria_pero_junto_a_arxiv_no(tmp_path):
 # --- T89: [measurement_findings] ----------------------------------------------
 
 _MEASUREMENT_FINDINGS_SECTION = BASE_TOML[
-    BASE_TOML.index("[measurement_findings]") : BASE_TOML.index("[llm]")
+    BASE_TOML.index("[measurement_findings]") : BASE_TOML.index("[solution_tensions]")
 ]
 
 

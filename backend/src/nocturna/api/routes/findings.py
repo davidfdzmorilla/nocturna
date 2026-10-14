@@ -7,6 +7,7 @@ lectura a los esquemas de `api/schemas.py`, que deciden qué campos de
 `Finding` cruzan hacia fuera.
 """
 
+from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
@@ -27,6 +28,13 @@ from nocturna.domain.entities import FindingType
 from nocturna.domain.repositories import FindingRepository, ItemRepository
 
 router = APIRouter()
+
+#: Tipos que la API expone en `?type=`. T85 no publica `solution_tension`
+#: (lo hará T85.e): hasta entonces el filtro no lo admite.
+FindingTypeFilter = StrEnum(
+    "FindingTypeFilter",
+    {t.name: t.value for t in FindingType if t is not FindingType.SOLUTION_TENSION},
+)
 
 _FINDING_NOT_FOUND = "finding not found"
 
@@ -50,7 +58,7 @@ def list_findings(
     findings: _FindingsDep,
     page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     size: Annotated[int, Query(ge=1, le=50)] = 20,
-    finding_type: Annotated[FindingType | None, Query(alias="type")] = None,
+    finding_type: Annotated[FindingTypeFilter | None, Query(alias="type")] = None,
 ) -> FindingsPageResponse:
     """Listado paginado, más recientes primero.
 
@@ -63,7 +71,11 @@ def list_findings(
     vacío da `422` por el propio enum, y el `total` es el del filtro.
     """
     offset = (page - 1) * size
-    result = ListPublishedFindings(findings)(limit=size, offset=offset, finding_type=finding_type)
+    result = ListPublishedFindings(findings)(
+        limit=size,
+        offset=offset,
+        finding_type=None if finding_type is None else FindingType(finding_type.value),
+    )
     summaries = []
     for finding in result.findings:
         if finding.published_at is None:

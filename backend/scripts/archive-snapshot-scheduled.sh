@@ -105,7 +105,7 @@ set -e
 
 {
     if [[ "$exit_code" -eq 3 ]]; then
-        echo "aviso: snapshot guardado, pero la evaluación de tensiones falló (código 3); ver $err_log"
+        echo "aviso: snapshot guardado, pero la evaluación de tensiones o las tensiones entre soluciones fallaron (código 3); ver $err_log"
     fi
     echo "fin: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "código de salida: $exit_code"

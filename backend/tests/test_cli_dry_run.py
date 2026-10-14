@@ -139,6 +139,11 @@ confirmation_max_sigma = 2.0
 confirmation_window_days = 30
 confirmation_enabled = false
 
+[solution_tensions]
+since = "2026-08-01"
+max_pubdate_age_months = 24
+writer_enabled = false
+
 [llm]
 provider = "agent_sdk"
 """

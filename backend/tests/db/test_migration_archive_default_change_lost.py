@@ -16,6 +16,7 @@ from nocturna.infrastructure.db.models import Base
 
 _REVISION = "d8b1e4f7a203"
 _REVISION_BEFORE = "a3f6d9c1b852"
+_HEAD = "b6d2f8a4c917"
 _CHECK = "ck_archive_default_change_old_or_new"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _KEY_A = "a" * 64
@@ -91,14 +92,14 @@ def test_downgrade_con_new_nula_falla_y_no_toca_nada(scratch_database_url):
             _insert_change(connection, _insert_snapshot(connection), _KEY_A, None)
 
         with pytest.raises(RuntimeError, match="new_solution_key NULL"):
-            run_alembic_downgrade(scratch_database_url, "-1")
+            run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE)
 
         with engine.connect() as connection:
             assert _check_exists(connection)
             assert _is_nullable(connection)
             assert (
                 connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
-                == _REVISION
+                == _HEAD  # el downgrade es una sola transaccion: el head sigue puesto
             )
     finally:
         engine.dispose()
@@ -111,7 +112,7 @@ def test_downgrade_sin_filas_nulas_funciona_y_upgrade_vuelve(scratch_database_ur
         with engine.begin() as connection:
             _insert_change(connection, _insert_snapshot(connection), _KEY_A, _KEY_B)
 
-        run_alembic_downgrade(scratch_database_url, "-1")
+        run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE)
         with engine.connect() as connection:
             assert not _check_exists(connection)
             assert not _is_nullable(connection)

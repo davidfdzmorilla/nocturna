@@ -42,6 +42,7 @@ from nocturna.application.use_cases.write_tensions import (
     TensionWriterWorkFactory,
 )
 from nocturna.domain.entities import (
+    ITEM_SOURCE_ARXIV,
     AgentCall,
     AgentCallStatus,
     Finding,
@@ -142,7 +143,11 @@ class InMemoryItemRepository:
         return self._items.get(item_id)
 
     def next_unread(self, limit: int) -> list[Item]:
-        new = [item for item in self._items.values() if item.status is ItemStatus.NEW]
+        new = [
+            item
+            for item in self._items.values()
+            if item.status is ItemStatus.NEW and item.source == ITEM_SOURCE_ARXIV
+        ]
         new.sort(key=lambda i: (not i.exoplanet_match, i.fetched_at, i.external_id))
         return new[:limit]
 

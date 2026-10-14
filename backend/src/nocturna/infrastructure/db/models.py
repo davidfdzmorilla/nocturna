@@ -55,9 +55,11 @@ from nocturna.domain.entities import (
     FindingType,
     ItemStatus,
     MeasuredParameter,
+    ReferenceRole,
     RunStatus,
 )
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.solution_tension import SkipReason
 from nocturna.domain.tension import EvaluationStatus
 
 # Convención de nombres completa. Sin ella, los CHECK de los enums (y el
@@ -199,8 +201,27 @@ class FindingRow(Base):
     tension_evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True), sa.ForeignKey("tension_evaluation.id"), nullable=True
     )
+    # T85: payload JSONB de `solution_tension` (schema_version dentro) y la fila de origen.
+    solution_tension: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    solution_tension_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("solution_tension.id"), nullable=True
+    )
 
     __table_args__ = (
+        sa.CheckConstraint(
+            "(type = 'solution_tension') = (solution_tension IS NOT NULL)",
+            name="solution_tension_iff_type",
+        ),
+        sa.CheckConstraint(
+            "(type = 'solution_tension') = (solution_tension_id IS NOT NULL)",
+            name="solution_tension_id_iff_type",
+        ),
+        sa.Index(
+            "uq_findings_solution_tension_id_type",
+            "solution_tension_id",
+            "type",
+            unique=True,
+        ),
         sa.CheckConstraint(
             "(type = 'catalog_tension') = (catalog_tension IS NOT NULL)",
             name="catalog_tension_iff_type",
@@ -477,4 +498,51 @@ class TensionEvaluationRow(Base):
             unique=True,
         ),
         sa.Index("ix_tension_evaluation_status", "status"),
+    )
+
+
+class SolutionTensionRow(Base):
+    """Tensión de una alta del archivo frente a su referencia, para un parámetro (T85).
+
+    Foto fija sin estados; incluye las que no pasan (`skip_reason`). `detail`
+    (JSONB, `schema_version` 1) guarda `new`, `reference`, `others` y
+    `period_check`; las columnas sueltas son la proyección consultable.
+    """
+
+    __tablename__ = "solution_tension"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    new_solution_key: Mapped[str] = mapped_column(
+        sa.CHAR(64), sa.ForeignKey("archive_solution.solution_key"), nullable=False
+    )
+    reference_solution_key: Mapped[str] = mapped_column(
+        sa.CHAR(64), sa.ForeignKey("archive_solution.solution_key"), nullable=False
+    )
+    planet_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    parameter: Mapped[MeasuredParameter] = mapped_column(
+        _str_enum(MeasuredParameter, "solution_tension_parameter"), nullable=False
+    )
+    sigma: Mapped[float] = mapped_column(sa.Double, nullable=False)
+    skip_reason: Mapped[SkipReason | None] = mapped_column(
+        _str_enum(SkipReason, "solution_tension_skip_reason", length=32), nullable=True
+    )
+    reference_role: Mapped[ReferenceRole] = mapped_column(
+        _str_enum(ReferenceRole, "solution_tension_reference_role"), nullable=False
+    )
+    labels: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False)
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    item_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("items.id"), nullable=True
+    )
+    computed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # Un par con ítem (T85.d) es elegible: sin motivo de descarte.
+        sa.CheckConstraint("item_id IS NULL OR skip_reason IS NULL", name="item_only_if_eligible"),
+        sa.Index(
+            "uq_solution_tension_new_solution_key_parameter",
+            "new_solution_key",
+            "parameter",
+            unique=True,
+        ),
     )

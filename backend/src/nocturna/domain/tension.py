@@ -57,6 +57,30 @@ def to_canonical(value: float, unit: MeasurementUnit) -> float:
     return value * _FACTOR_TO_CANONICAL[unit]
 
 
+def pairwise_sigma(
+    x_a: float,
+    plus_a: float,
+    minus_a: float,
+    x_b: float,
+    plus_b: float,
+    minus_b: float,
+) -> tuple[float, float, float]:
+    """σ de `a` frente a `b` (ADR 0015), todo en unidad canónica.
+
+    Devuelve `(e_a, e_b, σ)`: cada error es el lado que mira al otro valor
+    (`a` por encima de `b`: `minus_a` y `plus_b`; por debajo: `plus_a` y
+    `minus_b`; iguales: σ = 0 y se devuelven `minus_a`, `plus_b`).
+    """
+    if x_a > x_b:
+        e_a, e_b = minus_a, plus_b
+    elif x_a < x_b:
+        e_a, e_b = plus_a, minus_b
+    else:
+        e_a, e_b = minus_a, plus_b
+    sigma = 0.0 if x_a == x_b else abs(x_a - x_b) / math.sqrt(e_a**2 + e_b**2)
+    return e_a, e_b, sigma
+
+
 @dataclass(frozen=True, slots=True)
 class CatalogComparison:
     """Comparación de una medida del paper con una previa, en unidad común.
@@ -90,15 +114,14 @@ def compare(paper: Measurement, prior: CatalogSolution) -> CatalogComparison:
 
     x_p = to_canonical(paper.value, paper.unit)
     x_i = to_canonical(prior.value, prior.unit)
-    if x_p > x_i:
-        e_p, e_i = paper.err_minus, prior.err_plus
-    elif x_p < x_i:
-        e_p, e_i = paper.err_plus, prior.err_minus
-    else:
-        e_p, e_i = paper.err_minus, prior.err_plus
-    e_p = to_canonical(e_p, paper.unit)
-    e_i = to_canonical(e_i, prior.unit)
-    sigma = 0.0 if x_p == x_i else abs(x_p - x_i) / math.sqrt(e_p**2 + e_i**2)
+    e_p, e_i, sigma = pairwise_sigma(
+        x_p,
+        to_canonical(paper.err_plus, paper.unit),
+        to_canonical(paper.err_minus, paper.unit),
+        x_i,
+        to_canonical(prior.err_plus, prior.unit),
+        to_canonical(prior.err_minus, prior.unit),
+    )
     return CatalogComparison(
         paper=paper,
         prior=prior,
@@ -314,12 +337,22 @@ def check_period(
     if reference.parameter != MeasuredParameter.PERIOD:
         raise InvariantViolation("la referencia debe ser un periodo")
     p_ref = to_canonical(reference.value, reference.unit)
-    met = True
-    alias = False
+    periods: list[float] = []
     for m in measurements:
         if m.parameter != MeasuredParameter.PERIOD:
             raise InvariantViolation("las medidas deben ser periodos")
-        p = to_canonical(m.value, m.unit)
+        periods.append(to_canonical(m.value, m.unit))
+    return check_period_values(periods, p_ref, rule)
+
+
+def check_period_values(periods: Sequence[float], p_ref: float, rule: PeriodRule) -> PeriodCheck:
+    """Diferencia mínima (todos los periodos) y sospecha de alias (alguno), en
+    días. Compartida por `check_period` y por T85 (solución frente a solución)."""
+    if not periods:
+        raise InvariantViolation("se necesita al menos un periodo")
+    met = True
+    alias = False
+    for p in periods:
         delta = abs(p - p_ref)
         if not (
             delta / p_ref >= rule.min_relative_difference

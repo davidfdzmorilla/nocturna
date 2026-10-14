@@ -447,5 +447,18 @@ confirmation_window_days = 30
 # y `run-night --dry-run` las lista como bloqueadas.
 confirmation_enabled = true
 
+[solution_tensions]
+# Tensiones entre soluciones del archivo (T85, ADR 0029). Se calculan sin LLM
+# tras cada snapshot semanal (`archive-snapshot`) o con `solution-tensions`.
+# since: solo las altas `Published Confirmed` con `releasedate` >= esta fecha
+# (D4); las 40k soluciones anteriores no generan filas.
+since = "2026-08-01"
+# max_pubdate_age_months: se excluye (`old_paper`) la alta cuyo `pl_pubdate` es
+# más de N meses anterior a su `releasedate` (D6): una solución antigua que el
+# archivo acaba de catalogar no es una novedad.
+max_pubdate_age_months = 24
+# writer_enabled: reservado para T85.e (redactor de estas tensiones). Sin uso aún.
+writer_enabled = false
+
 [llm]
 provider = "agent_sdk"

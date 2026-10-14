@@ -86,8 +86,15 @@ from uuid import UUID
 from nocturna.application.agents.popularizer_output import parse_popularizer_output
 from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.unit_of_work import AgentWorkFactory
-from nocturna.domain.entities import Finding, FindingType, Item, ItemStatus, Reading
-from nocturna.domain.errors import InvalidTransition
+from nocturna.domain.entities import (
+    ITEM_SOURCE_ARXIV,
+    Finding,
+    FindingType,
+    Item,
+    ItemStatus,
+    Reading,
+)
+from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.llm import AgentResult, AgentRole, LLMProvider
 
 
@@ -190,6 +197,11 @@ class PopularizeReading:
         devuelve se persiste el `Finding`/`Item`, en una unidad de trabajo
         propia, nunca compartida con la contabilidad.
         """
+        if item.source != ITEM_SOURCE_ARXIV:
+            raise InvariantViolation(
+                f"el Popularizer solo divulga ítems de source='{ITEM_SOURCE_ARXIV}', "
+                f"no '{item.source}'"
+            )
         if item.status is not ItemStatus.READ:
             raise InvalidTransition(item.status.value, ItemStatus.DISCARDED.value, entity="Item")
 

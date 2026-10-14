@@ -47,9 +47,14 @@ from nocturna.domain.entities import (
     MeasurementOrigin,
     MeasurementUnit,
     Reading,
+    ReferenceRole,
     Run,
+    SolutionComparison,
+    SolutionTensionData,
+    SolutionTensionLabel,
 )
 from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.solution_tension import SolutionTension
 from nocturna.domain.tension import (
     EvaluationStatus,
     LimitComparison,
@@ -68,6 +73,7 @@ from nocturna.infrastructure.db.models import (
     ItemRow,
     ReadingRow,
     RunRow,
+    SolutionTensionRow,
     TensionEvaluationRow,
 )
 
@@ -227,6 +233,114 @@ def _catalog_tension_from_json(raw: dict | None) -> CatalogTension | None:
     )
 
 
+# Versión del JSON de `findings.solution_tension` y de `solution_tension.detail`.
+SOLUTION_TENSION_SCHEMA_VERSION = 1
+
+
+def _comparisons_to_list(comparisons: tuple[SolutionComparison, ...]) -> list[dict]:
+    return [{"solution": _solution_to_dict(c.solution), "sigma": c.sigma} for c in comparisons]
+
+
+def _comparisons_from_list(raw: list[dict]) -> tuple[SolutionComparison, ...]:
+    return tuple(
+        SolutionComparison(solution=_solution_from_dict(e["solution"]), sigma=e["sigma"])
+        for e in raw
+    )
+
+
+def _check_solution_tension_version(raw: dict, what: str) -> None:
+    version = raw.get("schema_version")
+    if type(version) is not int or version != SOLUTION_TENSION_SCHEMA_VERSION:
+        raise ValueError(
+            f"{what}: schema_version {version!r} desconocida "
+            f"(soportada: {SOLUTION_TENSION_SCHEMA_VERSION})"
+        )
+
+
+def _solution_tension_data_to_json(data: SolutionTensionData | None) -> dict | None:
+    """`None` -> SQL `NULL` (finding que no es `solution_tension`)."""
+    if data is None:
+        return None
+    return {
+        "schema_version": SOLUTION_TENSION_SCHEMA_VERSION,
+        "planet_name": data.planet_name,
+        "parameter": data.parameter.value,
+        "archive_url": data.archive_url,
+        "threshold_sigma": data.threshold_sigma,
+        "sigma": data.sigma,
+        "new": _solution_to_dict(data.new),
+        "reference": _solution_to_dict(data.reference),
+        "others": _comparisons_to_list(data.others),
+        "labels": [label.value for label in data.labels],
+        "reference_role": data.reference_role.value,
+    }
+
+
+def _solution_tension_data_from_json(raw: dict | None) -> SolutionTensionData | None:
+    """Inversa. `schema_version` ausente o desconocida -> `ValueError`."""
+    if raw is None:
+        return None
+    _check_solution_tension_version(raw, "solution_tension")
+    return SolutionTensionData(
+        planet_name=raw["planet_name"],
+        parameter=MeasuredParameter(raw["parameter"]),
+        archive_url=raw["archive_url"],
+        threshold_sigma=raw["threshold_sigma"],
+        sigma=raw["sigma"],
+        new=_solution_from_dict(raw["new"]),
+        reference=_solution_from_dict(raw["reference"]),
+        others=_comparisons_from_list(raw["others"]),
+        labels=tuple(SolutionTensionLabel(v) for v in raw["labels"]),
+        reference_role=ReferenceRole(raw["reference_role"]),
+    )
+
+
+def solution_tension_to_row(tension: SolutionTension) -> SolutionTensionRow:
+    return SolutionTensionRow(
+        id=tension.id,
+        new_solution_key=tension.new_solution_key,
+        reference_solution_key=tension.reference_solution_key,
+        planet_name=tension.planet_name,
+        parameter=tension.parameter,
+        sigma=tension.sigma,
+        skip_reason=tension.skip_reason,
+        reference_role=tension.reference_role,
+        labels=[label.value for label in tension.labels],
+        detail={
+            "schema_version": SOLUTION_TENSION_SCHEMA_VERSION,
+            "new": _solution_to_dict(tension.new),
+            "reference": _solution_to_dict(tension.reference),
+            "others": _comparisons_to_list(tension.others),
+            "period_check": _period_check_to_dict(tension.period_check),
+        },
+        item_id=tension.item_id,
+        computed_at=tension.computed_at,
+    )
+
+
+def solution_tension_from_row(row: SolutionTensionRow) -> SolutionTension:
+    """`schema_version` ausente o desconocida -> `ValueError`."""
+    detail = row.detail
+    _check_solution_tension_version(detail, "solution_tension.detail")
+    return SolutionTension(
+        id=row.id,
+        new_solution_key=row.new_solution_key,
+        reference_solution_key=row.reference_solution_key,
+        planet_name=row.planet_name,
+        parameter=row.parameter,
+        new=_solution_from_dict(detail["new"]),
+        reference=_solution_from_dict(detail["reference"]),
+        reference_role=row.reference_role,
+        computed_at=row.computed_at,
+        sigma=row.sigma,
+        others=_comparisons_from_list(detail["others"]),
+        period_check=_period_check_from_dict(detail["period_check"]),
+        labels=tuple(SolutionTensionLabel(v) for v in row.labels),
+        skip_reason=row.skip_reason,
+        item_id=row.item_id,
+    )
+
+
 def item_to_row(item: Item) -> ItemRow:
     return ItemRow(
         id=item.id,
@@ -316,6 +430,8 @@ def finding_to_row(finding: Finding) -> FindingRow:
             else finding.independent_confirmation.to_json()
         ),
         tension_evaluation_id=finding.tension_evaluation_id,
+        solution_tension=_solution_tension_data_to_json(finding.solution_tension),
+        solution_tension_id=finding.solution_tension_id,
     )
 
 
@@ -343,6 +459,8 @@ def finding_from_row(row: FindingRow) -> Finding:
             else IndependentConfirmation.from_json(row.independent_confirmation)
         ),
         tension_evaluation_id=row.tension_evaluation_id,
+        solution_tension=_solution_tension_data_from_json(row.solution_tension),
+        solution_tension_id=row.solution_tension_id,
     )
 
 

@@ -23,11 +23,13 @@ from typing import Protocol, get_type_hints
 
 from nocturna.domain.repositories import (
     AgentCallRepository,
+    ArchiveItemRepository,
     ArchiveRepository,
     FindingRepository,
     ItemRepository,
     ReadingRepository,
     RunRepository,
+    SolutionTensionRepository,
     TensionEvaluationRepository,
 )
 from nocturna.infrastructure.db.repositories import (
@@ -37,6 +39,7 @@ from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
+    SqlAlchemySolutionTensionRepository,
     SqlAlchemyTensionEvaluationRepository,
 )
 
@@ -137,3 +140,27 @@ def test_in_memory_tension_evaluation_repository_cumple_el_protocol() -> None:
 
     repo: TensionEvaluationRepository = InMemoryTensionEvaluationRepository()
     _assert_conforms(TensionEvaluationRepository, type(repo))
+
+
+def test_sqlalchemy_item_repository_cumple_archive_item_repository() -> None:
+    repo: ArchiveItemRepository = SqlAlchemyItemRepository(None)
+    _assert_conforms(ArchiveItemRepository, type(repo))
+
+
+def test_in_memory_archive_item_repository_cumple_el_protocol() -> None:
+    from fakes.solution_tensions import InMemoryArchiveItemRepository
+
+    repo: ArchiveItemRepository = InMemoryArchiveItemRepository()
+    _assert_conforms(ArchiveItemRepository, type(repo))
+
+
+def test_sqlalchemy_solution_tension_repository_cumple_el_protocol() -> None:
+    repo: SolutionTensionRepository = SqlAlchemySolutionTensionRepository(None)
+    _assert_conforms(SolutionTensionRepository, type(repo))
+
+
+def test_in_memory_solution_tension_repository_cumple_el_protocol() -> None:
+    from fakes.solution_tensions import InMemorySolutionTensionRepository
+
+    repo: SolutionTensionRepository = InMemorySolutionTensionRepository()
+    _assert_conforms(SolutionTensionRepository, type(repo))

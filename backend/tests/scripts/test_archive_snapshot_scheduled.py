@@ -172,7 +172,10 @@ def test_codigo_3_registra_el_aviso_de_evaluacion_fallida_en_el_log(tmp_path):
 
     assert result.returncode == 3
     out = next(env.logs.glob("archive-*.out.log")).read_text()
-    assert "snapshot guardado, pero la evaluación de tensiones falló (código 3)" in out
+    assert (
+        "snapshot guardado, pero la evaluación de tensiones o las tensiones "
+        "entre soluciones fallaron (código 3)" in out
+    )
     assert out.rstrip().endswith("código de salida: 3")
 
 

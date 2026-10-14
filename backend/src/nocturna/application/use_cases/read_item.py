@@ -67,8 +67,8 @@ from nocturna.application.agents.reader_measurements import (
 from nocturna.application.agents.reader_output import parse_reader_output, parse_reader_v3_output
 from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.unit_of_work import AgentWorkFactory
-from nocturna.domain.entities import Item, ItemStatus, Reading
-from nocturna.domain.errors import InvalidTransition
+from nocturna.domain.entities import ITEM_SOURCE_ARXIV, Item, ItemStatus, Reading
+from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.llm import AgentResult, AgentRole, LLMProvider
 
 _logger = logging.getLogger(__name__)
@@ -122,6 +122,15 @@ def reread_refusal(
     if previous.measurements is not None:
         return RereadRefusal.ALREADY_HAS_MEASUREMENTS
     return None
+
+
+def _require_arxiv(item: Item) -> None:
+    """Defensa en profundidad (T85): ningún agente lee ítems del archivo.
+    Se comprueba antes de autorizar o llamar al LLM."""
+    if item.source != ITEM_SOURCE_ARXIV:
+        raise InvariantViolation(
+            f"el Reader solo lee ítems de source='{ITEM_SOURCE_ARXIV}', no '{item.source}'"
+        )
 
 
 class ReadOutcome(StrEnum):
@@ -270,6 +279,7 @@ class ReadItem:
         trabajo del camino feliz (autorizar, `record_call`, persistir),
         nunca compartida con la contabilidad.
         """
+        _require_arxiv(item)
         if item.status is not ItemStatus.NEW:
             raise InvalidTransition(item.status.value, ItemStatus.READ.value, entity="Item")
 
@@ -393,6 +403,7 @@ class ReadItem:
         vigente; timeout, límite de tasa o error del proveedor no cambian
         nada salvo el `AgentCall`. `BudgetDenied` se propaga.
         """
+        _require_arxiv(item)
         refusal = reread_refusal(item, previous, self._measures_categories)
         if refusal is not None:
             raise RereadRefused(refusal)
