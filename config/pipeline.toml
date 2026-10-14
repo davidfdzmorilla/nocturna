@@ -463,7 +463,8 @@ max_pubdate_age_months = 24
 # usa editor-v4 (que conoce solution_tension). Se activa a mano y NO antes de
 # cerrar T85.w (D8): el Editor publica la noche en que se redacta, y la web aún
 # no sabe mostrar solution_tension. Al activarlo, el Editor pasa a editor-v4.
-writer_enabled = false
+# Activado el 2026-10-14, tras el merge de T85.w.
+writer_enabled = true
 # extreme_sigma: una σ mayor no excluye la tensión (D5): se marca, sin guardarla,
 # como `extreme_sigma` para el redactor y el Editor (errores diminutos frente al
 # cambio de valor; p. ej. HD 114082 b, σ 289). Debe ser > [tension] threshold_sigma.
