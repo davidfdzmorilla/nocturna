@@ -66,6 +66,8 @@ En T92 (solución propia en todos los parámetros, sin migración): tras el merg
 
 En T84 (resumen semanal, migración `d8b1e4f7a203`): migrar el mismo día del merge, fuera de 00:00–04:45 y antes del viernes a las 10:00; con el código nuevo y la base sin migrar, un snapshot con alguna pérdida de solución por defecto falla entero. Tras migrar, `uv run nocturna archive-digest --week 2026-W40` y `--week 2026-W41` (solo lectura) para que el autor revise el texto, y con la API arrancada `curl localhost:8000/archive/weeks`.
 
+En T85 (tensiones entre soluciones, migración `b6d2f8a4c917`): migrar el mismo día del merge, antes de las 00:00 y fuera de 00:00–04:45; con el código nuevo y la base sin migrar, el mapeo de `findings` lee columnas que no existen y la noche falla. Tras migrar, `uv run nocturna solution-tensions --dry-run` (solo lectura) para que el autor revise la cola; si la aprueba, `uv run nocturna solution-tensions` la guarda (sin tokens). `run-night --dry-run` debe seguir mostrando el mismo plan de gasto.
+
 ## Si algo va mal
 
 - Hook bloquea algo legítimo → el autor lo dice; se ajusta el script en `.claude/hooks/` en un commit `chore(hooks): ...`, con explicación en el mensaje.

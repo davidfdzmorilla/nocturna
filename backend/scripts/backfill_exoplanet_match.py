@@ -1,4 +1,4 @@
-"""Recalcula `items.exoplanet_match` de TODOS los ítems (T79).
+"""Recalcula `items.exoplanet_match` de los ítems arXiv (T79; T85: no toca los del archivo).
 
 ## Por qué existe
 
@@ -42,6 +42,7 @@ import sys
 import sqlalchemy as sa
 
 from nocturna.cli import exoplanet_filter_from_config
+from nocturna.domain.entities import ITEM_SOURCE_ARXIV
 from nocturna.infrastructure.config import Settings, load_pipeline_config
 from nocturna.infrastructure.db.models import ItemRow
 from nocturna.infrastructure.db.repositories import SqlAlchemyItemRepository
@@ -73,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
 
     with session_factory() as session:
         total = matching = changed = 0
-        rows = session.execute(sa.select(ItemRow).order_by(ItemRow.external_id)).scalars()
+        rows = session.execute(
+            sa.select(ItemRow)
+            .where(ItemRow.source == ITEM_SOURCE_ARXIV)
+            .order_by(ItemRow.external_id)
+        ).scalars()
         for row in rows:
             match = exo_filter.matches(row.title, row.abstract)
             total += 1

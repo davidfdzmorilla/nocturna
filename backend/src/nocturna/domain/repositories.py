@@ -9,7 +9,7 @@ interfaz.
 """
 
 from collections.abc import Collection, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -22,10 +22,12 @@ from nocturna.domain.entities import (
     Finding,
     FindingType,
     Item,
+    MeasuredParameter,
     Reading,
     Run,
 )
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.solution_tension import SolutionTension
 from nocturna.domain.tension import TensionEvaluation
 
 
@@ -41,11 +43,27 @@ class ItemRepository(Protocol):
         ...
 
     def next_unread(self, limit: int) -> list[Item]:
-        """Ítems en estado `NEW` a procesar esta noche, hasta `limit`. Usado por T44."""
+        """Ítems en estado `NEW` a procesar esta noche, hasta `limit`. Usado por T44.
+
+        Contrato (T85): solo `source = 'arxiv'`. Los ítems de la vía del archivo
+        (`exoplanet_archive`) nacen `NEW` pero ningún agente los lee.
+        """
         ...
 
     def save(self, item: Item) -> None:
         """Persiste el estado actual del ítem. Usado por T41/T42/T43."""
+        ...
+
+
+class ArchiveItemRepository(Protocol):
+    """Los `Item` de la vía del archivo (T85, D12): get-or-create por `(source, external_id)`."""
+
+    def get_by_external_id(self, source: str, external_id: str) -> Item | None:
+        """Recupera un ítem por su clave natural."""
+        ...
+
+    def add_many(self, items: list[Item]) -> int:
+        """Inserta ítems nuevos, deduplicando por `(source, external_id)`."""
         ...
 
 
@@ -216,6 +234,18 @@ class ArchiveRepository(Protocol):
         """Soluciones activas del planeta, cada una con `is_default_current`."""
         ...
 
+    def confirmed_added_since(self, day: date) -> list[tuple[ArchiveSolution, bool]]:
+        """Altas `Published Confirmed` activas con `releasedate >= day` (T85), cada una
+        con `is_default_current`; orden `(releasedate, solution_key)`."""
+        ...
+
+    def active_solutions_of(
+        self, planets: Collection[str]
+    ) -> dict[str, list[tuple[ArchiveSolution, bool]]]:
+        """Soluciones activas (cualquier `soltype`) de varios planetas, con
+        `is_default_current`, por `pl_name` y ordenadas por `solution_key` (T85)."""
+        ...
+
 
 class ArchiveDigestReader(Protocol):
     """Lectura del resumen semanal de cambios de referencia (T84). Solo lectura."""
@@ -246,4 +276,28 @@ class TensionEvaluationRepository(Protocol):
 
     def update(self, evaluation: TensionEvaluation) -> None:
         """Sustituye la evaluación con el mismo `id`."""
+        ...
+
+
+class SolutionTensionRepository(Protocol):
+    """Persistencia de `SolutionTension` (T85). Una fila por (alta, parámetro)."""
+
+    def add(self, tension: SolutionTension) -> None:
+        """Inserta la tensión; `(new_solution_key, parameter)` es único."""
+        ...
+
+    def get(self, tension_id: UUID) -> SolutionTension | None:
+        """Recupera por id."""
+        ...
+
+    def all(self) -> list[SolutionTension]:
+        """Todas, ordenadas por `computed_at`, `id`."""
+        ...
+
+    def keys_computed(self) -> frozenset[tuple[str, MeasuredParameter]]:
+        """`(new_solution_key, parameter)` ya calculados (idempotencia)."""
+        ...
+
+    def set_item(self, tension_id: UUID, item_id: UUID) -> None:
+        """Enlaza la tensión con su `Item` del archivo (D12). `LookupError` si no existe."""
         ...

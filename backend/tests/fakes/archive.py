@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from nocturna.domain.archive import (
@@ -19,6 +19,7 @@ from nocturna.domain.archive import (
     SnapshotDiff,
     SnapshotKind,
 )
+from nocturna.domain.tension import PUBLISHED_CONFIRMED
 
 
 @dataclass
@@ -113,3 +114,25 @@ class InMemoryArchiveRepository:
             for st in self.stored.values()
             if st.removed_at is None and st.solution.pl_name == pl_name
         ]
+
+    def confirmed_added_since(self, day: date) -> list[tuple[ArchiveSolution, bool]]:
+        found = [
+            (st.solution, st.is_default_current)
+            for st in self.stored.values()
+            if st.removed_at is None
+            and st.solution.soltype == PUBLISHED_CONFIRMED
+            and st.solution.releasedate >= day
+        ]
+        return sorted(found, key=lambda p: (p[0].releasedate, p[0].solution_key))
+
+    def active_solutions_of(
+        self, planets: Collection[str]
+    ) -> dict[str, list[tuple[ArchiveSolution, bool]]]:
+        wanted = set(planets)
+        result: dict[str, list[tuple[ArchiveSolution, bool]]] = {}
+        for st in sorted(self.stored.values(), key=lambda s: s.solution.solution_key):
+            if st.removed_at is None and st.solution.pl_name in wanted:
+                result.setdefault(st.solution.pl_name, []).append(
+                    (st.solution, st.is_default_current)
+                )
+        return result

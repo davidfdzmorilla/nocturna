@@ -116,6 +116,11 @@ contra su presupuesto. La construcción de `ReadItem`/`PopularizeReading`/
 su constructor (asignación de atributos), a diferencia de `AgentSDKProvider()`
 y `load_prompt(...)`, que sí se han adelantado.
 
+T85: `run-item` (y `run-item --reader v3 --force`) solo trabaja con ítems de
+`source = 'arxiv'`: uno del archivo (`exoplanet_archive`) se rechaza con el
+código propio `10` (`_EXIT_ITEM_NOT_ARXIV`) antes de abrir ningún Run ni
+construir `AgentRunner`: cero `agent_calls`.
+
 Códigos de salida de `run-night` sin `--dry-run` (los de `run-item`, 1–6,
 no cambian): `0` `RunNightResult.status is COMPLETED`, `7` `PARTIAL`, `8`
 `KILLED` (`_EXIT_CODE_BY_RUN_STATUS`), `1` una excepción escapó de
@@ -190,14 +195,14 @@ import sys
 import traceback
 from collections import Counter
 from collections.abc import Awaitable, Callable, Generator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.application.agents.prompt_loader import (
@@ -222,6 +227,12 @@ from nocturna.application.budget import (
 )
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
 from nocturna.application.use_cases.archive_digest import GetWeeklyDigest, ListDigestWeeks
+from nocturna.application.use_cases.compute_solution_tensions import (
+    ComputeSolutionTensions,
+    SolutionTensionReport,
+    SolutionTensionWork,
+    SolutionTensionWorkFactory,
+)
 from nocturna.application.use_cases.compute_tensions import (
     ComputeTensions,
     ResolutionFailure,
@@ -268,12 +279,13 @@ from nocturna.application.use_cases.write_tensions import (
 from nocturna.domain.archive import ArchiveSolution
 from nocturna.domain.archive_digest import TransitionKind, WeeklyDigest, week_bounds
 from nocturna.domain.clock import Clock
-from nocturna.domain.entities import Item, Reading, Run, RunStatus
+from nocturna.domain.entities import ITEM_SOURCE_ARXIV, Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.domain.own_solution import OwnSolutionRule
 from nocturna.domain.repositories import ArchiveRepository
+from nocturna.domain.solution_tension import SolutionTension, SolutionTensionRule
 from nocturna.domain.sources import ArxivSource
 from nocturna.domain.tension import EvaluationStatus, PeriodRule, TensionEvaluation
 from nocturna.infrastructure.arxiv.atom import ArxivFeedError
@@ -295,6 +307,7 @@ from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
     SqlAlchemyRunRepository,
+    SqlAlchemySolutionTensionRepository,
     SqlAlchemyTensionEvaluationRepository,
 )
 from nocturna.infrastructure.db.session import (
@@ -578,7 +591,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "item_id",
         type=UUID,
         metavar="ITEM_ID",
-        help="UUID del Item a leer. Un UUID mal formado es un error de argumentos (código 2).",
+        help=(
+            "UUID del Item a leer. Un UUID mal formado es un error de argumentos (código 2). "
+            "Un Item que no es de arXiv (p. ej. del archivo de exoplanetas) se rechaza con "
+            "el código 10, sin abrir Run ni llamar a ningún agente."
+        ),
     )
     run_item.add_argument(
         "--reader",
@@ -645,6 +662,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     evaluate_tensions.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Calcula e informa, pero no escribe nada en la base de datos.",
+    )
+
+    solution_tensions = subparsers.add_parser(
+        "solution-tensions",
+        help="Calcula las tensiones entre soluciones del archivo (sin LLM, sin red).",
+        description=(
+            "Para cada alta Published Confirmed del NASA Exoplanet Archive desde "
+            "[solution_tensions] since, compara masa, radio y periodo con su referencia y "
+            "guarda una fila por (alta, parámetro), incluidas las excluidas con su motivo. "
+            "Idempotente. No usa Claude ni red ni gasta tokens. Códigos: 0 ok, 1 error."
+        ),
+    )
+    solution_tensions.add_argument(
         "--dry-run",
         action="store_true",
         help="Calcula e informa, pero no escribe nada en la base de datos.",
@@ -1156,8 +1189,129 @@ def _evaluate_tensions(args: argparse.Namespace) -> int:
 #: evaluación de tensiones posterior falló (T88). El snapshot NO se deshace.
 _EXIT_EVALUATION_FAILED = 3
 
+#: Código de salida de `run-item` (con y sin `--reader v3 --force`) cuando el
+#: ítem no es de arXiv (T85): los ítems del archivo no los lee ningún agente.
+_EXIT_ITEM_NOT_ARXIV = 10
+
+
+def _refuse_non_arxiv(item: Item | None) -> bool:
+    """`True` (y mensaje a stderr) si `item` existe y no es de arXiv (T85)."""
+    if item is None or item.source == ITEM_SOURCE_ARXIV:
+        return False
+    print(
+        f"el Item {item.external_id} es de la fuente '{item.source}', no de '{ITEM_SOURCE_ARXIV}': "
+        "ningún agente lee ítems del archivo; no se hace nada",
+        file=sys.stderr,
+    )
+    return True
+
+
+def solution_tension_rule_from_config(config: PipelineConfig) -> SolutionTensionRule:
+    """`SolutionTensionRule` de `[solution_tensions]`, `[tension]` y `[tension.period]` (T85)."""
+    settings = config.solution_tensions
+    return SolutionTensionRule(
+        threshold_sigma=config.tension.threshold_sigma,
+        since=settings.since,
+        max_pubdate_age_months=settings.max_pubdate_age_months,
+        period_rule=period_rule_from_config(config),
+    )
+
+
+def _solution_tension_work(session: Session) -> SolutionTensionWork:
+    return SolutionTensionWork(
+        archive=SqlAlchemyArchiveRepository(session),
+        solution_tensions=SqlAlchemySolutionTensionRepository(session),
+        items=SqlAlchemyItemRepository(session),
+    )
+
+
+def compute_solution_tensions_from_config(
+    config: PipelineConfig, session: Session, clock: Clock
+) -> ComputeSolutionTensions:
+    """`ComputeSolutionTensions` sobre `session`. Sin LLM, sin `BudgetGuard` (T85)."""
+    work: SolutionTensionWorkFactory = lambda: nullcontext(_solution_tension_work(session))  # noqa: E731
+    return ComputeSolutionTensions(work, solution_tension_rule_from_config(config), clock)
+
+
+_SOLUTION_TENSION_LIST_CAP = 50
+
+
+def _format_solution_tensions_report(report: SolutionTensionReport, *, since: date) -> str:
+    """Informe de `solution-tensions` y de la sección del `--dry-run`: puro y determinista."""
+    lines = [
+        "Tensiones entre soluciones del NASA Exoplanet Archive"
+        f"{' [dry-run: no se escribió nada]' if report.dry_run else ''}:",
+        f"  altas Published Confirmed activas desde {since.isoformat()}: {report.altas}",
+        f"  pares (alta, parámetro) ya calculados: {report.already_computed}",
+        f"  calculados ahora: {len(report.computed)} "
+        f"(elegibles {len(report.eligible)}, excluidos {len(report.excluded)})",
+        "  excluidos por motivo: "
+        + (", ".join(f"{reason.value}={n}" for reason, n in report.by_skip_reason.items()) or "-"),
+        f"  sin referencia posible (sin fila): {len(report.no_reference)}",
+        f"  ítems del archivo {'que se crearían' if report.dry_run else 'creados'}: "
+        f"{report.items_created} (reutilizados {report.items_reused})",
+    ]
+
+    def _line(t: SolutionTension) -> str:
+        sigma = "-" if t.sigma is None else f"{t.sigma:.2f}σ"
+        labels = f" [{', '.join(label.value for label in t.labels)}]" if t.labels else ""
+        reason = "" if t.skip_reason is None else f" · {t.skip_reason.value}"
+        return (
+            f"    {t.planet_name} · {t.parameter.value} · {sigma} · "
+            f"{t.new.reference} frente a {t.reference.reference} "
+            f"({t.reference_role.value}){reason}{labels}"
+        )
+
+    for title, group in (("elegibles", report.eligible), ("excluidas", report.excluded)):
+        if not group:
+            continue
+        lines.append(f"  {title}:")
+        lines.extend(_line(t) for t in group[:_SOLUTION_TENSION_LIST_CAP])
+        if len(group) > _SOLUTION_TENSION_LIST_CAP:
+            lines.append(f"    ... y {len(group) - _SOLUTION_TENSION_LIST_CAP} más")
+    return "\n".join(lines)
+
+
+def _print_solution_tensions_section(
+    session: Session, config: PipelineConfig, clock: Clock
+) -> None:
+    """Sección "Tensiones entre soluciones" de `run-night --dry-run` (T85): calcula
+    con `dry_run=True` sobre la sesión sin commit y no escribe nada."""
+    report = compute_solution_tensions_from_config(config, session, clock)(dry_run=True)
+    print("Tensiones entre soluciones:")
+    print(_format_solution_tensions_report(report, since=config.solution_tensions.since))
+
+
+def _solution_tensions(args: argparse.Namespace) -> int:
+    """`solution-tensions`: `0` ok; `1` error de dato o de base (no se persiste
+    nada); `2` argumentos (argparse); nunca `3` (ese código es de
+    `archive-snapshot`). Sin LLM: no importa `claude_agent_sdk`."""
+    if not args.dry_run:
+        configure_json_logging()
+    settings = Settings()
+    config = load_pipeline_config()
+    clock = system_clock_from_config(config)
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    try:
+        with unit_of_work(session_factory, commit=not args.dry_run) as session:
+            report = compute_solution_tensions_from_config(config, session, clock)(
+                dry_run=args.dry_run
+            )
+    except (InvariantViolation, SQLAlchemyError, ValueError, LookupError) as exc:
+        print(f"solution-tensions falló: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        engine.dispose()
+    print(_format_solution_tensions_report(report, since=config.solution_tensions.since))
+    return 0
+
 
 def _archive_snapshot(args: argparse.Namespace) -> int:
+    """`archive-snapshot`: `0` ok; `1` el snapshot falló (nada confirmado);
+    `3` el snapshot está guardado pero falló la evaluación de tensiones (T88)
+    o el cálculo de tensiones entre soluciones (T85), o hubo fallos parciales
+    en la evaluación."""
     """`archive-snapshot`: `0` ok; `1` archivo no disponible, dato inválido o
     guarda de cambios masivos (no se persiste nada); `2` argumentos (argparse);
     `3` snapshot guardado pero la evaluación de tensiones posterior falló (el
@@ -1182,6 +1336,7 @@ def _archive_snapshot(args: argparse.Namespace) -> int:
 
     # Evaluación de tensiones en OTRA unidad de trabajo: si falla, el snapshot
     # ya está confirmado y no se toca.
+    exit_code = 0
     try:
         with unit_of_work(session_factory) as session:
             evaluation, _requests = asyncio.run(
@@ -1193,9 +1348,29 @@ def _archive_snapshot(args: argparse.Namespace) -> int:
             f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
             file=sys.stderr,
         )
+        exit_code = _EXIT_EVALUATION_FAILED
+    else:
+        print(_format_evaluation_report(evaluation, dry_run=False))
+        if evaluation.failures:
+            exit_code = _EXIT_EVALUATION_FAILED
+
+    # T85: tensiones entre soluciones, en una tercera unidad de trabajo (no
+    # depende de la evaluación; solo lee el snapshot ya confirmado). Un fallo
+    # aquí tampoco deshace nada: código 3.
+    try:
+        with unit_of_work(session_factory) as session:
+            solution_report = compute_solution_tensions_from_config(config, session, clock)(
+                dry_run=False
+            )
+    except Exception as exc:  # noqa: BLE001 - el snapshot ya está confirmado: cualquier fallo -> 3
+        print(
+            "archive-snapshot: snapshot guardado, pero las tensiones entre soluciones fallaron: "
+            f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
         return _EXIT_EVALUATION_FAILED
-    print(_format_evaluation_report(evaluation, dry_run=False))
-    return _EXIT_EVALUATION_FAILED if evaluation.failures else 0
+    print(_format_solution_tensions_report(solution_report, since=config.solution_tensions.since))
+    return exit_code
 
 
 def _evaluation_sigma(evaluation: TensionEvaluation) -> float | None:
@@ -1794,6 +1969,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
             )
             _print_measurement_findings_section(session, config, clock)
             _print_writer_section(session, config)
+            _print_solution_tensions_section(session, config, clock)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
             try:
                 _print_tension_section(session, config, clock, pairs, runs_with_reader_v3)
@@ -2469,6 +2645,12 @@ def _run_item(args: argparse.Namespace) -> int:
     engine = create_db_engine(settings)
     session_factory = create_session_factory(engine)
 
+    # T85: un ítem que no es de arXiv se rechaza antes de abrir ningún Run y de
+    # construir `AgentRunner`: cero `agent_calls`.
+    with unit_of_work(session_factory) as session:
+        if _refuse_non_arxiv(SqlAlchemyItemRepository(session).get(args.item_id)):
+            return _EXIT_ITEM_NOT_ARXIV
+
     # Los dos prompts del Reader (T71.c) se cargan antes de abrir ningún
     # Run, mismo orden que `_run_night_for_real` (revisión de T44, punto 3):
     # un fichero de prompt ausente (`FileNotFoundError`) no debe dejar un
@@ -2563,7 +2745,8 @@ def _reread_item(args: argparse.Namespace) -> int:
     """`run-item <id> --reader v3 --force` (T82): relee un ítem ya leído con
     `reader-v3` y sustituye su `Reading` vigente. Solo Reader.
 
-    Códigos de salida: `0` releído (Run `COMPLETED`) · `1` lectura fallida
+    Códigos de salida: `0` releído (Run `COMPLETED`) · `10` el ítem no es de arXiv (T85), sin Run ·
+    `1` lectura fallida
     (Run `PARTIAL`) · `2` argumentos (lo decide `main`) · `3` el ítem no
     existe, no tiene lectura vigente o no es elegible (`reread_refusal`),
     sin Run · `4` fuera de ventana (sin Run) o denegación de `BudgetGuard`
@@ -2597,6 +2780,8 @@ def _reread_item(args: argparse.Namespace) -> int:
     if item is None:
         print(f"no existe ningún Item con id={args.item_id}", file=sys.stderr)
         return 3
+    if _refuse_non_arxiv(item):
+        return _EXIT_ITEM_NOT_ARXIV
     if previous is None:
         print(
             f"el Item {item.external_id} no tiene una lectura vigente que releer "
@@ -2703,6 +2888,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _archive_digest(args)
     if args.command == "evaluate-tensions":
         return _evaluate_tensions(args)
+    if args.command == "solution-tensions":
+        return _solution_tensions(args)
     return _run_night(args)
 
 

@@ -21,7 +21,7 @@ transacción, sin cerrarla), nunca confirman la transacción.
 """
 
 from collections.abc import Collection, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from itertools import batched
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -38,19 +38,22 @@ from nocturna.domain.archive import (
 )
 from nocturna.domain.archive_digest import DefaultTransition, iso_week_of
 from nocturna.domain.entities import (
+    ITEM_SOURCE_ARXIV,
     AgentCall,
     AgentCallStatus,
     Finding,
     FindingType,
     Item,
     ItemStatus,
+    MeasuredParameter,
     Reading,
     Run,
     RunStatus,
 )
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentRole
-from nocturna.domain.tension import TensionEvaluation
+from nocturna.domain.solution_tension import SolutionTension
+from nocturna.domain.tension import PUBLISHED_CONFIRMED, TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
     agent_call_to_row,
     apply_tension_evaluation,
@@ -67,6 +70,8 @@ from nocturna.infrastructure.db.mappers import (
     reading_to_row,
     run_from_row,
     run_to_row,
+    solution_tension_from_row,
+    solution_tension_to_row,
     tension_evaluation_from_row,
     tension_evaluation_to_row,
 )
@@ -79,6 +84,7 @@ from nocturna.infrastructure.db.models import (
     ItemRow,
     ReadingRow,
     RunRow,
+    SolutionTensionRow,
     TensionEvaluationRow,
 )
 
@@ -141,6 +147,11 @@ class SqlAlchemyItemRepository:
         row = self._session.get(ItemRow, item_id)
         return item_from_row(row) if row is not None else None
 
+    def get_by_external_id(self, source: str, external_id: str) -> Item | None:
+        stmt = select(ItemRow).where(ItemRow.source == source, ItemRow.external_id == external_id)
+        row = self._session.execute(stmt).scalar_one_or_none()
+        return item_from_row(row) if row is not None else None
+
     def next_unread(self, limit: int) -> list[Item]:
         # T79: los ítems marcados `exoplanet_match` van primero, para que con
         # `limit` (max_items_per_night) los candidatos a `reader-v3` no queden
@@ -151,10 +162,11 @@ class SqlAlchemyItemRepository:
         # devolverlos en cualquier orden entre ellos. `external_id ASC`
         # desempata de forma determinista para que `run-item` y una
         # re-ejecución de la noche vean siempre el mismo orden. El LIMIT se
-        # aplica después de ordenar.
+        # aplica después de ordenar. T85, guarda de gasto: solo `source = 'arxiv'`;
+        # los ítems del archivo (`exoplanet_archive`) no los lee ningún agente.
         stmt = (
             select(ItemRow)
-            .where(ItemRow.status == ItemStatus.NEW)
+            .where(ItemRow.status == ItemStatus.NEW, ItemRow.source == ITEM_SOURCE_ARXIV)
             .order_by(
                 ItemRow.exoplanet_match.desc(),
                 ItemRow.fetched_at.asc(),
@@ -559,6 +571,40 @@ class SqlAlchemyArchiveRepository:
             for row in self._session.execute(stmt).scalars()
         ]
 
+    def confirmed_added_since(self, day: date) -> list[tuple[ArchiveSolution, bool]]:
+        stmt = (
+            select(ArchiveSolutionRow)
+            .where(
+                ArchiveSolutionRow.removed_at.is_(None),
+                ArchiveSolutionRow.soltype == PUBLISHED_CONFIRMED,
+                ArchiveSolutionRow.releasedate >= day,
+            )
+            .order_by(ArchiveSolutionRow.releasedate, ArchiveSolutionRow.solution_key)
+        )
+        return [
+            (archive_solution_from_row(row), row.is_default_current)
+            for row in self._session.execute(stmt).scalars()
+        ]
+
+    def active_solutions_of(
+        self, planets: Collection[str]
+    ) -> dict[str, list[tuple[ArchiveSolution, bool]]]:
+        result: dict[str, list[tuple[ArchiveSolution, bool]]] = {}
+        for chunk in batched(sorted(set(planets)), _UPSERT_CHUNK):
+            stmt = (
+                select(ArchiveSolutionRow)
+                .where(
+                    ArchiveSolutionRow.removed_at.is_(None),
+                    ArchiveSolutionRow.pl_name.in_(chunk),
+                )
+                .order_by(ArchiveSolutionRow.pl_name, ArchiveSolutionRow.solution_key)
+            )
+            for row in self._session.execute(stmt).scalars():
+                result.setdefault(row.pl_name, []).append(
+                    (archive_solution_from_row(row), row.is_default_current)
+                )
+        return result
+
     def save_snapshot(
         self,
         snapshot: ArchiveSnapshot,
@@ -730,4 +776,37 @@ class SqlAlchemyTensionEvaluationRepository:
         if row is None:
             raise LookupError(f"no existe TensionEvaluation con id={evaluation.id}")
         apply_tension_evaluation(row, evaluation)
+        self._session.flush()
+
+
+class SqlAlchemySolutionTensionRepository:
+    """Persistencia de `SolutionTension` (T85). Cumple
+    `domain.repositories.SolutionTensionRepository`; no confirma ni deshace."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, tension: SolutionTension) -> None:
+        self._session.add(solution_tension_to_row(tension))
+        self._session.flush()
+
+    def get(self, tension_id: UUID) -> SolutionTension | None:
+        row = self._session.get(SolutionTensionRow, tension_id)
+        return None if row is None else solution_tension_from_row(row)
+
+    def all(self) -> list[SolutionTension]:
+        stmt = select(SolutionTensionRow).order_by(
+            SolutionTensionRow.computed_at, SolutionTensionRow.id
+        )
+        return [solution_tension_from_row(r) for r in self._session.execute(stmt).scalars()]
+
+    def keys_computed(self) -> frozenset[tuple[str, MeasuredParameter]]:
+        stmt = select(SolutionTensionRow.new_solution_key, SolutionTensionRow.parameter)
+        return frozenset((key, parameter) for key, parameter in self._session.execute(stmt))
+
+    def set_item(self, tension_id: UUID, item_id: UUID) -> None:
+        row = self._session.get(SolutionTensionRow, tension_id)
+        if row is None:
+            raise LookupError(f"no existe SolutionTension con id={tension_id}")
+        row.item_id = item_id
         self._session.flush()

@@ -8,7 +8,7 @@ lugar de degradar a un presupuesto "seguro" inventado.
 
 import re
 import tomllib
-from datetime import time
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -447,6 +447,33 @@ class MeasurementFindingsConfig(BaseModel):
     confirmation_enabled: StrictBool
 
 
+class SolutionTensionsConfig(BaseModel):
+    """Tensiones entre soluciones del archivo (T85, `[solution_tensions]`).
+    Sin defaults en código.
+
+    `since`: fecha de entrada (`releasedate`) mínima de las altas que se
+    calculan; las anteriores no se tocan. `max_pubdate_age_months`: una alta
+    cuyo `pl_pubdate` es más de N meses anterior a su `releasedate` se excluye
+    (`old_paper`). `writer_enabled`: para T85.e; en T85 no se lee.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    since: date
+    max_pubdate_age_months: int = Field(ge=1, le=240)
+    writer_enabled: StrictBool
+
+    @field_validator("since", mode="before")
+    @classmethod
+    def _since_is_iso_date_string(cls, value: object) -> object:
+        """Solo `YYYY-MM-DD`: un entero o una fecha con hora es una errata."""
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            return value
+        raise ValueError("'since' debe ser una fecha 'YYYY-MM-DD'")
+
+
 class PipelineConfig(BaseModel):
     """Configuración completa del pipeline, agregando todas las secciones."""
 
@@ -462,6 +489,7 @@ class PipelineConfig(BaseModel):
     tension: TensionConfig
     exoplanet_filter: ExoplanetFilterConfig
     measurement_findings: MeasurementFindingsConfig
+    solution_tensions: SolutionTensionsConfig
 
     @model_validator(mode="after")
     def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":

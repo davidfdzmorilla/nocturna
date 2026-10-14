@@ -46,6 +46,9 @@ from nocturna.domain.errors import (
 )
 from nocturna.domain.llm import AgentRole
 
+ITEM_SOURCE_ARXIV = "arxiv"
+ITEM_SOURCE_EXOPLANET_ARCHIVE = "exoplanet_archive"
+
 
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -767,6 +770,64 @@ class Reading:
                     raise InvariantViolation("cada elemento de 'measurements' debe ser Measurement")
 
 
+class ReferenceRole(StrEnum):
+    """Por qué una solución es la referencia de una `SolutionTension` (T85, D5)."""
+
+    DEFAULT = "default"
+    MOST_RECENT = "most_recent"
+
+
+class SolutionTensionLabel(StrEnum):
+    """Etiquetas de una `SolutionTension` (T85, D9/D10)."""
+
+    MODEL_DEPENDENT = "model_dependent"
+    CONTROVERSIAL = "controversial"
+
+
+@dataclass(frozen=True, slots=True)
+class SolutionComparison:
+    """Una solución del archivo con su σ frente a otra (T85)."""
+
+    solution: CatalogSolution
+    sigma: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.sigma) or self.sigma < 0:
+            raise InvariantViolation("'sigma' debe ser finito y >= 0")
+
+
+@dataclass(frozen=True, slots=True)
+class SolutionTensionData:
+    """Tensión entre dos soluciones del archivo, publicable (T85, D13).
+
+    Value object sin identidad: nace dentro de `Finding.solution_tension`.
+    """
+
+    planet_name: str
+    parameter: MeasuredParameter
+    archive_url: str
+    threshold_sigma: float
+    sigma: float
+    new: CatalogSolution
+    reference: CatalogSolution
+    others: tuple[SolutionComparison, ...]
+    labels: tuple[SolutionTensionLabel, ...]
+    reference_role: ReferenceRole
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.planet_name, "planet_name")
+        _require_non_empty(self.archive_url, "archive_url")
+        object.__setattr__(self, "others", tuple(self.others))
+        object.__setattr__(self, "labels", tuple(self.labels))
+        if not math.isfinite(self.threshold_sigma) or self.threshold_sigma <= 0:
+            raise InvariantViolation("'threshold_sigma' debe ser finito y mayor que cero")
+        if not math.isfinite(self.sigma) or self.sigma < self.threshold_sigma:
+            raise InvariantViolation("'sigma' debe ser finito y >= 'threshold_sigma'")
+        for solution in (self.new, self.reference):
+            if solution.parameter != self.parameter:
+                raise InvariantViolation("las soluciones deben ser del 'parameter' de la tensión")
+
+
 class FindingType(StrEnum):
     """Tipo de hallazgo publicado: explicación de un paper, tensión con el
     catálogo, primera medida o confirmación independiente (T89)."""
@@ -775,6 +836,7 @@ class FindingType(StrEnum):
     CATALOG_TENSION = "catalog_tension"
     PRIMERA_MEDIDA = "primera_medida"
     CONFIRMACION_INDEPENDIENTE = "confirmacion_independiente"
+    SOLUTION_TENSION = "solution_tension"
 
 
 @dataclass(slots=True)
@@ -798,6 +860,9 @@ class Finding:
     first_measurement: FirstMeasurement | None = None
     independent_confirmation: IndependentConfirmation | None = None
     tension_evaluation_id: UUID | None = None
+    # T85: tensión entre soluciones del archivo y su fila de origen.
+    solution_tension: SolutionTensionData | None = None
+    solution_tension_id: UUID | None = None
 
     _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"confidence", "published_at"})
 
@@ -821,6 +886,7 @@ class Finding:
                 FindingType.CONFIRMACION_INDEPENDIENTE,
                 IndependentConfirmation,
             ),
+            ("solution_tension", FindingType.SOLUTION_TENSION, SolutionTensionData),
         ):
             payload = getattr(self, payload_name)
             if (self.type == payload_type) != (payload is not None):
@@ -838,6 +904,10 @@ class Finding:
             raise InvariantViolation(
                 "'tension_evaluation_id' debe informarse si y solo si 'type' es "
                 "catalog_tension, primera_medida o confirmacion_independiente"
+            )
+        if (self.type == FindingType.SOLUTION_TENSION) != (self.solution_tension_id is not None):
+            raise InvariantViolation(
+                "'solution_tension_id' debe informarse si y solo si 'type' es solution_tension"
             )
         if (self.published_at is None) != (self.confidence is None):
             raise InvariantViolation(

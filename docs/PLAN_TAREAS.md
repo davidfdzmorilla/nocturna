@@ -390,12 +390,29 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: lo fija el plan.
 
 ### T85 · Tensiones solución contra solución
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T81, T73, T72
 - **Toca agentes y gasto**: solo a través del redactor y el Editor.
 - **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b).
 - **Alcance**: tensiones entre soluciones del archivo con las reglas deterministas 1–3 y 5 del estudio como filtro (solo `Published Confirmed`, distinta referencia, sin papers antiguos incorporados ahora, reglas de periodo); la 6 ("depende del modelo") y la 7 (`pl_controv_flag`) como etiquetas visibles para el Editor, no como descarte. Un `Finding` de esta vía cuelga de un `Item` con `source = 'exoplanet_archive'` y `external_id = solution_key`.
 - **Hecho cuando**: lo fija el plan.
+- **Cierre (2026-10-14; pendiente de merge con migración `b6d2f8a4c917`, que se aplica a la base real el mismo día del merge, antes de las 00:00 y fuera de 00:00–04:45)**: plan aprobado por el autor con las recomendaciones D1–D16 (ADR 0029); al revisar, el autor decidió además excluir de la referencia las filas del mismo paper que la alta. Partida en T85 (cálculo y persistencia, sin tokens), T85.e y T85.w. `domain/solution_tension.py` (σ de ADR 0015 vía `pairwise_sigma`, referencia, reglas 1, 2, 3 con 24 meses, TTV y 5, etiquetas `model_dependent` y `controversial`, entidad `SolutionTension` con invariantes); `ComputeSolutionTensions` sin proveedor; tabla `solution_tension` y tipo `solution_tension` en `findings` (CHECK si y solo si, sin productores aún); `Item` del archivo con `source = 'exoplanet_archive'`; `nocturna solution-tensions [--dry-run]`, paso nuevo en `archive-snapshot` y sección en `run-night --dry-run`; `[solution_tensions]` en `pipeline.toml` (`since = 2026-08-01`, 24 meses, `writer_enabled = false`). Guardas de gasto: `next_unread` solo arXiv, `run-item` sale con 10, `ReadItem`, relectura y `PopularizeReading` rechazan otra fuente, downgrade que se niega con ítems del archivo; `?type=` de la API sigue con cuatro tipos. Base real (solo lectura): 16 pares ≥ 3σ con la solución por defecto desde el 2026-08-01; HD 202206 c da 8,2σ en masa y 3,46σ en periodo frente a Benedict & Harrison 2017. 34 de 34 mutantes muertos; revisión normal con una pasada de `budget-guard-review`, sus correcciones aplicadas y segunda revisión aprobada. Suite: 3046 passed (479 de `-m db`).
+
+### T85.e · Redactor y Editor de las tensiones entre soluciones
+- **Estado**: pending
+- **Depende de**: T85
+- **Toca agentes y gasto**: sí. **Dos pasadas de revisión con `budget-guard-review`.**
+- **Origen**: partición de T85 (D1, ADR 0029).
+- **Alcance**: `SelectSolutionTensions` (solo lectura) y `WriteSolutionTensions` a través de `AgentRunner` con rol `writer`; prompt `writer-archive-v1` y `editor-v4` con la línea `data` del tipo `solution_tension` y sus etiquetas; en `_phase_writer`, primero arXiv y después el archivo, con el tope y la reserva compartidos; `SolutionTensionOut` en la API por lista blanca y `?type=solution_tension`; `night_report.sql`. Activo solo con `[solution_tensions] writer_enabled = true`.
+- **Hecho cuando**: lo fija el plan; humos `-m manual` solo con autorización del autor.
+
+### T85.w · Web de las tensiones entre soluciones
+- **Estado**: pending
+- **Depende de**: T85.e
+- **Toca agentes y gasto**: no.
+- **Origen**: partición de T85 (D1, D16, ADR 0029).
+- **Alcance**: etiqueta y slug del tipo `solution_tension`, bloque de datos con las dos soluciones y las etiquetas `model_dependent` y `controversial` visibles; al cerrarla, el autor activa `writer_enabled` con un commit `chore(config)` aparte.
+- **Hecho cuando**: tests con la API simulada, guardas `no-claude-in-web` y `no-raw-html`, `pnpm lint` y `pnpm build` con la API parada, Lighthouse de accesibilidad ≥ 90 en un detalle del tipo nuevo.
 
 ### T86 · ADR 0021: criterio de cierre de fase 2 (supersede a ADR 0012)
 - **Estado**: pending

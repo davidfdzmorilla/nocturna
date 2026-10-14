@@ -28,6 +28,7 @@ EXPECTED_TABLES = {
     "archive_solution",
     "archive_default_change",
     "tension_evaluation",
+    "solution_tension",
 }
 
 # Revisión anterior a "950738867fb9" (item failed status and agent call
@@ -133,6 +134,8 @@ def test_columnas_y_nulabilidad_de_findings(scratch_database_url):
         "first_measurement",
         "independent_confirmation",
         "tension_evaluation_id",
+        "solution_tension",
+        "solution_tension_id",
     }
     assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:

@@ -395,6 +395,7 @@ def test_finding_type_contiene_exactamente_los_valores_esperados():
         "catalog_tension",
         "primera_medida",
         "confirmacion_independiente",
+        "solution_tension",
     }
 
 

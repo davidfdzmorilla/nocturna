@@ -197,7 +197,7 @@ SELECT
     MIN(fetched_at) AS mas_antiguo_fetched_at,
     ROUND(EXTRACT(EPOCH FROM (now() - MIN(fetched_at))) / 3600.0, 1) AS antiguedad_horas
 FROM items
-WHERE status = 'new';
+WHERE status = 'new' AND source = 'arxiv';
 
 \echo ''
 \echo '=== Q7 · Candidatos huérfanos (Finding sin publicar, Item aún READ) ==='
