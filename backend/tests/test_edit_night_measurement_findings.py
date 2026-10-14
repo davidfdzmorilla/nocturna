@@ -85,6 +85,7 @@ def _edit_night(env: Environment, fake: FakeLLMProvider) -> EditNight:
         max_attempts=1,
         base_tokens=BASE_TOKENS,
         tokens_per_candidate=PER_CANDIDATE,
+        extreme_sigma=50,
     )
 
 
@@ -257,6 +258,7 @@ async def test_la_estimacion_cuenta_todos_los_candidatos():
         max_attempts=1,
         base_tokens=BASE_TOKENS,
         tokens_per_candidate=PER_CANDIDATE,
+        extreme_sigma=50,
     )
 
     await edit_night(run_id=env.run.id)

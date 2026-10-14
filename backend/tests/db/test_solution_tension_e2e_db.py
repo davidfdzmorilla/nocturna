@@ -4,7 +4,7 @@ Sin red (archivo servido por `httpx.MockTransport`) y sin Claude. Cubre: HD 2022
 (masa y periodo frente a Benedict & Harrison 2017), frontera de `since` en SQL,
 `--dry-run` sin escrituras en NINGUNA tabla, `archive-snapshot` con código 3 si el
 paso nuevo falla, la sección de `run-night --dry-run`, `next_unread` mezclado y
-`/findings?type=solution_tension` -> 422.
+`/findings?type=solution_tension` -> 200 y detalle de un `solution_tension` publicado (T85.e).
 """
 
 from __future__ import annotations
@@ -310,7 +310,7 @@ def test_next_unread_nunca_devuelve_items_del_archivo_aunque_vayan_antes_y_con_m
             assert [i.id for i in got] == [arxiv_match.id, arxiv_old.id][:limit]
 
 
-# --- API: el tipo aun no se expone -------------------------------------------------
+# --- API: el tipo se expone desde T85.e -------------------------------------------------
 
 
 @pytest.fixture
@@ -327,17 +327,70 @@ async def client(db_session: Session) -> AsyncGenerator[httpx.AsyncClient, None]
 
 
 @pytest.mark.anyio
-async def test_findings_con_type_solution_tension_devuelve_422(client: httpx.AsyncClient):
-    response = await client.get("/findings", params={"type": "solution_tension"})
-    assert response.status_code == 422
-    body = response.text.lower()
-    assert "sqlalchemy" not in body and "psycopg" not in body and "traceback" not in body
+@pytest.mark.parametrize(
+    "type_",
+    [
+        "paper_explained",
+        "catalog_tension",
+        "primera_medida",
+        "confirmacion_independiente",
+        "solution_tension",
+    ],
+)
+async def test_los_cinco_tipos_son_aceptados(client: httpx.AsyncClient, type_: str):
+    response = await client.get("/findings", params={"type": type_})
+    assert response.status_code == 200
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    "type_", ["paper_explained", "catalog_tension", "primera_medida", "confirmacion_independiente"]
-)
-async def test_los_cuatro_tipos_vigentes_siguen_aceptados(client: httpx.AsyncClient, type_: str):
-    response = await client.get("/findings", params={"type": type_})
+async def test_detalle_de_un_solution_tension_publicado_solo_lleva_la_lista_blanca(
+    db_session_factory,
+) -> None:
+    from pathlib import Path
+
+    from factories import make_finding
+    from helpers.solution_tension_smoke import seed_hd202206c_solution_tension
+
+    from nocturna.domain.entities import FindingType
+    from nocturna.domain.solution_tension import solution_tension_data_from
+    from nocturna.infrastructure.config import load_pipeline_config
+    from nocturna.infrastructure.db.repositories import SqlAlchemyFindingRepository
+
+    config = load_pipeline_config(Path(__file__).resolve().parents[3] / "config" / "pipeline.toml")
+    seeded = seed_hd202206c_solution_tension(db_session_factory, config, run_budget_tokens=26_000)
+    data = solution_tension_data_from(seeded.mass, threshold_sigma=3.0, archive_url="https://x/y")
+    finding = make_finding(
+        seeded.item.id,
+        seeded.run_id,
+        type=FindingType.SOLUTION_TENSION,
+        solution_tension=data,
+        solution_tension_id=seeded.mass.id,
+    )
+    finding.publish(0.7, NOW)
+    with unit_of_work(db_session_factory) as session:
+        SqlAlchemyFindingRepository(session).add(finding)
+
+    app = create_app()
+
+    def _override() -> Generator[Session, None, None]:
+        with db_session_factory() as own_session:
+            yield own_session
+
+    app.dependency_overrides[get_session] = _override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        response = await c.get(f"/findings/{finding.id}")
+        listing = await c.get("/findings", params={"type": "solution_tension"})
+
     assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "solution_tension" and body["source_url"] is None
+    assert body["catalog_tension"] is None and body["first_measurement"] is None
+    detail = body["solution_tension"]
+    assert detail["planet_name"] == "HD 202206 c" and detail["new_releasedate"] == "2026-08-20"
+    assert detail["reference_role"] == "most_recent" and detail["labels"] == []
+    text = response.text
+    for forbidden in ("solution_key", "soltype", "pl_pubdate", "ttv_flag", "computed_at"):
+        assert forbidden not in text
+    assert "confidence" not in text and "run_id" not in text and "solution_tension_id" not in text
+    assert listing.status_code == 200 and listing.json()["total"] == 1

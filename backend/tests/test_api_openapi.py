@@ -36,7 +36,7 @@ def test_openapi_no_expone_campos_prohibidos() -> None:
         assert f'"{key}"' not in spec, f"la especificación OpenAPI expone '{key}'"
 
 
-def test_openapi_parametro_type_de_findings_es_enum_con_los_cuatro_valores() -> None:
+def test_openapi_parametro_type_de_findings_es_enum_con_los_cinco_valores() -> None:
     spec = create_app().openapi()
     params = spec["paths"]["/findings"]["get"]["parameters"]
     type_param = next(p for p in params if p["name"] == "type")
@@ -51,4 +51,5 @@ def test_openapi_parametro_type_de_findings_es_enum_con_los_cuatro_valores() -> 
         "catalog_tension",
         "primera_medida",
         "confirmacion_independiente",
+        "solution_tension",
     }

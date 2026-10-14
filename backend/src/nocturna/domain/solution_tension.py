@@ -19,6 +19,7 @@ from nocturna.domain.entities import (
     MeasuredParameter,
     ReferenceRole,
     SolutionComparison,
+    SolutionTensionData,
     SolutionTensionLabel,
 )
 from nocturna.domain.errors import InvariantViolation
@@ -333,4 +334,68 @@ def build_solution_tension(
             period_check=period_check,
             rule=rule,
         ),
+    )
+
+
+#: Motivo con el que el redactor del archivo (T85.e) no toma una tensión.
+NOT_ELIGIBLE = "not_eligible"
+
+#: Marca derivada (no persistida) de una σ extrema; ver `is_extreme_sigma`.
+EXTREME_SIGMA_LABEL = "extreme_sigma"
+
+
+def solution_writer_skip_reason(tension: SolutionTension) -> str | None:
+    """Motivo por el que el redactor no toma la tensión, o `None` (T85.e).
+
+    Solo se redacta lo elegible: sin `skip_reason` y con `Item` del archivo
+    enlazado (T85.d). Es el único motivo de este nivel; los demás (ya
+    redactada, redactor fallido) dependen de la base y viven en el caso de uso."""
+    if tension.skip_reason is not None or tension.item_id is None:
+        return NOT_ELIGIBLE
+    return None
+
+
+def is_extreme_sigma(sigma: float, extreme_sigma: float) -> bool:
+    """Marca derivada de T85.e (D5): la σ supera `[solution_tensions] extreme_sigma`.
+    No excluye nada ni se guarda: informa al redactor y al Editor de que la cifra
+    es enorme porque los errores son diminutos frente al cambio."""
+    return sigma > extreme_sigma
+
+
+def value_change(new: CatalogSolution, reference: CatalogSolution) -> tuple[float, float]:
+    """`(|v_new - v_ref| / v_ref, v_new / v_ref)` en la unidad canónica (T85.e, D3).
+
+    Cualquier parámetro, con ambas soluciones del mismo parámetro; la razón es
+    adimensional, así que las unidades de origen no importan."""
+    if new.parameter != reference.parameter:
+        raise InvariantViolation("'value_change' compara soluciones del mismo parámetro")
+    v_new = to_canonical(new.value, new.unit)
+    v_ref = to_canonical(reference.value, reference.unit)
+    if v_ref == 0:
+        raise InvariantViolation("'value_change' no admite una referencia de valor cero")
+    return abs(v_new - v_ref) / v_ref, v_new / v_ref
+
+
+def solution_tension_data_from(
+    tension: SolutionTension, *, threshold_sigma: float, archive_url: str
+) -> SolutionTensionData:
+    """`SolutionTensionData` publicable de una `SolutionTension` elegible (T85.e).
+
+    `InvariantViolation` si no es elegible (`solution_writer_skip_reason`) o si su σ
+    no alcanza el umbral vigente (el umbral pudo subir tras calcularla)."""
+    if solution_writer_skip_reason(tension) is not None:
+        raise InvariantViolation("la tensión no es elegible para el redactor")
+    if tension.sigma < threshold_sigma:
+        raise InvariantViolation("la σ de la tensión no alcanza el umbral vigente")
+    return SolutionTensionData(
+        planet_name=tension.planet_name,
+        parameter=tension.parameter,
+        archive_url=archive_url,
+        threshold_sigma=threshold_sigma,
+        sigma=tension.sigma,
+        new=tension.new,
+        reference=tension.reference,
+        others=tension.others,
+        labels=tension.labels,
+        reference_role=tension.reference_role,
     )

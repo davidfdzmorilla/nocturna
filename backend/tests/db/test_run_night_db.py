@@ -174,6 +174,7 @@ def _build_run_night(
         max_attempts=policy.max_editor_calls_per_night,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
     return RunNight(
         work=work,

@@ -345,6 +345,14 @@ class SqlAlchemyFindingRepository:
         )
         return frozenset(self._session.execute(stmt).scalars().all())
 
+    def solution_tension_ids_with_finding(self) -> frozenset[UUID]:
+        """`SolutionTension` con `Finding` `solution_tension`, publicado o no (T85.e)."""
+        stmt = select(FindingRow.solution_tension_id).where(
+            FindingRow.type == FindingType.SOLUTION_TENSION,
+            FindingRow.solution_tension_id.is_not(None),
+        )
+        return frozenset(self._session.execute(stmt).scalars().all())
+
     def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
         stmt = (
             select(func.count())

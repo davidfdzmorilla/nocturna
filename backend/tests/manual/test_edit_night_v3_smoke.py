@@ -214,6 +214,7 @@ async def test_smoke_editor_v3_decide_un_paper_y_una_tension_en_una_sola_llamada
         max_attempts=policy.max_editor_calls_per_night,
         base_tokens=config.budget.editor_base_tokens,
         tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+        extreme_sigma=50,
     )
 
     started_at = monotonic()

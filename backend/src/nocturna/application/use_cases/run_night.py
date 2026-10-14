@@ -87,6 +87,8 @@ sucesos que degradan, y a qué:
   fase y sigue al Editor; `RATE_LIMITED` -> `PARTIAL` `rate_limited_writer` y
   salta el Editor; `OUTSIDE_WINDOW` -> `KILLED` sin Editor; `RUN_NOT_RUNNING`
   -> `terminal_status_for` (`PARTIAL`) como en las demás fases.
+  T85.e: tras la pasada de arXiv corre la del archivo (`solution_tension`) con
+  el mismo bucle; cualquier parada de la primera corta la segunda (D14).
 - Ningún suceso arriba -> la noche cierra `COMPLETED` con motivo `edited` o
   `no_candidates`, el valor de `EditOutcome` que produjo el Editor.
 
@@ -197,9 +199,10 @@ orquestador la confirme o la corrija.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from time import monotonic
+from typing import Protocol
 from uuid import UUID
 
 from nocturna.application.budget import BudgetDenied, DenyReason, terminal_status_for
@@ -211,9 +214,14 @@ from nocturna.application.use_cases.generate_measurement_findings import (
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeOutcome, PopularizeReading
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.write_solution_tensions import (
+    SelectSolutionTensions,
+    WriteSolutionTensions,
+)
 from nocturna.application.use_cases.write_tensions import (
     SelectTensions,
     WriteOutcome,
+    WriteTensionResult,
     WriteTensions,
 )
 from nocturna.domain.clock import Clock
@@ -251,6 +259,20 @@ class RunNightResult:
     candidates: int
     findings_published: int
     tokens_used: int
+
+
+class _HasItem(Protocol):
+    @property
+    def item(self) -> Item: ...
+
+
+@dataclass(slots=True)
+class _WriteLoopStats:
+    processed: int = 0
+    ok: int = 0
+    failed: int = 0
+    stop_reason: str | None = None
+    stopped: bool = False
 
 
 def _duration_ms(started_at: float) -> int:
@@ -295,6 +317,8 @@ class RunNight:
         measurement_findings: GenerateMeasurementFindings,
         select_tensions: SelectTensions,
         write_tensions: WriteTensions,
+        select_solution_tensions: SelectSolutionTensions | None = None,
+        write_solution_tensions: WriteSolutionTensions | None = None,
         run_id: UUID,
         max_items: int,
         max_consecutive_failures: int,
@@ -310,6 +334,12 @@ class RunNight:
         self._measurement_findings = measurement_findings
         self._select_tensions = select_tensions
         self._write_tensions = write_tensions
+        if (select_solution_tensions is None) != (write_solution_tensions is None):
+            raise ValueError(
+                "select_solution_tensions y write_solution_tensions van los dos o ninguno"
+            )
+        self._select_solution_tensions = select_solution_tensions
+        self._write_solution_tensions = write_solution_tensions
         self._run_id = run_id
         self._max_items = max_items
         self._max_consecutive_failures = max_consecutive_failures
@@ -819,12 +849,15 @@ class RunNight:
     # --- fase B3: redactor de tensiones (T76) ---------------------------------
 
     async def _phase_writer(self) -> None:
-        """Redacta, con el redactor, las tensiones pendientes (`catalog_tension`).
+        """Redacta, con el redactor, las tensiones pendientes en dos pasadas:
+        primero las de arXiv (`catalog_tension`, T76) y después las del archivo
+        (`solution_tension`, T85.e), con el mismo bucle y los mismos desenlaces.
 
         Corre tras `_phase_measurement_findings` y antes del Editor, y solo si
         la noche no ha decidido saltarse el Editor. Cada llamada pasa por
-        `WriteTensions` -> `AgentRunner` -> `BudgetGuard`; sin tensión
-        pendiente no hay `authorize` ni llamada. `BudgetDenied`:
+        `WriteTensions`/`WriteSolutionTensions` -> `AgentRunner` ->
+        `BudgetGuard`; sin tensión pendiente no hay `authorize` ni llamada.
+        `BudgetDenied`:
 
         - `OUTSIDE_WINDOW` y `RUN_NOT_RUNNING` -> `terminal_status_for`
           (`KILLED` / `PARTIAL`); el primero además salta el Editor.
@@ -836,35 +869,96 @@ class RunNight:
         `RATE_LIMITED` -> `PARTIAL` y se salta el Editor. Un fallo
         inesperado degrada a `PARTIAL` y termina la fase (el Editor sigue). No captura
         `CancelledError` ni otras `BaseException`.
+
+        D14 (T85.e): cualquier parada de la pasada de arXiv (los desenlaces de
+        arriba, o un fallo al seleccionar) corta la del archivo, que no
+        empieza. Un fallo al seleccionar las del archivo es `PARTIAL`
+        `writer_error` sin ninguna llamada del archivo y no afecta a arXiv ni
+        al Editor. La pasada del archivo solo existe si se inyectaron
+        `select_solution_tensions` y `write_solution_tensions`.
         """
-        processed = ok = failed = 0
-        stop_reason: str | None = None
+        stopped = await self._writer_pass_arxiv()
+        if stopped or self._skip_editor:
+            return
+        if self._select_solution_tensions is None or self._write_solution_tensions is None:
+            return
+        await self._writer_pass_archive(
+            self._select_solution_tensions, self._write_solution_tensions
+        )
+
+    def _log_writer_error(self, phase: str, exc: Exception) -> None:
+        self._degrade(RunStatus.PARTIAL, "writer_error")
+        _logger.exception(
+            "night.phase_end",
+            extra={
+                "event": "night.phase_end",
+                "run_id": str(self._run_id),
+                "phase": phase,
+                "processed": 0,
+                "ok": 0,
+                "failed": 1,
+                "stop_reason": "error",
+                "error": type(exc).__name__,
+            },
+        )
+
+    async def _writer_pass_arxiv(self) -> bool:
+        """Pasada de arXiv (T76). Devuelve `True` si algo la detuvo."""
         try:
             pending = self._select_tensions.pending()
         except Exception as exc:
-            self._degrade(RunStatus.PARTIAL, "writer_error")
-            _logger.exception(
-                "night.phase_end",
-                extra={
-                    "event": "night.phase_end",
-                    "run_id": str(self._run_id),
-                    "phase": "writer",
-                    "processed": 0,
-                    "ok": 0,
-                    "failed": 1,
-                    "stop_reason": "error",
-                    "error": type(exc).__name__,
-                },
-            )
-            return
+            self._log_writer_error("writer", exc)
+            return True
+        stats = await self._write_loop(pending.candidates, self._write_tensions, phase="writer")
+        self._log_writer_end("writer", stats, skipped=len(pending.skipped))
+        return stats.stopped
 
-        for candidate in pending.candidates:
-            processed += 1
+    async def _writer_pass_archive(
+        self, select: SelectSolutionTensions, write: WriteSolutionTensions
+    ) -> None:
+        """Pasada del archivo (T85.e, D14): solo se llega aquí si la de arXiv no paró."""
+        try:
+            pending = select.pending()
+        except Exception as exc:
+            self._log_writer_error("writer_archive", exc)
+            return
+        stats = await self._write_loop(pending.candidates, write, phase="writer_archive")
+        self._log_writer_end("writer_archive", stats, skipped=len(pending.skipped))
+
+    def _log_writer_end(self, phase: str, stats: "_WriteLoopStats", *, skipped: int) -> None:
+        _logger.info(
+            "night.phase_end",
+            extra={
+                "event": "night.phase_end",
+                "run_id": str(self._run_id),
+                "phase": phase,
+                "processed": stats.processed,
+                "ok": stats.ok,
+                "failed": stats.failed,
+                "skipped": skipped,
+                "stop_reason": stats.stop_reason,
+            },
+        )
+
+    async def _write_loop[C: _HasItem](
+        self,
+        candidates: Sequence[C],
+        write: Callable[[C], Awaitable[WriteTensionResult]],
+        *,
+        phase: str,
+    ) -> "_WriteLoopStats":
+        """Bucle único de las dos pasadas del redactor: llama a `write` por
+        candidato y traduce los desenlaces (ver `_phase_writer`). `stopped` es
+        cierto si algo cortó el bucle (cualquier `break`)."""
+        stats = _WriteLoopStats()
+        for candidate in candidates:
+            stats.processed += 1
             start = monotonic()
             try:
-                result = await self._write_tensions(candidate)
+                result = await write(candidate)
             except BudgetDenied as exc:
-                stop_reason = exc.reason.value
+                stats.stop_reason = exc.reason.value
+                stats.stopped = True
                 if exc.reason is DenyReason.CALL_LIMIT_REACHED:
                     pass
                 elif exc.reason is DenyReason.BUDGET_EXHAUSTED:
@@ -879,25 +973,26 @@ class RunNight:
                     "night.item",
                     extra=self._item_log_fields(
                         item=candidate.item,
-                        phase="writer",
+                        phase=phase,
                         outcome="exception",
                         attempts=0,
                         tokens_spent=0,
                         duration_ms=_duration_ms(start),
                     ),
                 )
-                failed += 1
+                stats.failed += 1
                 # `break`, no `continue`: tras un fallo inesperado la llamada
                 # puede estar ya cobrada y `ok` (p. ej. `IntegrityError` al
                 # guardar el Finding), así que el límite por ítem no la
                 # frenaría y el siguiente candidato volvería a gastar.
-                stop_reason = "error"
+                stats.stop_reason = "error"
+                stats.stopped = True
                 self._degrade(RunStatus.PARTIAL, "writer_error")
                 break
 
             log_fields = self._item_log_fields(
                 item=candidate.item,
-                phase="writer",
+                phase=phase,
                 outcome=result.outcome.value,
                 attempts=result.attempts,
                 tokens_spent=result.tokens_spent,
@@ -908,28 +1003,16 @@ class RunNight:
             _logger.info("night.item", extra=log_fields)
 
             if result.outcome is WriteOutcome.WRITTEN:
-                ok += 1
+                stats.ok += 1
                 continue
-            failed += 1
+            stats.failed += 1
             if result.outcome is WriteOutcome.RATE_LIMITED:
-                stop_reason = "rate_limited"
+                stats.stop_reason = "rate_limited"
+                stats.stopped = True
                 self._skip_editor = True
                 self._degrade(RunStatus.PARTIAL, "rate_limited_writer")
                 break
-
-        _logger.info(
-            "night.phase_end",
-            extra={
-                "event": "night.phase_end",
-                "run_id": str(self._run_id),
-                "phase": "writer",
-                "processed": processed,
-                "ok": ok,
-                "failed": failed,
-                "skipped": len(pending.skipped),
-                "stop_reason": stop_reason,
-            },
-        )
+        return stats
 
     # --- fase C: Editor -----------------------------------------------------
 

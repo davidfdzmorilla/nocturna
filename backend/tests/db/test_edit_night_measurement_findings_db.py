@@ -128,6 +128,7 @@ async def test_generar_y_editar_de_extremo_a_extremo_con_la_base_real(db_session
         max_attempts=1,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
 
     result = await edit_night(run_id=run_id)

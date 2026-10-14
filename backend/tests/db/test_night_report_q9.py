@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from factories import make_agent_call, make_finding
@@ -86,10 +88,118 @@ def test_q9_y_q9b_no_duplican_el_gasto_del_redactor(test_database_url, db_sessio
             )
 
     q9 = _psql(test_database_url, _segment("=== Q9 ", "=== Q9b"))
-    q9b = _psql(test_database_url, _segment("=== Q9b", None))
+    q9b = _psql(test_database_url, _segment("=== Q9b", "=== Q9c"))
 
     (row,) = q9
     assert row[0] == "2609.30038" and row[1] == "V1298 Tau b" and row[2] == "mass"
     assert row[7] == "2" and row[8] == "1800", "las dos llamadas, contadas una sola vez"
-    assert sorted(q9b) == [["invalid_output", "1", "1", "800"], ["ok", "1", "1", "1000"]]
-    assert sum(int(r[3]) for r in q9b) == int(row[8])
+    assert sorted(q9b) == [
+        ["writer-v1", "invalid_output", "1", "1", "800"],
+        ["writer-v1", "ok", "1", "1", "1000"],
+    ]
+    assert sum(int(r[4]) for r in q9b) == int(row[8])
+
+
+def test_q9c_lista_la_tension_del_archivo_con_el_gasto_del_item_una_sola_vez(
+    test_database_url, db_session_factory
+):
+    if shutil.which("psql") is None:
+        pytest.skip("psql no está instalado en este entorno")
+    from helpers.solution_tension_smoke import seed_hd202206c_solution_tension
+
+    from nocturna.domain.solution_tension import solution_tension_data_from
+    from nocturna.infrastructure.config import load_pipeline_config
+
+    config = load_pipeline_config()
+    seeded = seed_hd202206c_solution_tension(db_session_factory, config, run_budget_tokens=26_000)
+    data = solution_tension_data_from(seeded.mass, threshold_sigma=3.0, archive_url="https://x/y")
+    with unit_of_work(db_session_factory) as session:
+        SqlAlchemyFindingRepository(session).add(
+            make_finding(
+                seeded.item.id,
+                seeded.run_id,
+                type=FindingType.SOLUTION_TENSION,
+                solution_tension=data,
+                solution_tension_id=seeded.mass.id,
+            )
+        )
+        SqlAlchemyAgentCallRepository(session).add(
+            make_agent_call(
+                seeded.run_id,
+                item_id=seeded.item.id,
+                agent=AgentRole.WRITER,
+                status=AgentCallStatus.OK,
+                tokens_in=800,
+                tokens_out=200,
+                prompt_version="writer-archive-v1",
+            )
+        )
+
+    q9b = _psql(test_database_url, _segment("=== Q9b", "=== Q9c"))
+    q9c = _psql(test_database_url, _segment("=== Q9c", None))
+
+    assert q9b == [["writer-archive-v1", "ok", "1", "1", "1000"]]
+    (row,) = q9c
+    assert row[0] == "HD 202206 c" and row[1] == "mass" and row[5] == "f"
+    assert row[7] == "1" and row[8] == "1000"
+
+
+def test_q9c_el_gasto_del_item_va_en_la_fila_que_se_ve_primero(
+    test_database_url, db_session_factory
+):
+    """Con dos tensiones en el mismo ítem, el gasto sale en la de mayor σ (la primera)."""
+    if shutil.which("psql") is None:
+        pytest.skip("psql no está instalado en este entorno")
+    from helpers.solution_tension_smoke import seed_hd202206c_solution_tension
+
+    from nocturna.domain.entities import MeasuredParameter, MeasurementUnit
+    from nocturna.domain.solution_tension import solution_tension_data_from
+    from nocturna.infrastructure.config import load_pipeline_config
+    from nocturna.infrastructure.db.repositories import SqlAlchemySolutionTensionRepository
+
+    config = load_pipeline_config()
+    seeded = seed_hd202206c_solution_tension(db_session_factory, config, run_budget_tokens=26_000)
+    # σ mayor que la de la masa sembrada y un `id` que no la precede: la fila
+    # que se ve primero no es la de menor `id`.
+    radius = MeasuredParameter.RADIUS
+    other = replace(
+        seeded.mass,
+        id=uuid4(),
+        parameter=radius,
+        sigma=900.0,
+        new=replace(seeded.mass.new, parameter=radius, unit=MeasurementUnit.R_JUP),
+        reference=replace(seeded.mass.reference, parameter=radius, unit=MeasurementUnit.R_JUP),
+    )
+    with unit_of_work(db_session_factory) as session:
+        SqlAlchemySolutionTensionRepository(session).add(other)
+    with unit_of_work(db_session_factory) as session:
+        repo = SqlAlchemyFindingRepository(session)
+        for tension in (seeded.mass, other):
+            repo.add(
+                make_finding(
+                    seeded.item.id,
+                    seeded.run_id,
+                    type=FindingType.SOLUTION_TENSION,
+                    solution_tension=solution_tension_data_from(
+                        tension, threshold_sigma=3.0, archive_url="https://x/y"
+                    ),
+                    solution_tension_id=tension.id,
+                )
+            )
+        SqlAlchemyAgentCallRepository(session).add(
+            make_agent_call(
+                seeded.run_id,
+                item_id=seeded.item.id,
+                agent=AgentRole.WRITER,
+                status=AgentCallStatus.OK,
+                tokens_in=800,
+                tokens_out=200,
+                prompt_version="writer-archive-v1",
+            )
+        )
+
+    q9c = _psql(test_database_url, _segment("=== Q9c", None))
+
+    assert len(q9c) == 2
+    assert q9c[0][2] == "900.00" and q9c[0][8] == "1000"
+    assert q9c[1][8] == ""

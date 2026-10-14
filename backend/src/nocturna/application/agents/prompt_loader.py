@@ -35,6 +35,11 @@ POPULARIZER_PROMPT_VERSION: str = "popularizer-v2"
 #: números ya calculados. Mismo criterio de subida a mano.
 WRITER_PROMPT_VERSION: str = "writer-v1"
 
+#: Versión a mano del prompt del redactor de tensiones entre soluciones del
+#: archivo (T85.e, `writer-archive-v1.md`). Fichero propio: `writer-v1.md` sigue
+#: siendo el de `catalog_tension`.
+WRITER_ARCHIVE_PROMPT_VERSION: str = "writer-archive-v1"
+
 #: Versión a mano del prompt del Editor, mismo criterio que
 #: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al
 #: editar el prompt. `editor-v1` (T43, `editor.md`, que se conserva) decidía
@@ -45,6 +50,11 @@ WRITER_PROMPT_VERSION: str = "writer-v1"
 #: lecciones de T42 (nada de fences, nunca un salto de línea real dentro de
 #: una cadena JSON).
 EDITOR_PROMPT_VERSION: str = "editor-v3"
+
+#: `editor-v4` (T85.e, `editor-v4.md`) añade `solution_tension`. Solo se usa
+#: con `[solution_tensions] writer_enabled = true` (`cli.py::editor_prompt_version`);
+#: con el interruptor apagado el Editor sigue en `EDITOR_PROMPT_VERSION`.
+EDITOR_V4_PROMPT_VERSION: str = "editor-v4"
 
 
 def load_prompt(name: str) -> str:

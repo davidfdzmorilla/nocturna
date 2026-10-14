@@ -207,9 +207,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from nocturna.application.agents.prompt_loader import (
     EDITOR_PROMPT_VERSION,
+    EDITOR_V4_PROMPT_VERSION,
     POPULARIZER_PROMPT_VERSION,
     READER_PROMPT_VERSION,
     READER_V3_PROMPT_VERSION,
+    WRITER_ARCHIVE_PROMPT_VERSION,
     WRITER_PROMPT_VERSION,
     load_prompt,
 )
@@ -268,6 +270,13 @@ from nocturna.application.use_cases.take_archive_snapshot import (
     ArchiveSnapshotReport,
     SnapshotAborted,
     TakeArchiveSnapshot,
+)
+from nocturna.application.use_cases.write_solution_tensions import (
+    PendingSolutionTensions,
+    SelectSolutionTensions,
+    SolutionTensionWriterWork,
+    SolutionTensionWriterWorkFactory,
+    WriteSolutionTensions,
 )
 from nocturna.application.use_cases.write_tensions import (
     PendingTensions,
@@ -1679,6 +1688,72 @@ def write_tensions_from_config(
     )
 
 
+def editor_prompt_version(config: PipelineConfig) -> str:
+    """Versión del prompt del Editor: `editor-v4` (conoce `solution_tension`) solo con
+    `[solution_tensions] writer_enabled = true`; si no, `editor-v3` (T85.e, D7)."""
+    if config.solution_tensions.writer_enabled:
+        return EDITOR_V4_PROMPT_VERSION
+    return EDITOR_PROMPT_VERSION
+
+
+def _solution_tension_writer_work(session: Session) -> SolutionTensionWriterWork:
+    return SolutionTensionWriterWork(
+        items=SqlAlchemyItemRepository(session),
+        findings=SqlAlchemyFindingRepository(session),
+        solution_tensions=SqlAlchemySolutionTensionRepository(session),
+        agent_calls=SqlAlchemyAgentCallRepository(session),
+    )
+
+
+def _solution_tension_writer_work_factory(
+    session_factory: sessionmaker[Session],
+) -> SolutionTensionWriterWorkFactory:
+    """Unidad de trabajo de solo lectura de `SelectSolutionTensions.pending()` (T85.e).
+    Sin `BudgetGuard`: seleccionar no gasta tokens."""
+
+    @contextmanager
+    def _open() -> Generator[SolutionTensionWriterWork, None, None]:
+        with unit_of_work(session_factory) as session:
+            yield _solution_tension_writer_work(session)
+
+    return _open
+
+
+def select_solution_tensions_from_config(
+    config: PipelineConfig, *, candidates_work: SolutionTensionWriterWorkFactory
+) -> SelectSolutionTensions:
+    """`SelectSolutionTensions` (solo lectura) con el umbral, `extreme_sigma` y los
+    intentos de la configuración (T85.e)."""
+    return SelectSolutionTensions(
+        candidates_work=candidates_work,
+        threshold_sigma=config.tension.threshold_sigma,
+        extreme_sigma=config.solution_tensions.extreme_sigma,
+        planet_overview_url=planet_overview_url,
+        max_attempts=config.limits.max_calls_per_item,
+    )
+
+
+def write_solution_tensions_from_config(
+    config: PipelineConfig,
+    *,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    system_prompt: str,
+) -> WriteSolutionTensions:
+    """`WriteSolutionTensions` con modelo del rol `writer`, turnos, intentos y la
+    estimación `writer_estimated_tokens` de la configuración (T85.e, D10)."""
+    return WriteSolutionTensions(
+        work=work,
+        provider=provider,
+        system_prompt=system_prompt,
+        prompt_version=WRITER_ARCHIVE_PROMPT_VERSION,
+        model=config.models.writer,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_calls_per_item,
+        estimated_tokens=config.budget.writer_estimated_tokens,
+    )
+
+
 # Motivos de exclusión que solo se cuentan en el `--dry-run`: son la mayoría
 # de las evaluaciones y no dicen nada del redactor.
 _WRITER_SKIP_REASONS_COUNTED = frozenset({"not_evaluated", "below_threshold"})
@@ -1736,6 +1811,77 @@ def _print_writer_section(session: Session, config: PipelineConfig) -> None:
     print(
         _format_writer_section(
             pending, labels=labels, estimated_tokens=config.budget.writer_estimated_tokens
+        )
+    )
+
+
+def _format_solution_writer_section(
+    pending: PendingSolutionTensions,
+    *,
+    enabled: bool,
+    labels: dict[UUID, str],
+    estimated_tokens: int,
+) -> str:
+    """Subsección del `--dry-run` con las tensiones del archivo que redactaría el
+    redactor (T85.e, D13): pura y determinista, cero tokens. Se lista aunque el
+    interruptor esté apagado, con la marca. `not_eligible` sale agregado; el
+    resto de exclusiones, una línea por tensión."""
+    lines = [
+        "",
+        "Tensiones del archivo pendientes del redactor (T85.e, cero tokens en el ensayo):",
+    ]
+    if not enabled:
+        lines.append("  redactor del archivo desactivado (writer_enabled = false)")
+    lines.append(
+        f"  elegibles={len(pending.candidates)} excluidas={len(pending.skipped)} "
+        f"estimación por llamada={estimated_tokens} tokens"
+    )
+    for candidate in pending.candidates:
+        tension = candidate.tension
+        extra = " · extreme_sigma" if candidate.extreme else ""
+        lines.append(
+            f"  elegible · {tension.planet_name} ({tension.parameter.value}) · "
+            f"σ={tension.sigma:.2f}{extra}"
+        )
+    counted = Counter(reason for _, reason in pending.skipped if reason == "not_eligible")
+    for reason in sorted(counted):
+        lines.append(f"  excluidas · {reason}: {counted[reason]}")
+    for tension_id, reason in pending.skipped:
+        if reason == "not_eligible":
+            continue
+        lines.append(f"  excluida · {labels.get(tension_id, str(tension_id))} · {reason}")
+    return "\n".join(lines)
+
+
+def _print_solution_writer_section(session: Session, config: PipelineConfig) -> None:
+    """Imprime las tensiones del archivo que redactaría la noche: solo
+    `SelectSolutionTensions.pending()` (lectura), nunca el runner ni el SDK."""
+
+    @contextmanager
+    def _same_session() -> Generator[SolutionTensionWriterWork, None, None]:
+        yield _solution_tension_writer_work(session)
+
+    try:
+        pending = select_solution_tensions_from_config(
+            config, candidates_work=_same_session
+        ).pending()
+    except InvariantViolation as exc:
+        print("")
+        print("Tensiones del archivo pendientes del redactor (T85.e, cero tokens en el ensayo):")
+        print(f"  error al seleccionar las tensiones del archivo: {exc}")
+        return
+    skipped_ids = {tension_id for tension_id, _ in pending.skipped}
+    labels = {
+        t.id: f"{t.planet_name} ({t.parameter.value})"
+        for t in SqlAlchemySolutionTensionRepository(session).all()
+        if t.id in skipped_ids
+    }
+    print(
+        _format_solution_writer_section(
+            pending,
+            enabled=config.solution_tensions.writer_enabled,
+            labels=labels,
+            estimated_tokens=config.budget.writer_estimated_tokens,
         )
     )
 
@@ -1840,6 +1986,8 @@ def _build_run_night(
     max_consecutive_failures: int,
     deadline_s: int,
     deadline_reason: str = "hard_stop",
+    select_solution_tensions: SelectSolutionTensions | None = None,
+    write_solution_tensions: WriteSolutionTensions | None = None,
 ) -> RunNight:
     """Construye `RunNight`, comprobando explícitamente que `run_id` -- el
     que `RunNight` reenviará a `EditNight.__call__` -- coincide con
@@ -1883,6 +2031,8 @@ def _build_run_night(
         measurement_findings=measurement_findings,
         select_tensions=select_tensions,
         write_tensions=write_tensions,
+        select_solution_tensions=select_solution_tensions,
+        write_solution_tensions=write_solution_tensions,
         run_id=run_id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,
@@ -1969,6 +2119,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
             )
             _print_measurement_findings_section(session, config, clock)
             _print_writer_section(session, config)
+            _print_solution_writer_section(session, config)
             _print_solution_tensions_section(session, config, clock)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
             try:
@@ -2026,8 +2177,16 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     provider = AgentSDKProvider()
     reader_prompts = _load_reader_prompts()
     popularizer_prompt = load_prompt("popularizer")
-    editor_prompt = load_prompt(EDITOR_PROMPT_VERSION)
+    editor_prompt_name = editor_prompt_version(config)
+    editor_prompt = load_prompt(editor_prompt_name)
     writer_prompt = load_prompt(WRITER_PROMPT_VERSION)
+    # Interruptor (T85.e): apagado, ni se carga el prompt del archivo ni se
+    # construye el redactor (cero `authorize`).
+    archive_writer_prompt = (
+        load_prompt(WRITER_ARCHIVE_PROMPT_VERSION)
+        if config.solution_tensions.writer_enabled
+        else None
+    )
     deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
 
     run_id = _current_or_new_run_night(session_factory, policy, clock)
@@ -2052,12 +2211,13 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         provider=provider,
         clock=clock,
         system_prompt=editor_prompt,
-        prompt_version=EDITOR_PROMPT_VERSION,
+        prompt_version=editor_prompt_name,
         model=config.models.editor,
         max_turns=config.limits.max_turns_per_agent,
         max_attempts=config.limits.max_editor_calls_per_night,
         base_tokens=config.budget.editor_base_tokens,
         tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+        extreme_sigma=config.solution_tensions.extreme_sigma,
     )
     measurement_findings = generate_measurement_findings_from_config(
         config, _measurement_findings_work_factory(session_factory), clock
@@ -2070,6 +2230,20 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         work=work,
         provider=provider,
         system_prompt=writer_prompt,
+    )
+    select_solution_tensions = (
+        select_solution_tensions_from_config(
+            config, candidates_work=_solution_tension_writer_work_factory(session_factory)
+        )
+        if archive_writer_prompt is not None
+        else None
+    )
+    write_solution_tensions = (
+        write_solution_tensions_from_config(
+            config, work=work, provider=provider, system_prompt=archive_writer_prompt
+        )
+        if archive_writer_prompt is not None
+        else None
     )
 
     async def _ingest() -> IngestResult:
@@ -2088,6 +2262,8 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         measurement_findings=measurement_findings,
         select_tensions=select_tensions,
         write_tensions=write_tensions,
+        select_solution_tensions=select_solution_tensions,
+        write_solution_tensions=write_solution_tensions,
         run_id=run_id,
         max_items=config.limits.max_items_per_night,
         max_consecutive_failures=config.limits.max_consecutive_failures,
@@ -2406,7 +2582,7 @@ def _print_edit_night_report(
         remaining = w.guard.remaining_for(AgentRole.EDITOR)
 
     print(
-        f"  Editor: modelo={config.models.editor} · prompt={EDITOR_PROMPT_VERSION} · "
+        f"  Editor: modelo={config.models.editor} · prompt={editor_prompt_version(config)} · "
         f"intentos={result.attempts}"
     )
     print(f"  tokens gastados={result.tokens_spent} · tokens restantes para el Editor={remaining}")
@@ -2465,13 +2641,14 @@ def _edit_one_night(
         work=work,
         provider=provider,
         clock=clock,
-        system_prompt=load_prompt(EDITOR_PROMPT_VERSION),
-        prompt_version=EDITOR_PROMPT_VERSION,
+        system_prompt=load_prompt(editor_prompt_version(config)),
+        prompt_version=editor_prompt_version(config),
         model=config.models.editor,
         max_turns=config.limits.max_turns_per_agent,
         max_attempts=config.limits.max_editor_calls_per_night,
         base_tokens=config.budget.editor_base_tokens,
         tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+        extreme_sigma=config.solution_tensions.extreme_sigma,
     )
     try:
         result = asyncio.run(edit_night(run_id=run_id))

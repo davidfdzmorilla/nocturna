@@ -306,6 +306,7 @@ Implementado en T76 ([ADR 0026](adr/0026-redactor-de-tensiones.md)). Único cami
 - **En la noche**: fase `_phase_writer` entre los hallazgos de medida y el Editor; no corre si el Editor se va a saltar. Tope de llamadas: termina la fase sin degradar. Presupuesto agotado: `partial` (`writer_budget_exhausted`) y sigue al Editor. `OUTSIDE_WINDOW`: `killed` sin Editor. `RATE_LIMITED`: `partial` sin Editor. Error inesperado: termina la fase, `partial` (`writer_error`) y sigue al Editor. Nunca captura la cancelación del `hard_stop`.
 - **Editor**: `editor-v3` recibe `catalog_tension` en el mismo bloque `<candidates>` con una línea `data` acotada (planeta, parámetro, valores, referencia, σ, umbral, número de previas y su rango de σ), nunca `evidence`. Lo acota el tope del redactor, que el validador de la reserva del Editor ya cuenta.
 - **Informe**: `night_report.sql` añade las tensiones de la noche y las llamadas del redactor por estado.
+- **Segunda fuente (T85.e)**: tras las tensiones de arXiv, la misma fase redacta las tensiones entre soluciones del archivo si `writer_enabled` está activo, con el mismo tope y la misma reserva (§ Tensiones entre soluciones del archivo).
 
 ## Histórico del NASA Exoplanet Archive (fase 2, T81)
 
@@ -320,13 +321,14 @@ Implementado en T81 ([ADR 0019](adr/0019-historico-del-nasa-exoplanet-archive.md
 
 ## Tensiones entre soluciones del archivo (fase 2, T85)
 
-Implementado en T85 ([ADR 0029](adr/0029-tensiones-entre-soluciones-del-archivo.md)), sin tokens. El redactor y el Editor llegan en T85.e y la web en T85.w.
+Implementado en T85 ([ADR 0029](adr/0029-tensiones-entre-soluciones-del-archivo.md)), sin tokens. El redactor y el Editor, en T85.e (ver la última viñeta); la web llega en T85.w.
 
 - **`domain/solution_tension.py`** (puro): `usable_solution`, `compare_solutions` (σ de ADR 0015 vía `domain/tension.py::pairwise_sigma`, compartida con `compare`), `select_pair_reference` (solución por defecto vigente o, si la alta lo es o la por defecto es del mismo paper, la `Published Confirmed` más reciente de otro paper; nunca del mismo `ref_key`/`arxiv_id`), `solution_tension_skip_reason` (reglas 1, 2, 3, TTV, umbral y 5, en ese orden), `labels_for` (`model_dependent`, `controversial`) y la entidad `SolutionTension` (foto fija con invariantes). `check_period` comparte `check_period_values` con esta vía.
 - **`application/use_cases/compute_solution_tensions.py`**: `ComputeSolutionTensions` sobre las altas `Published Confirmed` con `releasedate >= [solution_tensions] since`; idempotente por `(new_solution_key, parameter)`; guarda también las excluidas con su motivo; crea el `Item` del archivo (`source = 'exoplanet_archive'`, `external_id = solution_key`) solo para las elegibles. Sin proveedor, guard ni runner.
-- **Persistencia**: tabla `solution_tension` y columnas `findings.solution_tension` / `solution_tension_id` del tipo `solution_tension` (migración `b6d2f8a4c917`), sin productores hasta T85.e. El filtro `?type=` de la API acepta solo los cuatro tipos publicados (`FindingTypeFilter`).
+- **Persistencia**: tabla `solution_tension` y columnas `findings.solution_tension` / `solution_tension_id` del tipo `solution_tension` (migración `b6d2f8a4c917`); desde T85.e los produce el redactor (§ siguiente) y `?type=` admite los cinco tipos.
 - **Lanzadores**: paso final de `archive-snapshot` (código 3 si falla, snapshot conservado), `nocturna solution-tensions [--dry-run]` (0 o 1) y sección "Tensiones entre soluciones" en `run-night --dry-run` (solo los pares aún no calculados).
 - **Guardas de gasto**: el contrato de `ItemRepository.next_unread` es solo `source = 'arxiv'`; `run-item` sale con 10 ante otra fuente; `ReadItem`, la relectura y `PopularizeReading` lanzan `InvariantViolation` antes de autorizar; la cola de `night_report.sql` y `backfill_exoplanet_match.py` cuentan solo arXiv; el downgrade se niega si hay ítems del archivo.
+- **Redactor y Editor (T85.e, [ADR 0030](adr/0030-redactor-de-tensiones-entre-soluciones.md))**: `application/use_cases/write_solution_tensions.py` con `SelectSolutionTensions` (solo lectura: excluye ya redactadas, ítems fallidos y datos inválidos; orden σ descendente) y `WriteSolutionTensions` (`AgentRunner`, rol `writer`, prompt `writer-archive-v1`). `_phase_writer` hace dos pasadas, primero arXiv y después el archivo, con un único bucle de denegaciones; cualquier parada de arXiv corta la del archivo. Tope y reserva del redactor compartidos (contados en base por rol). Marca derivada `extreme_sigma` por encima de `[solution_tensions] extreme_sigma` para el redactor y el Editor. Todo detrás de `[solution_tensions] writer_enabled` (apagado hasta T85.w): apagado, cero `authorize` y Editor en `editor-v3`; encendido, Editor en `editor-v4` (`cli.py::editor_prompt_version`). API `SolutionTensionOut` por lista blanca. `night_report.sql` Q9b por versión de prompt y Q9c.
 
 ## Lo que no existe en fase 1 (a propósito)
 

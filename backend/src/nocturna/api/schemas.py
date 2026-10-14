@@ -12,9 +12,11 @@ como lo que sale:
 - `item_id`: el identificador público de un hallazgo es `finding.id`; no
   hay ninguna vista pública de `Item` en fase 1.
 
-- `tension_evaluation_id`, `solution_key`, `soltype`, `pl_pubdate`,
-  `releasedate` de la previa, `ttv_flag`, `window_days`,
-  `paper_published_at`, `limit` y `origin`: metadatos internos del cálculo.
+- `tension_evaluation_id`, `solution_tension_id`, `solution_key`, `soltype`,
+  `pl_pubdate`, `releasedate` de la previa, `ttv_flag`, `period_check`,
+  `computed_at`, `window_days`, `paper_published_at`, `limit` y `origin`:
+  metadatos internos del cálculo. De un `solution_tension` solo sale
+  `new_releasedate` (mes de entrada de la alta en el archivo, T85.e).
 
 Los payloads de `catalog_tension`, `first_measurement` e
 `independent_confirmation` se exponen con una lista blanca de campos
@@ -53,6 +55,10 @@ from nocturna.domain.entities import (
     MeasurementLimit,
     MeasurementUnit,
     PaperMeasurement,
+    ReferenceRole,
+    SolutionComparison,
+    SolutionTensionData,
+    SolutionTensionLabel,
 )
 
 
@@ -186,6 +192,84 @@ class CatalogTensionOut(BaseModel):
         )
 
 
+class SolutionTensionSolutionOut(BaseModel):
+    """Solución del archivo de una tensión entre soluciones (T85.e). Lista blanca."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reference: str
+    value: float
+    err_plus: float
+    err_minus: float
+    unit: MeasurementUnit
+    is_default: bool
+    arxiv_id: str | None
+
+    @classmethod
+    def from_domain(cls, solution: CatalogSolution) -> "SolutionTensionSolutionOut":
+        if solution.err_plus is None or solution.err_minus is None:
+            raise ValueError("la solución de una tensión debe tener los dos errores")
+        return cls(
+            reference=solution.reference,
+            value=solution.value,
+            err_plus=solution.err_plus,
+            err_minus=solution.err_minus,
+            unit=solution.unit,
+            is_default=solution.is_default,
+            arxiv_id=solution.arxiv_id,
+        )
+
+
+class SolutionTensionComparisonOut(BaseModel):
+    """Otra solución del archivo con el σ de la nueva frente a ella."""
+
+    model_config = ConfigDict(frozen=True)
+
+    solution: SolutionTensionSolutionOut
+    sigma: float
+
+    @classmethod
+    def from_domain(cls, comparison: SolutionComparison) -> "SolutionTensionComparisonOut":
+        return cls(
+            solution=SolutionTensionSolutionOut.from_domain(comparison.solution),
+            sigma=comparison.sigma,
+        )
+
+
+class SolutionTensionOut(BaseModel):
+    """Datos de un `solution_tension` (T85.e): lista blanca construida a mano."""
+
+    model_config = ConfigDict(frozen=True)
+
+    planet_name: str
+    parameter: MeasuredParameter
+    archive_url: str
+    threshold_sigma: float
+    sigma: float
+    reference_role: ReferenceRole
+    labels: list[SolutionTensionLabel]
+    new: SolutionTensionSolutionOut
+    reference: SolutionTensionSolutionOut
+    others: list[SolutionTensionComparisonOut]
+    new_releasedate: date | None
+
+    @classmethod
+    def from_domain(cls, data: SolutionTensionData) -> "SolutionTensionOut":
+        return cls(
+            planet_name=data.planet_name,
+            parameter=data.parameter,
+            archive_url=data.archive_url,
+            threshold_sigma=data.threshold_sigma,
+            sigma=data.sigma,
+            reference_role=data.reference_role,
+            labels=list(data.labels),
+            new=SolutionTensionSolutionOut.from_domain(data.new),
+            reference=SolutionTensionSolutionOut.from_domain(data.reference),
+            others=[SolutionTensionComparisonOut.from_domain(o) for o in data.others],
+            new_releasedate=data.new.releasedate,
+        )
+
+
 class FirstMeasurementOut(BaseModel):
     """Datos de una `primera_medida` (T89)."""
 
@@ -298,6 +382,7 @@ class FindingDetail(BaseModel):
     catalog_tension: CatalogTensionOut | None
     first_measurement: FirstMeasurementOut | None
     independent_confirmation: IndependentConfirmationOut | None
+    solution_tension: SolutionTensionOut | None
 
 
 class FindingsPageResponse(BaseModel):

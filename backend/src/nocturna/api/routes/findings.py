@@ -21,6 +21,7 @@ from nocturna.api.schemas import (
     FindingSummary,
     FirstMeasurementOut,
     IndependentConfirmationOut,
+    SolutionTensionOut,
     source_url,
 )
 from nocturna.application.use_cases.list_findings import GetPublishedFinding, ListPublishedFindings
@@ -29,12 +30,8 @@ from nocturna.domain.repositories import FindingRepository, ItemRepository
 
 router = APIRouter()
 
-#: Tipos que la API expone en `?type=`. T85 no publica `solution_tension`
-#: (lo hará T85.e): hasta entonces el filtro no lo admite.
-FindingTypeFilter = StrEnum(
-    "FindingTypeFilter",
-    {t.name: t.value for t in FindingType if t is not FindingType.SOLUTION_TENSION},
-)
+#: Tipos que la API expone en `?type=`: los cinco (`solution_tension` desde T85.e).
+FindingTypeFilter = StrEnum("FindingTypeFilter", {t.name: t.value for t in FindingType})
 
 _FINDING_NOT_FOUND = "finding not found"
 
@@ -150,5 +147,10 @@ def get_finding(
             None
             if finding.independent_confirmation is None
             else IndependentConfirmationOut.from_domain(finding.independent_confirmation)
+        ),
+        solution_tension=(
+            None
+            if finding.solution_tension is None
+            else SolutionTensionOut.from_domain(finding.solution_tension)
         ),
     )

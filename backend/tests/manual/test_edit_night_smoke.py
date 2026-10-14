@@ -327,6 +327,7 @@ async def test_smoke_edit_night_llamada_real_produce_decision_y_gasto_contabiliz
         max_attempts=policy.max_editor_calls_per_night,
         base_tokens=config.budget.editor_base_tokens,
         tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+        extreme_sigma=50,
     )
 
     # --- la llamada real (uno o dos intentos, según haga falta) -------------

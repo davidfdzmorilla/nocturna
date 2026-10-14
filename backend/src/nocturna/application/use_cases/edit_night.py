@@ -112,6 +112,7 @@ from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import (
+    CatalogSolution,
     CatalogTension,
     Finding,
     FindingType,
@@ -119,9 +120,12 @@ from nocturna.domain.entities import (
     ItemStatus,
     Measurement,
     PaperMeasurement,
+    ReferenceRole,
+    SolutionTensionData,
 )
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentResult, AgentRole, LLMProvider
+from nocturna.domain.solution_tension import EXTREME_SIGMA_LABEL, is_extreme_sigma, value_change
 
 _logger = logging.getLogger(__name__)
 
@@ -224,6 +228,7 @@ class EditNight:
         max_attempts: int,
         base_tokens: int,
         tokens_per_candidate: int,
+        extreme_sigma: float,
     ) -> None:
         self._work = work
         self._provider = provider
@@ -235,6 +240,9 @@ class EditNight:
         self._max_attempts = max_attempts
         self._base_tokens = base_tokens
         self._tokens_per_candidate = tokens_per_candidate
+        #: `[solution_tensions] extreme_sigma` (T85.e, D5): marca derivada, no
+        #: persistida, que la línea `data` de un `solution_tension` añade a `labels`.
+        self._extreme_sigma = extreme_sigma
 
     async def __call__(self, *, run_id: UUID) -> EditNightResult:
         """Decide qué publicar de los candidatos pendientes del `run_id` dado.
@@ -311,7 +319,9 @@ class EditNight:
             return parse_editor_output(result.output_text)
 
         runner_result = await runner.run(
-            prompt=self._build_prompt(candidates), item_id=None, build=_build_editor_output
+            prompt=self._build_prompt(candidates, extreme_sigma=self._extreme_sigma),
+            item_id=None,
+            build=_build_editor_output,
         )
         outcome = _OUTCOME_BY_ATTEMPT[runner_result.outcome]
 
@@ -428,7 +438,9 @@ class EditNight:
         return decisions, tuple(unknown_candidate_ids)
 
     @staticmethod
-    def _build_prompt(candidates: list[tuple[Finding, Item]]) -> str:
+    def _build_prompt(
+        candidates: list[tuple[Finding, Item]], *, extreme_sigma: float | None = None
+    ) -> str:
         """Contenido de usuario de la petición: los candidatos, no instrucciones.
 
         Por candidato: `candidate_id`, `type`, `title`, `level_curious` y, si
@@ -445,7 +457,7 @@ class EditNight:
             lines.append(f"  type: {finding.type.value}")
             lines.append(f"  title: {inline(finding.title)}")
             lines.append(f"  level_curious: {inline(finding.level_curious)}")
-            data = _data_line(finding)
+            data = _data_line(finding, extreme_sigma=extreme_sigma)
             if data is not None:
                 lines.append(f"  data: {data}")
         lines.append("</candidates>")
@@ -456,9 +468,10 @@ def _measurement_data(m: PaperMeasurement) -> str:
     return f"{num(m.value)} (+{num(m.err_plus)}/-{num(m.err_minus)}) {m.unit.value}"
 
 
-def _data_line(finding: Finding) -> str | None:
+def _data_line(finding: Finding, *, extreme_sigma: float | None = None) -> str | None:
     """Línea `data` del candidato: planeta, parámetro, valor±error, referencia y σ.
-    `None` para `paper_explained` y cualquier tipo sin rama (se omite la línea)."""
+    `None` para `paper_explained` y cualquier tipo sin rama (se omite la línea).
+    `extreme_sigma` solo afecta a `solution_tension` (etiqueta derivada, T85.e)."""
     first = finding.first_measurement
     if first is not None:
         values = " | ".join(_measurement_data(m) for m in first.measurements)
@@ -479,7 +492,44 @@ def _data_line(finding: Finding) -> str | None:
     tension = finding.catalog_tension
     if tension is not None:
         return _tension_data(tension)
+    solution = finding.solution_tension
+    if solution is not None:
+        return _solution_tension_data(solution, extreme_sigma=extreme_sigma)
     return None
+
+
+def _solution_text(solution: CatalogSolution) -> str:
+    errors = (
+        f" (+{num(solution.err_plus)}/-{num(solution.err_minus)})"
+        if solution.err_plus is not None and solution.err_minus is not None
+        else ""
+    )
+    return f"{solution.reference} {num(solution.value)}{errors} {solution.unit.value}"
+
+
+def _solution_tension_data(data: SolutionTensionData, *, extreme_sigma: float | None) -> str:
+    """Línea `data` de un `solution_tension` (T85.e, D4): acotada, sin texto del
+    ítem. `others` solo cuenta y da el rango de σ."""
+    new_tag = "default" if data.new.is_default else "-"
+    role = "default" if data.reference_role is ReferenceRole.DEFAULT else "most_recent"
+    spread = (
+        f" (sigma {min(o.sigma for o in data.others):.2f}-{max(o.sigma for o in data.others):.2f})"
+        if data.others
+        else ""
+    )
+    labels = [label.value for label in data.labels]
+    if extreme_sigma is not None and is_extreme_sigma(data.sigma, extreme_sigma):
+        labels.append(EXTREME_SIGMA_LABEL)
+    line = (
+        f"planet={data.planet_name}; parameter={data.parameter.value}; "
+        f"new={_solution_text(data.new)} [{new_tag}]; "
+        f"reference={_solution_text(data.reference)} [{role}]; "
+        f"sigma={data.sigma:.2f}; threshold={data.threshold_sigma}; "
+        f"others={len(data.others)}{spread}; labels={','.join(labels) if labels else 'none'}"
+    )
+    rel_diff, ratio = value_change(data.new, data.reference)
+    line += f"; rel_diff={rel_diff:.4f}; ratio={ratio:.4f}"
+    return inline(line)
 
 
 def _tension_data(tension: CatalogTension) -> str:
