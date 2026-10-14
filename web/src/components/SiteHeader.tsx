@@ -12,9 +12,15 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-surface">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-3">
-        <nav aria-label="Navegación principal">
+        <nav
+          aria-label="Navegación principal"
+          className="flex flex-wrap items-baseline gap-x-6 gap-y-1"
+        >
           <Link href="/" className="text-lg font-semibold">
             Nocturna
+          </Link>
+          <Link href="/archivo" className="py-1 text-sm">
+            Resumen del archivo
           </Link>
         </nav>
         <p

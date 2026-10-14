@@ -102,3 +102,64 @@ export type FindingsPage = {
   size: number;
   total: number;
 };
+
+// Resumen semanal del archivo (T84, ADR 0028). Espejo de `DigestWeekOut`,
+// `WeeklyDigestOut` y compañía en `backend/src/nocturna/api/schemas.py`.
+
+export type TransitionKind = "changed" | "new_planet" | "regained" | "lost";
+
+export type Bound = "none" | "upper" | "lower";
+
+export type ArchiveValue = {
+  value: number | null;
+  err_plus: number | null;
+  err_minus: number | null;
+  bound: Bound | null;
+  unit: Unit;
+};
+
+export type ParameterChange = {
+  parameter: Parameter;
+  old: ArchiveValue | null;
+  new: ArchiveValue | null;
+  old_mass_provenance: string | null;
+  new_mass_provenance: string | null;
+};
+
+export type DigestReference = {
+  reference: string;
+  /** Texto tal cual del archivo (p. ej. "2026-03"); puede faltar. */
+  pl_pubdate: string | null;
+  /** Fecha `YYYY-MM-DD`. */
+  releasedate: string;
+};
+
+export type DigestEntry = {
+  kind: TransitionKind;
+  pl_name: string;
+  planet_url: string;
+  /** Datetime ISO. */
+  detected_at: string;
+  old: DigestReference | null;
+  new: DigestReference | null;
+  parameter_changes: ParameterChange[];
+};
+
+export type WeeklyDigest = {
+  week: string;
+  snapshots: number;
+  entries: DigestEntry[];
+};
+
+export type DigestWeek = {
+  week: string;
+  snapshots: number;
+  changed: number;
+  new_planet: number;
+  regained: number;
+  lost: number;
+};
+
+export type DigestWeeksResponse = {
+  weeks: DigestWeek[];
+};
