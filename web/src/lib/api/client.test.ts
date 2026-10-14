@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchFindingsPage, fetchFinding } from "./client";
+import {
+  fetchArchiveWeek,
+  fetchArchiveWeeks,
+  fetchFindingsPage,
+  fetchFinding,
+} from "./client";
 import type { FindingDetail } from "./types";
 
 /**
@@ -205,5 +210,131 @@ describe("fetchFinding con payloads", () => {
       fakeResponse({ status: 200, ok: true, json: () => Promise.resolve(detail) }),
     );
     expect(await fetchFinding(detail.id)).toEqual({ ok: true, data: detail });
+  });
+});
+
+describe("fetchArchiveWeeks", () => {
+  it("pide la URL exacta y devuelve ok con los datos", async () => {
+    const body = { weeks: [] };
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 200, ok: true, json: () => Promise.resolve(body) }),
+    );
+    expect(await fetchArchiveWeeks()).toEqual({ ok: true, data: body });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(`${API_URL}/archive/weeks`);
+  });
+
+  it.each([
+    [404, "not_found"],
+    [422, "unavailable"],
+    [500, "unavailable"],
+  ])("%i -> %s", async (status, reason) => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status, ok: false }));
+    expect(await fetchArchiveWeeks()).toEqual({ ok: false, reason });
+  });
+
+  it("red caída y JSON ilegible son unavailable", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("down"));
+    expect(await fetchArchiveWeeks()).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 200,
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("x")),
+      }),
+    );
+    expect(await fetchArchiveWeeks()).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+  });
+});
+
+describe("fetchArchiveWeek", () => {
+  // `cache` de React no memoriza fuera de un render de servidor, pero cada
+  // test usa una semana distinta para que no dependa de ello.
+  const digest = { week: "2026-W41", snapshots: 1, entries: [] };
+
+  it("200 -> ok y URL exacta", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({ status: 200, ok: true, json: () => Promise.resolve(digest) }),
+    );
+    expect(await fetchArchiveWeek("2026-W41")).toEqual({
+      ok: true,
+      data: digest,
+    });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      `${API_URL}/archive/weeks/2026-W41`,
+    );
+  });
+
+  it("codifica el parámetro de la ruta", async () => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status: 404, ok: false }));
+    await fetchArchiveWeek("../x?a=1/#");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      `${API_URL}/archive/weeks/${encodeURIComponent("../x?a=1/#")}`,
+    );
+  });
+
+  it("404 y 422 son not_found", async () => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status: 404, ok: false }));
+    expect(await fetchArchiveWeek("2026-W01")).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status: 422, ok: false }));
+    expect(await fetchArchiveWeek("2026-W02")).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("500, red caída y JSON ilegible son unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status: 500, ok: false }));
+    expect(await fetchArchiveWeek("2026-W03")).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    vi.mocked(fetch).mockRejectedValue(new Error("down"));
+    expect(await fetchArchiveWeek("2026-W04")).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 200,
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("x")),
+      }),
+    );
+    expect(await fetchArchiveWeek("2026-W05")).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+  });
+
+  it("no filtra cuerpo, estado ni URL", async () => {
+    const secret = "SECRET_INTERNAL_STACK_TRACE_DETAIL";
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 500,
+        ok: false,
+        json: () => Promise.resolve({ detail: secret }),
+      }),
+    );
+    const serialized = JSON.stringify(await fetchArchiveWeek("2026-W06"));
+    expect(serialized).toBe('{"ok":false,"reason":"unavailable"}');
+  });
+});
+
+describe("el 422 solo es not_found en la semana del archivo", () => {
+  it("fetchFinding con 422 sigue siendo unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status: 422, ok: false }));
+    expect(await fetchFinding("no-es-uuid")).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
   });
 });

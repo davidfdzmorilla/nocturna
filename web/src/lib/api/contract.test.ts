@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ArchiveValue,
   CatalogTension,
   ConfirmationReference,
+  DigestEntry,
+  DigestReference,
+  DigestWeek,
+  DigestWeeksResponse,
   FindingDetail,
   FindingSummary,
   FindingsPage,
   FirstMeasurement,
   IndependentConfirmation,
   MeasurementValue,
+  ParameterChange,
   PaperMeasurementWithEvidence,
   PriorSolution,
   TensionComparison,
+  WeeklyDigest,
 } from "./types";
 
 /**
@@ -150,6 +157,82 @@ describe("contrato de la API (claves exactas)", () => {
     );
     expect(keys(confirmation.reference)).toEqual(
       expected("refname", "arxiv_id", "value", "err_plus", "err_minus", "unit", "releasedate"),
+    );
+  });
+});
+
+describe("contrato del resumen semanal (claves exactas)", () => {
+  const archiveValue: ArchiveValue = {
+    value: 5.2,
+    err_plus: 0.3,
+    err_minus: 0.4,
+    bound: "none",
+    unit: "M_earth",
+  };
+  const ref: DigestReference = {
+    reference: "Ref A",
+    pl_pubdate: "2026-03",
+    releasedate: "2026-10-01",
+  };
+  const change: ParameterChange = {
+    parameter: "mass",
+    old: archiveValue,
+    new: archiveValue,
+    old_mass_provenance: "Mass",
+    new_mass_provenance: null,
+  };
+  const digestEntry: DigestEntry = {
+    kind: "changed",
+    pl_name: "Kepler-1 b",
+    planet_url: "https://exoplanetarchive.ipac.caltech.edu/overview/Kepler-1%20b",
+    detected_at: "2026-10-09T03:00:00Z",
+    old: ref,
+    new: ref,
+    parameter_changes: [change],
+  };
+  const digest: WeeklyDigest = {
+    week: "2026-W41",
+    snapshots: 2,
+    entries: [digestEntry],
+  };
+  const week: DigestWeek = {
+    week: "2026-W41",
+    snapshots: 2,
+    changed: 1,
+    new_planet: 2,
+    regained: 0,
+    lost: 3,
+  };
+  const weeks: DigestWeeksResponse = { weeks: [week] };
+
+  it("DigestWeek y DigestWeeksResponse", () => {
+    expect(keys(week)).toEqual(
+      expected("week", "snapshots", "changed", "new_planet", "regained", "lost"),
+    );
+    expect(keys(weeks)).toEqual(expected("weeks"));
+  });
+
+  it("WeeklyDigest y DigestEntry", () => {
+    expect(keys(digest)).toEqual(expected("week", "snapshots", "entries"));
+    expect(keys(digestEntry)).toEqual(
+      expected(
+        "kind", "pl_name", "planet_url", "detected_at", "old", "new",
+        "parameter_changes",
+      ),
+    );
+  });
+
+  it("DigestReference, ParameterChange y ArchiveValue", () => {
+    expect(keys(ref)).toEqual(
+      expected("reference", "pl_pubdate", "releasedate"),
+    );
+    expect(keys(change)).toEqual(
+      expected(
+        "parameter", "old", "new", "old_mass_provenance", "new_mass_provenance",
+      ),
+    );
+    expect(keys(archiveValue)).toEqual(
+      expected("value", "err_plus", "err_minus", "bound", "unit"),
     );
   });
 });

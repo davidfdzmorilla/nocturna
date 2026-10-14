@@ -6,7 +6,12 @@
  * σ con dos decimales. Funciones puras.
  */
 
-import type { MeasurementValue, Parameter, Unit } from "./api/types";
+import type {
+  ArchiveValue,
+  MeasurementValue,
+  Parameter,
+  Unit,
+} from "./api/types";
 
 const MINUS = "−";
 
@@ -62,4 +67,46 @@ export function formatWithErrors(m: MeasurementValue): string {
       ? `± ${formatNumber(m.err_plus)}`
       : `+${formatNumber(m.err_plus)} / ${MINUS}${formatNumber(m.err_minus)}`;
   return `${formatNumber(m.value)} ${errors} ${UNIT_LABELS[m.unit]}`;
+}
+
+/**
+ * Como `formatNumber`, pero con el ",0" que Python da a los enteros
+ * (`repr(5.0)` -> "5,0", `-0.0` -> "-0,0"); el JSON `1.0` llega a JS como `1`.
+ * Por encima de 1e16 `repr` usa exponente y no añade ",0".
+ */
+function formatArchive(v: number): string {
+  if (Object.is(v, -0)) {
+    return "-0,0";
+  }
+  const text = formatNumber(v);
+  return Number.isInteger(v) && Math.abs(v) < 1e16 ? `${text},0` : text;
+}
+
+const MISSING_VALUE = "sin valor";
+
+/**
+ * Espejo de `format_archive_value`
+ * (`backend/src/nocturna/application/archive_digest_text.py`):
+ * `"5,2 ± 0,3 M⊕"`, `"5,2 +0,4 / −0,3 M⊕"`, `"< 5,2 M⊕"` (cota) o
+ * `"sin valor"`. La API ya entrega los errores en valor absoluto.
+ */
+export function formatArchiveValue(p: ArchiveValue | null): string {
+  if (p === null || p.value === null) {
+    return MISSING_VALUE;
+  }
+  const unit = UNIT_LABELS[p.unit];
+  const number = formatArchive(p.value);
+  if (p.bound === "upper") {
+    return `< ${number} ${unit}`;
+  }
+  if (p.bound === "lower") {
+    return `> ${number} ${unit}`;
+  }
+  if (p.err_plus === null || p.err_minus === null) {
+    return `${number} ${unit}`;
+  }
+  if (p.err_plus === p.err_minus) {
+    return `${number} ± ${formatArchive(p.err_plus)} ${unit}`;
+  }
+  return `${number} +${formatArchive(p.err_plus)} / ${MINUS}${formatArchive(p.err_minus)} ${unit}`;
 }

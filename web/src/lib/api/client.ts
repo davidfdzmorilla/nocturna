@@ -12,7 +12,8 @@
  * devuelve el detalle real a quien la llama, solo `{"detail": "internal
  * error"}`, y manda la traza a stderr):
  *  - `200` -> `ok`.
- *  - `404` -> `not_found`.
+ *  - `404` -> `not_found` (y los estados extra que pase quien llama, p. ej.
+ *    `422` en la semana del resumen del archivo).
  *  - Cualquier otra cosa (5xx, red caída, timeout, JSON ilegible,
  *    `NOCTURNA_API_URL` sin definir) -> `unavailable`.
  * Esta función nunca lanza hacia quien la llama salvo bug propio, y
@@ -22,7 +23,13 @@
 
 import { cache } from "react";
 import { apiBaseUrl } from "./config";
-import type { FindingDetail, FindingsPage, FindingType } from "./types";
+import type {
+  DigestWeeksResponse,
+  FindingDetail,
+  FindingsPage,
+  FindingType,
+  WeeklyDigest,
+} from "./types";
 import { PAGE_SIZE } from "../pagination";
 
 export type ApiResult<T> =
@@ -30,7 +37,10 @@ export type ApiResult<T> =
 
 const TIMEOUT_MS = 5000;
 
-async function getJson<T>(path: string): Promise<ApiResult<T>> {
+async function getJson<T>(
+  path: string,
+  notFoundStatuses: readonly number[] = [404],
+): Promise<ApiResult<T>> {
   let baseUrl: string;
   try {
     baseUrl = apiBaseUrl();
@@ -53,7 +63,7 @@ async function getJson<T>(path: string): Promise<ApiResult<T>> {
     return { ok: false, reason: "unavailable" };
   }
 
-  if (response.status === 404) {
+  if (notFoundStatuses.includes(response.status)) {
     return { ok: false, reason: "not_found" };
   }
 
@@ -101,4 +111,23 @@ export const fetchFinding = cache(async function fetchFinding(
   id: string,
 ): Promise<ApiResult<FindingDetail>> {
   return getJson<FindingDetail>(`/findings/${encodeURIComponent(id)}`);
+});
+
+export async function fetchArchiveWeeks(): Promise<
+  ApiResult<DigestWeeksResponse>
+> {
+  return getJson<DigestWeeksResponse>("/archive/weeks");
+}
+
+/**
+ * `422` (formato de semana inválido) se trata como `not_found`: solo aquí,
+ * porque es el único endpoint con un parámetro de ruta que la API valida.
+ */
+export const fetchArchiveWeek = cache(async function fetchArchiveWeek(
+  week: string,
+): Promise<ApiResult<WeeklyDigest>> {
+  return getJson<WeeklyDigest>(
+    `/archive/weeks/${encodeURIComponent(week)}`,
+    [404, 422],
+  );
 });

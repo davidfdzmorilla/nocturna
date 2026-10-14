@@ -373,12 +373,13 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-10-09; pendiente de merge con migración `d8b1e4f7a203`, que se aplica a la base real el mismo día del merge, fuera de 00:00–04:45 y antes del viernes a las 10:00)**: plan aprobado por el autor con las recomendaciones D1–D9 (ADR 0028). Sin LLM: resumen determinista calculado al leer, no `Finding`. Fila de pérdida de solución por defecto en `save_snapshot`; `domain/archive_digest.py` (cuatro secciones, cambios por parámetro, semana ISO); `ArchiveDigestReader`; `ListDigestWeeks`/`GetWeeklyDigest`; `nocturna archive-digest`; `GET /archive/weeks` y `GET /archive/weeks/{week}` por lista blanca. Base real (solo lectura, 2026-10-09): 1 cambio de verdad en dos snapshots (TOI-2427 b), 73 planetas nuevos (70 el 2026-10-09), ninguna pérdida en los logs. Cinco mutantes muertos; revisión normal aprobada con sus correcciones aplicadas. Suite: 2873 passed (446 de `-m db`).
 
 ### T84.w · Página web del resumen semanal
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T84
 - **Toca agentes y gasto**: no.
 - **Origen**: partición de T84 (D9, ADR 0028).
 - **Alcance**: `/archivo` (lista de semanas) y `/archivo/[semana]` (secciones por tipo) en Next.js sobre `GET /archive/weeks` y `GET /archive/weeks/{week}`, con `lib/api/client.ts` como única vía de IO; cero llamadas a Claude. Textos y forma en la OD de T84.w.
 - **Hecho cuando**: tests de las dos rutas con la API simulada, guardas `no-claude-in-web` y `no-raw-html`, `pnpm lint` y `pnpm build` con la API parada, y Lighthouse de accesibilidad ≥ 90 en `/archivo` y en una semana.
+- **Cierre (2026-10-14; sin migración ni cambios de backend)**: plan aprobado por el autor con las recomendaciones D1–D10 (OD de T84.w y de T77 resueltas; sin ADR nuevo, ADR 0028 fija el contrato). `/archivo` y `/archivo/[semana]` con SSR dinámico; `fetchArchiveWeeks`/`fetchArchiveWeek` en `client.ts` (`422` → `not_found` solo en la segunda); `lib/archiveDigest.ts` (semana, rango ISO, secciones, agrupación por referencia), `lib/archiveRoute.ts`, `formatArchiveValue` espejo del formato de la CLI, `DigestSection`, `not-found` del segmento; enlace en la cabecera y pie nuevo. La revisión pidió que los enteros salgan con `,0` como en Python y una clave React con `detected_at`; corregidos. 15 de 17 mutantes muertos (los dos que sobreviven son equivalentes o no detectables con render estático). Lighthouse de accesibilidad 100 en escritorio y móvil en `/archivo`, `/archivo/2026-W40` y `/archivo/2026-W41`, con la API local en solo lectura sobre la base real. Suites: web 200 tests; backend 2873 passed sin cambios.
 
 ### T84.r · Redactor del resumen semanal
 - **Estado**: pending
