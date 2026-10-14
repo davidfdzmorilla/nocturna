@@ -2,6 +2,7 @@ import type { FindingDetail } from "@/lib/api/types";
 import { CatalogTensionData } from "./CatalogTensionData";
 import { ConfirmationData } from "./ConfirmationData";
 import { FirstMeasurementData } from "./FirstMeasurementData";
+import { SolutionTensionData } from "./SolutionTensionData";
 
 type FindingDataProps = {
   finding: FindingDetail;
@@ -20,6 +21,11 @@ export function FindingData({ finding }: FindingDataProps) {
           data={finding.catalog_tension}
           sourceUrl={finding.source_url}
         />
+      ) : null;
+      break;
+    case "solution_tension":
+      body = finding.solution_tension ? (
+        <SolutionTensionData data={finding.solution_tension} />
       ) : null;
       break;
     case "primera_medida":

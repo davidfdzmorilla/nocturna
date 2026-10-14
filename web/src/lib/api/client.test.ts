@@ -50,6 +50,7 @@ const sampleFinding: FindingDetail = {
   catalog_tension: null,
   first_measurement: null,
   independent_confirmation: null,
+  solution_tension: null,
 };
 
 describe("fetchFinding", () => {

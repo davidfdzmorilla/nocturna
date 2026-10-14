@@ -1,7 +1,7 @@
 import type { IndependentConfirmation } from "@/lib/api/types";
 import { arxivAbsUrl, safeArchiveUrl } from "@/lib/externalLinks";
 import {
-  PARAMETER_LABELS,
+  parameterTitle,
   formatSigma,
   formatWithErrors,
 } from "@/lib/measurementFormat";
@@ -13,7 +13,7 @@ type Props = {
 export function ConfirmationData({ data }: Props) {
   const archiveUrl = safeArchiveUrl(data.archive_url);
   const refArxiv = arxivAbsUrl(data.reference.arxiv_id);
-  const caption = `${PARAMETER_LABELS[data.parameter]} de ${data.paper_planet_name}: medida del artículo frente a la referencia del archivo`;
+  const caption = `${parameterTitle(data.parameter)} de ${data.paper_planet_name}: medida del artículo frente a la referencia del archivo`;
 
   return (
     <>

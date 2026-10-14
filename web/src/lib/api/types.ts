@@ -13,6 +13,7 @@
 export type FindingType =
   | "paper_explained"
   | "catalog_tension"
+  | "solution_tension"
   | "primera_medida"
   | "confirmacion_independiente";
 
@@ -87,6 +88,36 @@ export type IndependentConfirmation = {
   max_sigma: number;
 };
 
+export type ReferenceRole = "default" | "most_recent";
+
+export type SolutionTensionLabel = "model_dependent" | "controversial";
+
+export type SolutionTensionSolution = MeasurementValue & {
+  reference: string;
+  is_default: boolean;
+  arxiv_id: string | null;
+};
+
+export type SolutionTensionComparison = {
+  solution: SolutionTensionSolution;
+  sigma: number;
+};
+
+export type SolutionTension = {
+  planet_name: string;
+  parameter: Parameter;
+  archive_url: string;
+  threshold_sigma: number;
+  sigma: number;
+  reference_role: ReferenceRole;
+  labels: SolutionTensionLabel[];
+  new: SolutionTensionSolution;
+  reference: SolutionTensionSolution;
+  others: SolutionTensionComparison[];
+  /** Fecha `YYYY-MM-DD` de entrada de la solución nueva en el archivo. */
+  new_releasedate: string | null;
+};
+
 export type FindingDetail = FindingSummary & {
   level_amateur: string;
   level_technical: string;
@@ -94,6 +125,7 @@ export type FindingDetail = FindingSummary & {
   catalog_tension: CatalogTension | null;
   first_measurement: FirstMeasurement | null;
   independent_confirmation: IndependentConfirmation | null;
+  solution_tension: SolutionTension | null;
 };
 
 export type FindingsPage = {

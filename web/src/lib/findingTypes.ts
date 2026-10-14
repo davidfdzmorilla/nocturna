@@ -9,6 +9,7 @@ import type { FindingType } from "./api/types";
 export const FINDING_TYPES: readonly FindingType[] = [
   "paper_explained",
   "catalog_tension",
+  "solution_tension",
   "primera_medida",
   "confirmacion_independiente",
 ];
@@ -16,6 +17,7 @@ export const FINDING_TYPES: readonly FindingType[] = [
 export const TYPE_LABELS: Record<FindingType, string> = {
   paper_explained: "Artículo explicado",
   catalog_tension: "Tensión con el catálogo",
+  solution_tension: "Tensión entre soluciones",
   primera_medida: "Primera medida",
   confirmacion_independiente: "Confirmación independiente",
 };
@@ -23,6 +25,7 @@ export const TYPE_LABELS: Record<FindingType, string> = {
 export const TYPE_SLUGS: Record<FindingType, string> = {
   paper_explained: "articulo",
   catalog_tension: "tension",
+  solution_tension: "tension-soluciones",
   primera_medida: "primera-medida",
   confirmacion_independiente: "confirmacion",
 };
@@ -33,6 +36,16 @@ export const CANDIDATE_LABEL = "Candidato";
 
 export const CANDIDATE_LEGEND =
   "Candidato: discrepancia calculada automáticamente frente al NASA Exoplanet Archive; ninguna persona la ha verificado.";
+
+export const SOLUTION_CANDIDATE_LEGEND =
+  "Candidato: discrepancia entre soluciones del NASA Exoplanet Archive calculada automáticamente; ninguna persona la ha verificado.";
+
+/** Leyenda de "Candidato" según el tipo. */
+export function candidateLegend(type: FindingType): string {
+  return type === "solution_tension"
+    ? SOLUTION_CANDIDATE_LEGEND
+    : CANDIDATE_LEGEND;
+}
 
 /**
  * Interpreta `?tipo=`. Ausente o desconocido (incluidas mayúsculas) da
@@ -48,9 +61,9 @@ export function parseTypeParam(
   return FINDING_TYPES.find((type) => TYPE_SLUGS[type] === value) ?? null;
 }
 
-/** "Candidato" solo para `catalog_tension` (ADR 0012 §6). */
+/** "Candidato" para `catalog_tension` (ADR 0012 §6) y `solution_tension`. */
 export function isCandidate(type: FindingType): boolean {
-  return type === "catalog_tension";
+  return type === "catalog_tension" || type === "solution_tension";
 }
 
 /** `"/"`, `"/?page=n"`, `"/?tipo=slug"` o `"/?tipo=slug&page=n"`. */
