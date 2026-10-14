@@ -69,7 +69,7 @@ class WriteOutcome(StrEnum):
     RATE_LIMITED = "rate_limited"
 
 
-_OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, WriteOutcome] = {
+OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, WriteOutcome] = {
     AttemptOutcome.OK: WriteOutcome.WRITTEN,
     AttemptOutcome.INVALID_OUTPUT: WriteOutcome.INVALID_OUTPUT,
     AttemptOutcome.AGENT_ERROR: WriteOutcome.AGENT_ERROR,
@@ -241,7 +241,7 @@ class WriteTensions:
             with self._work() as w:
                 w.findings.add(finding)
         return WriteTensionResult(
-            outcome=_OUTCOME_BY_ATTEMPT[runner_result.outcome],
+            outcome=OUTCOME_BY_ATTEMPT[runner_result.outcome],
             finding=finding,
             attempts=runner_result.attempts,
             tokens_spent=runner_result.tokens_spent,

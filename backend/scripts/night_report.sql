@@ -1,6 +1,6 @@
 -- night_report.sql — Informe de la mañana (T60).
 --
--- Nueve consultas (Q1-Q9, más Q9b) de solo lectura sobre la última noche ejecutada, pensadas
+-- Nueve consultas (Q1-Q9, más Q9b y Q9c) de solo lectura sobre la última noche ejecutada, pensadas
 -- para leerse con café en dos minutos en vez de reconstruirse a mano cada
 -- mañana durante las catorce noches de calibración. Uso:
 --
@@ -264,8 +264,48 @@ ORDER BY sigma_referencia DESC, i.external_id, t.id;
 WITH n AS (
     SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 )
-SELECT ac.status, COUNT(*) AS llamadas, COUNT(DISTINCT ac.item_id) AS items,
+-- Desde T85.e agrupa también por `prompt_version`: writer-v1 (arXiv) y
+-- writer-archive-v1 (archivo) comparten el rol `writer`.
+SELECT ac.prompt_version, ac.status, COUNT(*) AS llamadas, COUNT(DISTINCT ac.item_id) AS items,
        COALESCE(SUM(ac.tokens_in + ac.tokens_out), 0) AS tokens
 FROM agent_calls ac JOIN n ON ac.run_id = n.id
 WHERE ac.agent = 'writer'
-GROUP BY ac.status ORDER BY ac.status;
+GROUP BY ac.prompt_version, ac.status ORDER BY ac.prompt_version, ac.status;
+
+\echo ''
+\echo '=== Q9c · Tensiones del archivo de la noche (redactor, T85.e) ==='
+-- Los solution_tension generados con el run_id de la noche: planeta, parámetro,
+-- σ, etiquetas persistidas, título, publicación y confidence, y el gasto del
+-- redactor del ítem del archivo contado una sola vez por ítem, en la fila que se
+-- ve primero (mismo orden que la salida: σ redondeada desc, planeta, parámetro,
+-- id), para que la suma cuadre con dos parámetros en el mismo ítem.
+-- Solo salen las tensiones con Finding: un ítem del archivo cuyo redactor falló
+-- sin llegar a crear Finding no aparece aquí, solo en Q9b.
+WITH n AS (
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
+),
+w AS (
+    SELECT ac.item_id, COUNT(*) AS llamadas, SUM(ac.tokens_in + ac.tokens_out) AS tokens
+    FROM agent_calls ac JOIN n ON ac.run_id = n.id
+    WHERE ac.agent = 'writer' AND ac.item_id IS NOT NULL
+    GROUP BY ac.item_id
+),
+t AS (
+    SELECT f.*, ROW_NUMBER() OVER (
+               PARTITION BY f.item_id
+               ORDER BY ROUND((f.solution_tension->>'sigma')::numeric, 2) DESC,
+                        f.solution_tension->>'planet_name',
+                        f.solution_tension->>'parameter', f.id
+           ) AS rn
+    FROM findings f JOIN n ON f.run_id = n.id
+    WHERE f.type = 'solution_tension'
+)
+SELECT t.solution_tension->>'planet_name' AS planeta,
+       t.solution_tension->>'parameter' AS parametro,
+       ROUND((t.solution_tension->>'sigma')::numeric, 2) AS sigma,
+       t.solution_tension->'labels' AS etiquetas,
+       t.title, t.published_at IS NOT NULL AS publicado, t.confidence,
+       CASE WHEN t.rn = 1 THEN w.llamadas END AS llamadas_writer_del_item,
+       CASE WHEN t.rn = 1 THEN w.tokens END AS tokens_writer_del_item
+FROM t LEFT JOIN w ON w.item_id = t.item_id
+ORDER BY sigma DESC, planeta, parametro, t.id;

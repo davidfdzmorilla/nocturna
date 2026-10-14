@@ -172,6 +172,7 @@ def _make_run_night(
         max_attempts=1,
         base_tokens=100,
         tokens_per_candidate=50,
+        extreme_sigma=50,
     )
 
     async def _ingest() -> IngestResult:

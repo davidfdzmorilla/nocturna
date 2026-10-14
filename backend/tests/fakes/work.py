@@ -37,6 +37,10 @@ from nocturna.application.use_cases.generate_measurement_findings import (
     MeasurementFindingsWork,
     MeasurementFindingsWorkFactory,
 )
+from nocturna.application.use_cases.write_solution_tensions import (
+    SolutionTensionWriterWork,
+    SolutionTensionWriterWorkFactory,
+)
 from nocturna.application.use_cases.write_tensions import (
     TensionWriterWork,
     TensionWriterWorkFactory,
@@ -55,7 +59,7 @@ from nocturna.domain.entities import (
 )
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentRole
-from nocturna.domain.repositories import TensionEvaluationRepository
+from nocturna.domain.repositories import SolutionTensionRepository, TensionEvaluationRepository
 
 
 class InMemoryRunRepository:
@@ -220,6 +224,13 @@ class InMemoryFindingRepository:
             if f.type == type and f.tension_evaluation_id is not None
         )
 
+    def solution_tension_ids_with_finding(self) -> frozenset[UUID]:
+        return frozenset(
+            f.solution_tension_id
+            for f in self._findings.values()
+            if f.type == FindingType.SOLUTION_TENSION and f.solution_tension_id is not None
+        )
+
     def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
         return sum(1 for f in self._findings.values() if f.run_id == run_id and f.type in types)
 
@@ -352,6 +363,28 @@ def make_tension_writer_work_factory(
     def _work() -> Iterator[TensionWriterWork]:
         yield TensionWriterWork(
             items=items, findings=findings, evaluations=evaluations, agent_calls=agent_calls
+        )
+
+    return _work
+
+
+def make_solution_tension_writer_work_factory(
+    *,
+    items: InMemoryItemRepository,
+    findings: InMemoryFindingRepository,
+    solution_tensions: SolutionTensionRepository,
+    agent_calls: InMemoryAgentCallRepository,
+) -> SolutionTensionWriterWorkFactory:
+    """Fábrica en memoria de la selección de tensiones del archivo (T85.e):
+    solo lectura, sin `BudgetGuard`, como la real."""
+
+    @contextmanager
+    def _work() -> Iterator[SolutionTensionWriterWork]:
+        yield SolutionTensionWriterWork(
+            items=items,
+            findings=findings,
+            solution_tensions=solution_tensions,
+            agent_calls=agent_calls,
         )
 
     return _work

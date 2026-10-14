@@ -127,6 +127,7 @@ async def test_orquestador_real_publica_el_aprobado_y_descarta_el_resto(
         max_attempts=policy.max_editor_calls_per_night,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
 
     result = await edit_night(run_id=run_id)

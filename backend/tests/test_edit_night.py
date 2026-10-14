@@ -169,6 +169,7 @@ def _make_edit_night(
         max_attempts=max_attempts,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
 
 

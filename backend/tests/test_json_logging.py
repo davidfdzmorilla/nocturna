@@ -349,6 +349,7 @@ async def _run_minimal_night_for_night_item_log() -> None:
         max_attempts=2,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
 
     async def _ingest() -> IngestResult:

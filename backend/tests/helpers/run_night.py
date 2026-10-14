@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fakes.clock import FakeClock
 from fakes.llm import FakeLLMProvider
+from fakes.solution_tensions import InMemorySolutionTensionRepository
 from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
 from fakes.work import (
     InMemoryAgentCallRepository,
@@ -17,6 +18,7 @@ from fakes.work import (
     InMemoryReadingRepository,
     InMemoryRunRepository,
     make_measurement_findings_work_factory,
+    make_solution_tension_writer_work_factory,
     make_tension_writer_work_factory,
     make_work_factory,
 )
@@ -32,6 +34,10 @@ from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight
+from nocturna.application.use_cases.write_solution_tensions import (
+    SelectSolutionTensions,
+    WriteSolutionTensions,
+)
 from nocturna.application.use_cases.write_tensions import SelectTensions, WriteTensions
 from nocturna.domain.entities import Item, Run
 from nocturna.domain.llm import AgentRole
@@ -101,6 +107,7 @@ class Environment:
         self.findings = InMemoryFindingRepository()
         self.agent_calls = InMemoryAgentCallRepository()
         self.evaluations = InMemoryTensionEvaluationRepository()
+        self.solution_tensions = InMemorySolutionTensionRepository()
         self.clock = FakeClock(now)
         self.guard = BudgetGuard(
             run_id=self.run.id,
@@ -180,6 +187,48 @@ def make_selector(
     )
 
 
+def make_solution_writer(
+    env: Environment,
+    provider: FakeLLMProvider,
+    *,
+    max_attempts: int = 2,
+    estimated_tokens: int = 500,
+) -> WriteSolutionTensions:
+    """`WriteSolutionTensions` sobre las tensiones del archivo en memoria de `env` (T85.e)."""
+    return WriteSolutionTensions(
+        work=env.work,
+        provider=provider,
+        system_prompt="prompt del redactor del archivo",
+        prompt_version="writer-archive-v1",
+        model="claude-sonnet-test",
+        max_turns=3,
+        max_attempts=max_attempts,
+        estimated_tokens=estimated_tokens,
+    )
+
+
+def make_solution_selector(
+    env: Environment,
+    *,
+    threshold_sigma: float = 3.0,
+    extreme_sigma: float = 50.0,
+    max_attempts: int = 2,
+) -> SelectSolutionTensions:
+    """`SelectSolutionTensions` (solo lectura) sobre las tensiones en memoria de `env`."""
+    return SelectSolutionTensions(
+        candidates_work=make_solution_tension_writer_work_factory(
+            items=env.items,
+            findings=env.findings,
+            solution_tensions=env.solution_tensions,
+            agent_calls=env.agent_calls,
+        ),
+        threshold_sigma=threshold_sigma,
+        extreme_sigma=extreme_sigma,
+        planet_overview_url=lambda name: f"https://archive.example/overview/{name}",
+        max_attempts=max_attempts,
+    )
+
+
 def make_run_night(
     *,
     env: Environment,
@@ -191,6 +240,8 @@ def make_run_night(
     measurement_findings: GenerateMeasurementFindings | None = None,
     write_tensions: WriteTensions | None = None,
     select_tensions: SelectTensions | None = None,
+    select_solution_tensions: SelectSolutionTensions | None = None,
+    write_solution_tensions: WriteSolutionTensions | None = None,
 ) -> RunNight:
     read_item = ReadItem(
         work=env.work,
@@ -230,6 +281,7 @@ def make_run_night(
         max_attempts=2,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50.0,
     )
 
     async def _ingest() -> IngestResult:
@@ -245,6 +297,8 @@ def make_run_night(
         measurement_findings=measurement_findings or make_generator(env),
         select_tensions=select_tensions or make_selector(env),
         write_tensions=write_tensions or make_writer(env, provider),
+        select_solution_tensions=select_solution_tensions,
+        write_solution_tensions=write_solution_tensions,
         run_id=env.run.id,
         max_items=max_items,
         max_consecutive_failures=max_consecutive_failures,

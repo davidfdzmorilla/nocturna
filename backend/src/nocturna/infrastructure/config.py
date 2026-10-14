@@ -454,7 +454,11 @@ class SolutionTensionsConfig(BaseModel):
     `since`: fecha de entrada (`releasedate`) mínima de las altas que se
     calculan; las anteriores no se tocan. `max_pubdate_age_months`: una alta
     cuyo `pl_pubdate` es más de N meses anterior a su `releasedate` se excluye
-    (`old_paper`). `writer_enabled`: para T85.e; en T85 no se lee.
+    (`old_paper`). `writer_enabled`: interruptor del redactor de estas
+    tensiones (T85.e): con `false` no se carga su prompt, no se autoriza gasto y
+    el Editor sigue en `editor-v3`. `extreme_sigma`: una σ por encima de este
+    valor no excluye la tensión: se marca (sin persistir) para el redactor y el
+    Editor (D5); debe ser mayor que `[tension] threshold_sigma`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -462,6 +466,7 @@ class SolutionTensionsConfig(BaseModel):
     since: date
     max_pubdate_age_months: int = Field(ge=1, le=240)
     writer_enabled: StrictBool
+    extreme_sigma: float = Field(gt=0, allow_inf_nan=False)
 
     @field_validator("since", mode="before")
     @classmethod
@@ -490,6 +495,16 @@ class PipelineConfig(BaseModel):
     exoplanet_filter: ExoplanetFilterConfig
     measurement_findings: MeasurementFindingsConfig
     solution_tensions: SolutionTensionsConfig
+
+    @model_validator(mode="after")
+    def _extreme_sigma_above_threshold(self) -> "PipelineConfig":
+        """`solution_tensions.extreme_sigma` > `tension.threshold_sigma`: una marca de σ
+        extrema por debajo del umbral marcaría todas las tensiones (T85.e, D5)."""
+        if self.solution_tensions.extreme_sigma <= self.tension.threshold_sigma:
+            raise ValueError(
+                "solution_tensions.extreme_sigma debe ser mayor que tension.threshold_sigma"
+            )
+        return self
 
     @model_validator(mode="after")
     def _measurement_categories_subset_of_arxiv_categories(self) -> "PipelineConfig":

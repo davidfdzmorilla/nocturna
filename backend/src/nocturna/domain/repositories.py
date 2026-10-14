@@ -144,6 +144,12 @@ class FindingRepository(Protocol):
         """
         ...
 
+    def solution_tension_ids_with_finding(self) -> frozenset[UUID]:
+        """Ids de `SolutionTension` que ya tienen un `Finding` `solution_tension`
+        (T85.e). Publicado o no: el índice único `(solution_tension_id, type)`
+        impide regenerarlo."""
+        ...
+
     def count_for_run(self, run_id: UUID, types: Collection[FindingType]) -> int:
         """Número de `Finding` del run con alguno de esos tipos, publicados o no.
         Usado por T89 para que el tope de candidatos sea por Run."""

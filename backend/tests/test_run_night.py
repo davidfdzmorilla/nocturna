@@ -657,6 +657,7 @@ async def test_budget_exhausted_en_fase_b_no_toca_la_reserva_y_el_editor_se_llam
         max_attempts=2,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
 
     async def _ingest() -> IngestResult:
@@ -866,6 +867,7 @@ async def test_ingesta_fallida_continua_con_los_new_existentes_y_no_supera_parti
         max_attempts=2,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
     run_night = RunNight(
         work=env.work,
@@ -954,6 +956,7 @@ async def test_el_log_de_ingesta_fallida_incluye_error_detail(caplog, monkeypatc
         max_attempts=2,
         base_tokens=1_000,
         tokens_per_candidate=200,
+        extreme_sigma=50,
     )
     run_night = RunNight(
         work=env.work,

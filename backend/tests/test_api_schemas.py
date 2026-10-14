@@ -93,6 +93,7 @@ def test_finding_detail_has_exactly_expected_keys() -> None:
         catalog_tension=None,
         first_measurement=None,
         independent_confirmation=None,
+        solution_tension=None,
     )
     dumped = detail.model_dump(mode="json")
     assert set(dumped.keys()) == {
@@ -107,6 +108,7 @@ def test_finding_detail_has_exactly_expected_keys() -> None:
         "catalog_tension",
         "first_measurement",
         "independent_confirmation",
+        "solution_tension",
     }
     assert _FORBIDDEN_KEYS.isdisjoint(dumped.keys())
     assert dumped["type"] == "paper_explained"
@@ -403,3 +405,42 @@ def test_archive_value_out_errores_en_valor_absoluto_y_unidad() -> None:
     assert (out.err_plus, out.err_minus) == (0.3, 0.4)
     assert out.unit.value == "R_earth" and out.bound is not None
     assert ArchiveValueOut.from_domain(None, MeasuredParameter.MASS) is None
+
+
+def test_solution_tension_out_es_lista_blanca() -> None:
+    from helpers.solution_tension_writer import make_solution_tension
+
+    from nocturna.api.schemas import SolutionTensionOut
+    from nocturna.domain.solution_tension import solution_tension_data_from
+
+    tension = make_solution_tension(uuid4())
+    data = solution_tension_data_from(tension, threshold_sigma=3.0, archive_url="https://x/y")
+
+    dumped = SolutionTensionOut.from_domain(data).model_dump(mode="json")
+
+    assert set(dumped) == {
+        "planet_name",
+        "parameter",
+        "archive_url",
+        "threshold_sigma",
+        "sigma",
+        "reference_role",
+        "labels",
+        "new",
+        "reference",
+        "others",
+        "new_releasedate",
+    }
+    expected_solution = {
+        "reference",
+        "value",
+        "err_plus",
+        "err_minus",
+        "unit",
+        "is_default",
+        "arxiv_id",
+    }
+    assert set(dumped["new"]) == expected_solution == set(dumped["reference"])
+    assert dumped["new_releasedate"] == "2026-09-18"
+    forbidden = {"solution_key", "soltype", "pl_pubdate", "ttv_flag", "period_check", "computed_at"}
+    assert forbidden.isdisjoint(all_keys(dumped))

@@ -143,6 +143,7 @@ confirmation_enabled = false
 since = "2026-08-01"
 max_pubdate_age_months = 24
 writer_enabled = false
+extreme_sigma = 50
 
 [llm]
 provider = "agent_sdk"
