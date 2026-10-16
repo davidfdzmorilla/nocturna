@@ -248,7 +248,12 @@ from nocturna.application.use_cases.generate_measurement_findings import (
     MeasurementFindingsWork,
     MeasurementFindingsWorkFactory,
 )
-from nocturna.application.use_cases.ingest_arxiv import IngestArxiv, IngestResult
+from nocturna.application.use_cases.ingest_arxiv import (
+    IngestArxiv,
+    IngestResult,
+    default_since,
+    since_was_capped,
+)
 from nocturna.application.use_cases.popularize_reading import (
     PopularizeOutcome,
     PopularizeReading,
@@ -538,11 +543,6 @@ def _parse_categories(value: str) -> list[str]:
     return categories
 
 
-def _default_since(now: datetime) -> datetime:
-    """Ayer a las 00:00 UTC, tomando `now` (aware, UTC) como referencia."""
-    return datetime.combine(now.date() - timedelta(days=1), time.min, tzinfo=UTC)
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nocturna", description="Pipeline nocturno de Nocturna.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -573,7 +573,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_parse_since,
         default=None,
         metavar="YYYY-MM-DD",
-        help="Fecha desde la que ingerir (00:00 UTC). Por defecto: ayer a las 00:00 UTC.",
+        help=(
+            "Fecha desde la que ingerir (00:00 UTC). Por defecto (T93): la fecha de la "
+            "última ingesta de arXiv en la base, nunca más tarde de ayer 00:00 UTC ni más "
+            "atrás de [sources.arxiv] max_catchup_days."
+        ),
     )
     run_night.add_argument(
         "--categories",
@@ -742,6 +746,51 @@ def exoplanet_filter_from_config(config: PipelineConfig) -> ExoplanetFilter:
     )
 
 
+def _resolve_since(
+    session_factory: sessionmaker[Session], *, since: datetime | None, config: PipelineConfig
+) -> tuple[datetime, str]:
+    """`since` efectivo y una descripción de su origen (T93, ADR 0032).
+
+    Explícito: se devuelve tal cual, sin tocar la base. Ausente: se calcula
+    con `default_since` desde `max(fetched_at)` de los ítems de arXiv, leído
+    en una unidad de trabajo propia, corta y de solo lectura (siempre se
+    deshace) que se cierra antes de que empiece la descarga: la sesión de la
+    ingesta no queda con una transacción abierta durante la petición. Registra
+    `arxiv.ingest_since` (con `capped` si la marca era anterior al tope de
+    recuperación; la regla vive en `since_was_capped`).
+    """
+    if since is not None:
+        return since, "explícito (--since)"
+    now = datetime.now(UTC)
+    max_catchup_days = config.sources.arxiv.max_catchup_days
+    with unit_of_work(session_factory, commit=False) as session:
+        last_ingest_at = SqlAlchemyItemRepository(session).last_fetched_at(ITEM_SOURCE_ARXIV)
+    resolved = default_since(
+        now=now, last_ingest_at=last_ingest_at, max_catchup_days=max_catchup_days
+    )
+    capped = since_was_capped(
+        now=now, last_ingest_at=last_ingest_at, max_catchup_days=max_catchup_days
+    )
+    _logger.info(
+        "arxiv.ingest_since",
+        extra={
+            "event": "arxiv.ingest_since",
+            "since": resolved.isoformat(),
+            "last_ingest_at": last_ingest_at.isoformat() if last_ingest_at else None,
+            "capped": capped,
+        },
+    )
+    if last_ingest_at is None:
+        origin = "ayer, sin ingesta previa"
+    elif capped:
+        origin = f"acotado a max_catchup_days={max_catchup_days}"
+    elif resolved.date() == now.astimezone(UTC).date() - timedelta(days=1):
+        origin = "ayer"
+    else:
+        origin = f"desde la última ingesta, {last_ingest_at.astimezone(UTC).date().isoformat()}"
+    return resolved, origin
+
+
 async def _ingest_into(
     session: Session,
     *,
@@ -750,6 +799,9 @@ async def _ingest_into(
     config: PipelineConfig,
 ) -> IngestResult:
     """Compone y ejecuta la ingesta de arXiv sobre la sesión recibida.
+
+    `since` llega ya resuelto (`_resolve_since`, T93, ADR 0032, en una sesión
+    aparte y cerrada): aquí no se consulta la marca de la última ingesta.
 
     No decide la frontera transaccional: quien llama abre `unit_of_work`
     (con commit en la noche real, sin commit en `--dry-run`). `IngestArxiv`
@@ -780,7 +832,7 @@ async def _ingest_into(
 
 async def _run_ingest(
     *,
-    since: datetime,
+    since: datetime | None,
     categories: Sequence[str],
     config: PipelineConfig,
     settings: Settings,
@@ -788,8 +840,11 @@ async def _run_ingest(
     """Compone y ejecuta la ingesta de arXiv dentro de una única unidad de trabajo."""
     engine = create_db_engine(settings)
     factory = create_session_factory(engine)
+    resolved_since, _ = _resolve_since(factory, since=since, config=config)
     with unit_of_work(factory) as session:
-        return await _ingest_into(session, since=since, categories=categories, config=config)
+        return await _ingest_into(
+            session, since=resolved_since, categories=categories, config=config
+        )
 
 
 def _abstract_preview(text: str) -> str:
@@ -2083,12 +2138,12 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
     0; 1 si falla arXiv o el archivo (en ambos casos sin escribir nada)."""
     settings = Settings()
     config = load_pipeline_config()
-    since = args.since if args.since is not None else _default_since(datetime.now(UTC))
     categories = args.categories if args.categories is not None else config.sources.arxiv.categories
 
     engine = create_db_engine(settings)
     factory = create_session_factory(engine)
     try:
+        since, since_origin = _resolve_since(factory, since=args.since, config=config)
         with unit_of_work(factory, commit=False) as session:
             try:
                 result = asyncio.run(
@@ -2098,6 +2153,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 print(f"error consultando arXiv: {exc}", file=sys.stderr)
                 return 1
 
+            print(f"since: {since.isoformat()} ({since_origin})")
             _print_dry_run_report(result)
 
             policy = budget_policy_from_config(config)
@@ -2163,7 +2219,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
     engine = create_db_engine(settings)
     session_factory = create_session_factory(engine)
 
-    since = args.since if args.since is not None else _default_since(datetime.now(UTC))
+    since = args.since
     categories = args.categories if args.categories is not None else config.sources.arxiv.categories
 
     # Todo lo que puede fallar por sí solo, construido ANTES de abrir

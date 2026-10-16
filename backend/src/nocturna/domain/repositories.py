@@ -54,6 +54,10 @@ class ItemRepository(Protocol):
         """Persiste el estado actual del ítem. Usado por T41/T42/T43."""
         ...
 
+    def last_fetched_at(self, source: str) -> datetime | None:
+        """Mayor `fetched_at` de los ítems de `source`; `None` si no hay ninguno (T93)."""
+        ...
+
 
 class ArchiveItemRepository(Protocol):
     """Los `Item` de la vía del archivo (T85, D12): get-or-create por `(source, external_id)`."""

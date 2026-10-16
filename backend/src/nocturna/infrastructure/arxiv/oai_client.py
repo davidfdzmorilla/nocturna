@@ -39,11 +39,14 @@ _logger = logging.getLogger(__name__)
 OAI_BASE_URL = "https://oaipmh.arxiv.org/oai"
 
 # Desfase máximo entre el `datestamp` de anuncio de un lote y la fecha de
-# envío de lo que contiene. arXiv anuncia a las 00:00 UTC los envíos hasta
-# las 18:00 UTC del día anterior, así que un lote con `datestamp = D` puede
-# traer envíos de `D-2 18:00`. Dos días cubre ese intervalo con margen; es
-# el suelo del filtro fino, no un solape de cortesía.
-_DATESTAMP_LAG_DAYS = 2
+# envío de lo que contiene. Ciclo real de arXiv: el anuncio del lunes trae
+# los envíos de (jueves 18:00, viernes 18:00] UTC y el del martes los de
+# (viernes 18:00, lunes 18:00]; los fines de semana no hay anuncio y los
+# festivos de arXiv desplazan el ciclo. El peor caso es un envío del jueves
+# 18:00 anunciado el lunes (4 días + 6 h de desfase), más el de un martes
+# tras festivo. Siete días cubren ese intervalo con margen; es el suelo del
+# filtro fino, no un solape de cortesía.
+_DATESTAMP_LAG_DAYS = 7
 _SERVICE = "el OAI-PMH de arXiv"
 
 # Los sets de OAI-PMH son jerárquicos: `grupo:archivo:CATEGORÍA`. El prefijo
@@ -116,23 +119,23 @@ class ArxivOaiClient:
         sin lotes que filtrar.
 
         El suelo del filtro fino NO es `since`, y esto es lo más delicado de
-        este método. Un lote con `datestamp = D` contiene envíos de
-        `(D-2 18:00 UTC, D-1 18:00 UTC]`: arXiv anuncia a las 00:00 UTC lo
-        que se envió hasta las 18:00 UTC del día anterior. Usar `since` (que
-        con el valor por defecto es *ayer a medianoche*) como suelo cortaba
-        ese intervalo por la mitad y **descartaba la franja de envíos de la
-        tarde anterior, que es la más poblada del día**: medido sobre una
-        cosecha real, 8 de 18 novedades, un 44 %. Y se perdían para siempre,
-        porque la noche anterior no pidió ese `datestamp` y la siguiente lo
-        pide con el `since` ya por delante.
+        este método. Un lote con `datestamp = D` contiene envíos anteriores a
+        D con un desfase que depende del ciclo de anuncios de arXiv: el del
+        lunes trae (jueves 18:00, viernes 18:00] UTC y el del martes
+        (viernes 18:00, lunes 18:00], de modo que el desfase llega a 4 días
+        + 6 h (más con festivos de arXiv). Usar `since` (por defecto *ayer a
+        medianoche*) como suelo, o un suelo de `from_ - 2 días`, cortaba esos
+        intervalos y descartaba para siempre los envíos de jueves y viernes
+        a partir de las 18:00 UTC: la noche siguiente no repite el
+        `datestamp` y el `since` ya va por delante.
 
-        Así que el suelo baja `_DATESTAMP_LAG_DAYS` días respecto a `from_`:
-        acepta todo lo que los lotes de la ventana traen legítimamente como
-        novedad, y sigue descartando las reediciones de papers viejos que la
-        cosecha arrastra (el `datestamp` es de modificación, no de envío).
-        Los papers que se repiten entre noches por el solape los absorbe
-        `add_many` con `ON CONFLICT DO NOTHING`, que es gratis en base de
-        datos; lo que NO es gratis es perderlos.
+        Así que el suelo baja `_DATESTAMP_LAG_DAYS` (7) días respecto a
+        `from_`: acepta todo lo que los lotes de la ventana traen
+        legítimamente como novedad, y sigue descartando las reediciones de
+        papers viejos que la cosecha arrastra (el `datestamp` es de
+        modificación, no de envío). Los papers que se repiten entre noches
+        por el solape los absorbe `add_many` con `ON CONFLICT DO NOTHING`,
+        que es gratis en base de datos; lo que NO es gratis es perderlos.
 
         Un mismo paper puede aparecer en los sets de dos categorías
         (cross-list): se deduplica aquí, antes de devolver, para no inflar

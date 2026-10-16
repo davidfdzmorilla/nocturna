@@ -231,6 +231,9 @@ class ArxivConfig(BaseModel):
     # `resumptionToken` inesperada podría encadenar peticiones sin límite a
     # las 00:05, comiéndose la ventana de lectura.
     max_requests_per_fetch: int = Field(ge=1)
+    # T93, ADR 0032: días máximos hacia atrás que recupera la ingesta tras
+    # noches sin ejecutar o con ingesta fallida (ver `default_since`).
+    max_catchup_days: int = Field(ge=1, le=14)
 
     @model_validator(mode="after")
     def _categories_traducibles_a_sets_oai(self) -> "ArxivConfig":
@@ -545,6 +548,10 @@ class PipelineConfig(BaseModel):
 
         El límite es el 25 % de `run_timeout_s`: por encima de eso la ingesta
         deja de ser un preámbulo y empieza a competir con las lecturas.
+
+        Nota: la vía `api` no tiene techo de peticiones propio y, con
+        `max_results_per_fetch = 800`, puede llegar a 8 páginas; hoy está
+        degradada y sin uso, y este cálculo no la cubre.
         """
         arxiv = self.sources.arxiv
         per_request_s = arxiv.retry_max_elapsed_s + _HTTP_TIMEOUT_CEILING_S + _COURTESY_CEILING_S

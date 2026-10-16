@@ -361,7 +361,7 @@ async def test_la_noche_siguiente_tambien_ve_el_lote_no_cero_items() -> None:
 
 @pytest.mark.anyio
 async def test_las_reediciones_antiguas_siguen_descartandose() -> None:
-    """El suelo baja dos días, no desaparece: `2509.12737` tiene v1 de 2025
+    """El suelo baja siete días (T93), no desaparece: `2509.12737` tiene v1 de 2025
     y aparece en la cosecha solo porque su `datestamp` es reciente. Sin este
     contraste, «no perder nada» se cumpliría ingiriendo también las
     reediciones, gastando lecturas del Reader en papers ya analizados."""
@@ -397,7 +397,8 @@ async def test_el_resumen_de_la_cosecha_queda_en_el_log(caplog) -> None:
     assert campos["items"] > 0
     assert campos["filtered_out"] > 0  # las reediciones antiguas de la captura
     assert campos["requests"] == 1
-    assert campos["floor"].startswith("2026-09-21")
+    # from_ = 2026-09-23; el suelo baja _DATESTAMP_LAG_DAYS = 7 días (T93).
+    assert campos["floor"].startswith("2026-09-16")
 
 
 @pytest.mark.anyio

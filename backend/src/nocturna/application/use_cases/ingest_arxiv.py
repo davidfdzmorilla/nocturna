@@ -15,12 +15,45 @@ su cuenta.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 
 from nocturna.domain.entities import Item
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.repositories import ItemRepository
 from nocturna.domain.sources import ArxivSource
+
+
+def default_since(
+    *, now: datetime, last_ingest_at: datetime | None, max_catchup_days: int
+) -> datetime:
+    """Desde cuándo ingesta la noche cuando no hay `--since` (T93, ADR 0032).
+
+    00:00 UTC de `max(min(ayer, fecha de la última ingesta), hoy - max_catchup_days)`:
+    nunca más tarde de ayer (el suelo de siempre), retrocede hasta la última
+    ingesta si hubo noches sin ejecutar o fallidas, y no más de
+    `max_catchup_days` días. Sin marca previa, ayer.
+    """
+    today = now.astimezone(UTC).date()
+    yesterday = today - timedelta(days=1)
+    start = yesterday
+    if last_ingest_at is not None:
+        start = min(yesterday, last_ingest_at.astimezone(UTC).date())
+    start = max(start, today - timedelta(days=max_catchup_days))
+    return datetime.combine(start, time.min, tzinfo=UTC)
+
+
+def since_was_capped(
+    *, now: datetime, last_ingest_at: datetime | None, max_catchup_days: int
+) -> bool:
+    """Si `default_since` acotó el retroceso a `max_catchup_days` (T93).
+
+    Misma aritmética de fechas UTC que `default_since`: la marca es anterior
+    al día `hoy - max_catchup_days`. Estar justo en ese día no es acotar.
+    """
+    if last_ingest_at is None:
+        return False
+    today = now.astimezone(UTC).date()
+    return last_ingest_at.astimezone(UTC).date() < today - timedelta(days=max_catchup_days)
 
 
 @dataclass(frozen=True, slots=True)
