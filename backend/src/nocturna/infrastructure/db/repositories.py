@@ -95,6 +95,12 @@ class SqlAlchemyItemRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def last_fetched_at(self, source: str) -> datetime | None:
+        """`max(fetched_at)` de los ítems de `source` (T93). El filtro por
+        `source` es obligatorio: hay ítems de `exoplanet_archive`."""
+        stmt = select(func.max(ItemRow.fetched_at)).where(ItemRow.source == source)
+        return self._session.execute(stmt).scalar_one_or_none()
+
     def add_many(self, items: list[Item]) -> int:
         """Inserta ítems nuevos, deduplicando por `(source, external_id)`.
 

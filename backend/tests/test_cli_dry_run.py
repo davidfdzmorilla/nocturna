@@ -93,6 +93,7 @@ measurement_categories = ["astro-ph.EP"]
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+max_catchup_days = 7
 ingest_via = "oai"
 oai_base_url = "https://oaipmh.arxiv.org/oai"
 oai_metadata_prefix = "arXivRaw"
@@ -218,25 +219,6 @@ def test_valor_por_defecto_de_since_no_se_calcula_al_construir_el_parser() -> No
     args = parser.parse_args(["run-night", "--dry-run"])
 
     assert args.since is None
-
-
-@pytest.mark.parametrize(
-    ("now", "expected"),
-    [
-        # Caso normal, a media tarde.
-        (datetime(2026, 9, 16, 10, 0, tzinfo=UTC), datetime(2026, 9, 15, 0, 0, tzinfo=UTC)),
-        # Justo en la medianoche: "ayer" sigue siendo el día natural anterior.
-        (datetime(2026, 9, 16, 0, 0, 0, tzinfo=UTC), datetime(2026, 9, 15, 0, 0, tzinfo=UTC)),
-        # Cruce de año.
-        (datetime(2026, 1, 1, 12, 0, tzinfo=UTC), datetime(2025, 12, 31, 0, 0, tzinfo=UTC)),
-    ],
-    ids=["media-tarde", "medianoche-exacta", "cruce-de-año"],
-)
-def test_default_since_es_ayer_a_medianoche_utc(now: datetime, expected: datetime) -> None:
-    result = cli._default_since(now)
-
-    assert result == expected
-    assert result.tzinfo is UTC
 
 
 # --- budget_policy_from_config: traducción campo a campo --------------------

@@ -284,8 +284,14 @@ categories = ["astro-ph.EP", "astro-ph.GA"]
 # page_size: entradas por página de la API de arXiv.
 page_size = 100
 # max_results_per_fetch: tope de resultados acumulados en una ingesta; límite de
-# cortesía hacia arXiv y de memoria, no de gasto.
-max_results_per_fetch = 400
+# cortesía hacia arXiv y de memoria, no de gasto. 800 (antes 400, T93) para
+# que una recuperación de varios lotes de dos categorías no se trunque.
+max_results_per_fetch = 800
+# T93, ADR 0032: días máximos hacia atrás que recupera la ingesta tras noches
+# sin ejecutar o con ingesta fallida. Sin --since, la ingesta parte de la fecha
+# de la última ingesta de arXiv en la base (nunca más tarde de ayer), acotada
+# por este valor.
+max_catchup_days = 7
 # ingest_via: vía de ingesta (T60.c, ADR 0010). "oai" = OAI-PMH de
 # oaipmh.arxiv.org, el endpoint que arXiv documenta para cosecha programada;
 # "api" = /api/query, la vía original, degradada desde el 406 sistemático
@@ -306,10 +312,11 @@ oai_base_url = "https://oaipmh.arxiv.org/oai"
 oai_metadata_prefix = "arXivRaw"
 # PROVISIONAL, sin datos de campo. Días de ventana sobre el datestamp de
 # ANUNCIO (el OAI-PMH de arXiv no filtra por fecha de envío). El suelo del
-# filtro fino NO es `since`: baja dos días respecto al inicio de la ventana,
-# porque un lote con datestamp D trae envíos desde D-2 18:00 UTC y usar
-# `since` descartaba la franja de la tarde anterior -- un 44 % de las
-# novedades, medido. Ver oai_client.py::fetch_new y ADR 0010.
+# filtro fino NO es `since` ni "D-2": baja 7 días respecto al inicio de la
+# ventana, porque el anuncio del lunes trae (jue 18:00, vie 18:00] y el del
+# martes (vie 18:00, lun 18:00] UTC (desfase de hasta 4 días + 6 h, más con
+# festivos de arXiv); con un suelo menor se perdían los envíos de jueves y
+# viernes desde las 18:00. Ver oai_client.py::fetch_new, ADR 0010 y ADR 0032.
 # Subir este valor NO trae más novedades: trae lotes más viejos que el suelo
 # descarta, y esos lotes sí gastan max_requests_per_fetch. De ahí la cota
 # `le=7` en ArxivConfig.

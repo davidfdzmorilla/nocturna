@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from uuid import UUID
 
 from nocturna.application.budget import BudgetGuard
@@ -142,6 +143,10 @@ class InMemoryItemRepository:
                 self._items[item.id] = item
                 added += 1
         return added
+
+    def last_fetched_at(self, source: str) -> datetime | None:
+        fetched = [i.fetched_at for i in self._items.values() if i.source == source]
+        return max(fetched, default=None)
 
     def get(self, item_id: UUID) -> Item | None:
         return self._items.get(item_id)

@@ -64,6 +64,7 @@ measurement_categories = ["astro-ph.EP"]
 categories = ["astro-ph.EP", "astro-ph.GA"]
 page_size = 100
 max_results_per_fetch = 400
+max_catchup_days = 7
 ingest_via = "oai"
 oai_base_url = "https://oaipmh.arxiv.org/oai"
 oai_metadata_prefix = "arXivRaw"
@@ -185,7 +186,7 @@ def test_arxiv_page_size_y_max_results_se_cargan():
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
     assert config.sources.arxiv.page_size == 100
-    assert config.sources.arxiv.max_results_per_fetch == 400
+    assert config.sources.arxiv.max_results_per_fetch == 800
 
 
 # --- reader.measurement_categories (T71.c) ---------------------------------

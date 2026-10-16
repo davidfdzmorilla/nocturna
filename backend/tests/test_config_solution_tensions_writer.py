@@ -27,10 +27,11 @@ def _config_with(tmp_path: Path, *, replace: str, by: str):
     return load_pipeline_config(path)
 
 
-def test_el_toml_real_trae_extreme_sigma_50_y_el_redactor_apagado() -> None:
+def test_el_toml_real_trae_extreme_sigma_50_y_el_redactor_encendido() -> None:
+    # Activado el 2026-10-14 tras el merge de T85.w (commit `chore(config)`).
     config = load_pipeline_config(REAL_PIPELINE_TOML)
     assert config.solution_tensions.extreme_sigma == 50
-    assert config.solution_tensions.writer_enabled is False
+    assert config.solution_tensions.writer_enabled is True
 
 
 def test_sin_extreme_sigma_la_configuracion_falla(tmp_path: Path) -> None:
@@ -45,8 +46,8 @@ def test_extreme_sigma_debe_ser_mayor_que_el_umbral(tmp_path: Path, value: str) 
 
 
 def test_editor_prompt_version_sigue_a_writer_enabled(tmp_path: Path) -> None:
-    off = load_pipeline_config(REAL_PIPELINE_TOML)
-    on = _config_with(tmp_path, replace="writer_enabled = false", by="writer_enabled = true")
+    on = load_pipeline_config(REAL_PIPELINE_TOML)
+    off = _config_with(tmp_path, replace="writer_enabled = true", by="writer_enabled = false")
     assert cli.editor_prompt_version(off) == EDITOR_PROMPT_VERSION == "editor-v3"
     assert cli.editor_prompt_version(on) == EDITOR_V4_PROMPT_VERSION == "editor-v4"
 
