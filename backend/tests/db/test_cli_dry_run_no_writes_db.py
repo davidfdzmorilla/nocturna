@@ -399,3 +399,109 @@ def test_dry_run_lista_la_tension_elegible_sin_construir_el_redactor_ni_escribir
     assert f"elegible · {PAPER_V1298} · V1298 Tau b (mass)" in out
     assert MARKER in out
     assert _snapshot(db_session_factory) == before
+
+
+def test_dry_run_excluye_la_tension_del_archivo_ya_contada_por_arxiv_sin_escribir(
+    monkeypatch, db_session_factory, capsys
+):
+    """T95: HD 65216 c, periodo. El `catalog_tension` del paper 2610.02783 ya
+    existe por la vía arXiv y la alta del archivo cita el mismo paper: el
+    `--dry-run` la lista como `same_paper_arxiv` y la base queda intacta."""
+    from datetime import date
+
+    from helpers.cross_path_dedup import (
+        HD65216_ARXIV_ID,
+        arxiv_evaluation,
+        arxiv_finding,
+    )
+    from test_archive_repository import save, snapshot, solution
+
+    from nocturna.domain.archive import ArchiveParameterValue, catalog_solution_from_archive
+    from nocturna.domain.entities import (
+        ITEM_SOURCE_EXOPLANET_ARCHIVE,
+        FindingType,
+        MeasuredParameter,
+        ReferenceRole,
+    )
+    from nocturna.domain.solution_tension import SolutionTension
+    from nocturna.domain.tension import PeriodCheck
+    from nocturna.infrastructure.db.repositories import (
+        SqlAlchemyArchiveRepository,
+        SqlAlchemyFindingRepository,
+        SqlAlchemySolutionTensionRepository,
+        SqlAlchemyTensionEvaluationRepository,
+    )
+
+    planet = "HD 65216 c"
+    period = MeasuredParameter.PERIOD
+    wallace = solution(
+        planet,
+        "Wallace et al. 2026",
+        mass=None,
+        is_default=True,
+        arxiv_id=HD65216_ARXIV_ID,
+        releasedate=date(2026, 10, 8),
+        period=ArchiveParameterValue(value=1100.0, err1=2.0, err2=-2.0, lim=0),
+    )
+    wittenmyer = solution(
+        planet,
+        "Wittenmyer et al. 2019",
+        mass=None,
+        arxiv_id="1901.00001",
+        releasedate=date(2026, 7, 1),
+        period=ArchiveParameterValue(value=1000.0, err1=8.0, err2=-8.0, lim=0),
+    )
+    new = catalog_solution_from_archive(wallace, period, is_default=True)
+    reference = catalog_solution_from_archive(wittenmyer, period, is_default=False)
+    assert new is not None and reference is not None
+    arxiv_item = make_item(external_id=HD65216_ARXIV_ID)
+    reading = make_reading(arxiv_item.id)
+    run = make_run()
+    archive_item = make_item(
+        source=ITEM_SOURCE_EXOPLANET_ARCHIVE,
+        external_id=wallace.solution_key,
+        categories=["exoplanet_archive"],
+    )
+    evaluation = arxiv_evaluation(
+        arxiv_item.id, planet=planet, parameter=MeasuredParameter.PERIOD, reading_id=reading.id
+    )
+    with unit_of_work(db_session_factory) as session:
+        save(SqlAlchemyArchiveRepository(session), snapshot(), [wittenmyer, wallace])
+        SqlAlchemyItemRepository(session).add_many([arxiv_item, archive_item])
+        SqlAlchemyRunRepository(session).add(run)
+        SqlAlchemyReadingRepository(session).add(reading)
+        SqlAlchemyTensionEvaluationRepository(session).add(evaluation)
+        SqlAlchemyFindingRepository(session).add(
+            arxiv_finding(
+                FindingType.CATALOG_TENSION,
+                item_id=arxiv_item.id,
+                run_id=run.id,
+                evaluation_id=evaluation.id,
+                published=True,
+            )
+        )
+        SqlAlchemySolutionTensionRepository(session).add(
+            SolutionTension(
+                new_solution_key=wallace.solution_key,
+                reference_solution_key=wittenmyer.solution_key,
+                planet_name=planet,
+                parameter=period,
+                new=new,
+                reference=reference,
+                reference_role=ReferenceRole.MOST_RECENT,
+                computed_at=datetime(2026, 10, 14, 4, 0, tzinfo=UTC),
+                sigma=10.09,
+                period_check=PeriodCheck(min_difference_met=True, alias_suspected=False),
+                item_id=archive_item.id,
+            )
+        )
+    before = _snapshot(db_session_factory)
+    _route(monkeypatch)
+
+    code = main(ARGS)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Tensiones del archivo pendientes del redactor" in out
+    assert f"excluida · {planet} (period) · same_paper_arxiv" in out
+    assert _snapshot(db_session_factory) == before

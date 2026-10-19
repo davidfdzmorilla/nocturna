@@ -340,6 +340,14 @@ def build_solution_tension(
 #: Motivo con el que el redactor del archivo (T85.e) no toma una tensión.
 NOT_ELIGIBLE = "not_eligible"
 
+#: Motivo con el que el redactor del archivo no toma una tensión porque el paper
+#: de la alta ya cuenta ese planeta y parámetro por la vía arXiv (T95, ADR 0034).
+#: No es un `SkipReason`: ese enum es columna con CHECK y este motivo no se persiste.
+SAME_PAPER_ARXIV = "same_paper_arxiv"
+
+#: Clave `(arxiv_id del paper, planeta del archivo, parámetro)` de un hallazgo arXiv.
+ArxivFindingKey = tuple[str, str, MeasuredParameter]
+
 #: Marca derivada (no persistida) de una σ extrema; ver `is_extreme_sigma`.
 EXTREME_SIGMA_LABEL = "extreme_sigma"
 
@@ -399,3 +407,12 @@ def solution_tension_data_from(
         labels=tension.labels,
         reference_role=tension.reference_role,
     )
+
+
+def told_by_arxiv(tension: SolutionTension, arxiv_keys: frozenset[ArxivFindingKey]) -> bool:
+    """Cierto si el paper de la alta ya tiene hallazgo arXiv para este planeta y
+    parámetro (T95, ADR 0034). Sin `arxiv_id` en la alta no hay cruce posible."""
+    arxiv_id = tension.new.arxiv_id
+    if arxiv_id is None:
+        return False
+    return (arxiv_id, tension.planet_name, tension.parameter) in arxiv_keys

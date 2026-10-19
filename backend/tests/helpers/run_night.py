@@ -221,6 +221,7 @@ def make_solution_selector(
             findings=env.findings,
             solution_tensions=env.solution_tensions,
             agent_calls=env.agent_calls,
+            evaluations=env.evaluations,
         ),
         threshold_sigma=threshold_sigma,
         extreme_sigma=extreme_sigma,

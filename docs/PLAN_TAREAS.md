@@ -498,6 +498,39 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: lo fija el plan. Como mínimo: test del orden nuevo que falla antes del arreglo, test de caducidad, consulta de solo lectura en la base real de cuántos ítems caducarían, y la decisión T20/T44 cerrada.
 - **Cierre (2026-10-17; con migración `e3a7c5b9d214`)**: plan aprobado por el autor con D1 a (estado `expired`, cambio del modelo de dominio de `CLAUDE.md` aprobado), D2 N = 7 sobre `published_at`, D3 b (los `exoplanet_match` no caducan) y D4 a (fase `expire` de `run-night` entre ingesta y Reader). ADR 0033 (modifica ADR 0018 §6). Consulta de solo lectura previa: 223 `new` sin marca, caducarían 43 con N = 7; desfase envío-ingesta p50 1,8 d, p90 3,9 d, p99 8,1 d (recuperaciones); 9 de 219 `paper_explained` publicados se leyeron con más de 7 días. `next_unread` por `exoplanet_match DESC, published_at DESC, external_id`; `expire_stale_unread` compartida por la noche y el `--dry-run` (sin escrituras); `reread_refusal` y `run-item` rechazan `expired`; `[limits] max_unread_age_days = 7`; Q6 de `night_report.sql` con el más antiguo de la cola y los caducados acumulados. Mutantes muertos (orden, prioridad, cada filtro de `stale_unread`, límite exacto, fase ausente o tras el Reader, sin `save`, sin `except`, cutoff ±1, dry-run sin caducar, `reread_refusal`). Revisión aprobada (normal + control de gasto). Suite: 3239 passed (520 de `-m db`). El `--dry-run` sobre la base real se hace tras migrar.
 
+### T95 · Un resultado no se publica dos veces por las dos vías
+- **Estado**: done
+- **Depende de**: T85.e, T76
+- **Toca agentes y gasto**: decide qué tensiones del archivo llegan al redactor; no toca `budget.py`. Revisión con `budget-guard-review`.
+- **Origen**: decisión abierta T85/T76 ("El mismo resultado se publica dos veces, una por cada vía"): HD 65216 c, `catalog_tension` del 2026-10-08 y `solution_tension` del 2026-10-17 del mismo paper (arXiv 2610.02783). Adelantada por el autor el 2026-10-19.
+- **Alcance**: que una tensión entre soluciones del archivo cuya alta procede de un paper ya publicado por la vía arXiv para el mismo planeta y parámetro no se publique como hallazgo nuevo. La política (excluir, enlazar o informar al Editor) y el criterio de coincidencia los fija el plan.
+- **Hecho cuando**: lo fija el plan. Como mínimo: test que falla antes del arreglo con el caso de HD 65216 c, consulta de solo lectura en la base real de cuántas tensiones afecta, y la decisión T85/T76 cerrada.
+- **Cierre (2026-10-19; sin migración)**: plan aprobado por el autor con D1 a (filtro en `SelectSolutionTensions.pending()` con el motivo de selección `same_paper_arxiv`, fuera de `SkipReason`), D2 b (cuentan `catalog_tension`, `primera_medida` y `confirmacion_independiente` de un `Item` arXiv, publicados o no), D3 a (mismo planeta del archivo y parámetro), D4 a (solo por `arxiv_id`), D5 a (sin sentido contrario) y D6 (filas y el `solution_tension` publicado de HD 65216 c intactos). ADR 0034 (modifica ADR 0030 §4). Consulta de solo lectura previa: dos duplicados, los dos llegados primero por arXiv: HD 65216 c (periodo, 2610.02783, publicado por las dos vías) y TOI-2158 b (radio, 2609.30915, redactado por las dos y publicado por ninguna); 10 tensiones elegibles, todas ya redactadas, 6 con alta sin `arxiv_id`; hoy el filtro no evita ninguna llamada y actúa hacia adelante. `domain/solution_tension.py::told_by_arxiv`; `_arxiv_finding_keys` en aplicación con los repositorios existentes; `InvariantViolation` si falta el `Item`, que deja la pasada del archivo en `writer_error` sin llamadas. Tests rojos antes del arreglo (HD 65216 c en memoria, contra PostgreSQL y en `--dry-run`; TOI-2158 b; noche con una sola llamada del redactor). 10 de 10 mutantes muertos (sin la comprobación, sin planeta, sin parámetro, solo `catalog_tension`, solo publicados, `arxiv_id` nulo, orden de motivos, sin `source = 'arxiv'`, sin `InvariantViolation`, sin cablear). Revisión aprobada (normal + `budget-guard-review`). Suite: 3266 passed.
+
+### T96 · `writer-archive-v2`: estilo del redactor del archivo
+- **Estado**: pending
+- **Depende de**: T85.e
+- **Toca agentes y gasto**: sí (prompt del redactor). **Dos pasadas de revisión con `budget-guard-review`.**
+- **Origen**: `TECHNICAL_DEBT.md` (T85.e): diferencia relativa expresada como fracción y etiquetas nombradas para decir que no aplican. Adelantada por el autor el 2026-10-19.
+- **Alcance**: prompt `writer-archive-v2` que corrige los dos fallos; humo `-m manual` solo con autorización del autor.
+- **Hecho cuando**: lo fija el plan.
+
+### T97 · ADR protegidos también frente a Bash
+- **Estado**: pending
+- **Depende de**: T80
+- **Toca agentes y gasto**: no.
+- **Origen**: decisiones abiertas de T80 (ADR modificables por Bash; variantes de ruta). Adelantada por el autor el 2026-10-19.
+- **Alcance**: `guard-bash.sh` bloquea `sed -i`, `rm`, `mv`, `git mv`, `git rm` y redirecciones sobre ADR publicados, y las variantes de ruta que hoy no casan.
+- **Hecho cuando**: lo fija el plan.
+
+### T98 · Estimación del Editor con `editor-v4`
+- **Estado**: pending
+- **Depende de**: T85.e
+- **Toca agentes y gasto**: sí (estimación de gasto del Editor). Revisión con `budget-guard-review`.
+- **Origen**: decisión abierta T85.e (`editor_base_tokens` con `editor-v4`). Datos reales 2026-10-14 a 2026-10-18: 11.277–17.953 tokens por llamada. Adelantada por el autor el 2026-10-19.
+- **Alcance**: revisar `editor_base_tokens` y `editor_tokens_per_candidate` con las noches de `editor-v4`.
+- **Hecho cuando**: lo fija el plan.
+
 ---
 
 ## Decisiones abiertas al arrancar
