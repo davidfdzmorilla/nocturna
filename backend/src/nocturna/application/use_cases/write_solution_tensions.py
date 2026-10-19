@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
 
-from nocturna.application.agents.prompt_text import inline, num
+from nocturna.application.agents.prompt_text import inline, num, percent_4sf, round_to_error
 from nocturna.application.agents.runner import AgentRunner, AttemptOutcome
 from nocturna.application.agents.writer_output import parse_writer_output
 from nocturna.application.unit_of_work import AgentWorkFactory
@@ -321,12 +321,17 @@ class WriteSolutionTensions:
 
     @staticmethod
     def _solution_text(solution: CatalogSolution) -> str:
-        errors = (
-            f"(+{num(solution.err_plus)}/-{num(solution.err_minus)})"
-            if solution.err_plus is not None and solution.err_minus is not None
-            else ""
-        )
-        return f"{solution.reference}; {num(solution.value)} {errors} {solution.unit.value}"
+        rounded = round_to_error(solution.value, solution.err_plus, solution.err_minus)
+        if rounded is not None:
+            value, plus, minus = rounded
+            figures = f"{value} (+{plus}/-{minus})"
+        elif solution.err_plus is not None and solution.err_minus is not None:
+            figures = (
+                f"{num(solution.value)} (+{num(solution.err_plus)}/-{num(solution.err_minus)})"
+            )
+        else:
+            figures = f"{num(solution.value)} "
+        return f"{solution.reference}; {figures} {solution.unit.value}"
 
     @classmethod
     def _build_prompt(cls, candidate: SolutionTensionCandidate) -> str:
@@ -356,8 +361,8 @@ class WriteSolutionTensions:
         ]
         rel_diff, ratio = value_change(new, reference)
         lines.append(
-            f"value_change: relative_difference={rel_diff:.4f} "
-            f"(|new-reference|/reference); ratio={ratio:.4f} (new/reference, "
+            f"value_change: relative_difference_pct={percent_4sf(rel_diff)} "
+            f"(100*|new-reference|/reference); ratio={ratio:.4f} (new/reference, "
             "same unit)"
         )
         if new.releasedate is not None:

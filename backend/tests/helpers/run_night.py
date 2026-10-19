@@ -199,7 +199,7 @@ def make_solution_writer(
         work=env.work,
         provider=provider,
         system_prompt="prompt del redactor del archivo",
-        prompt_version="writer-archive-v1",
+        prompt_version="writer-archive-v2",
         model="claude-sonnet-test",
         max_turns=3,
         max_attempts=max_attempts,

@@ -37,8 +37,10 @@ WRITER_PROMPT_VERSION: str = "writer-v1"
 
 #: Versión a mano del prompt del redactor de tensiones entre soluciones del
 #: archivo (T85.e, `writer-archive-v1.md`). Fichero propio: `writer-v1.md` sigue
-#: siendo el de `catalog_tension`.
-WRITER_ARCHIVE_PROMPT_VERSION: str = "writer-archive-v1"
+#: siendo el de `catalog_tension`. T96 (ADR 0035): sube a v2 (porcentaje en vez
+#: de fracción, sin hablar del bloque ni de "pipeline", ejemplo sin cifras
+#: reales); `writer-archive-v1.md` queda congelado porque hay hallazgos que lo citan.
+WRITER_ARCHIVE_PROMPT_VERSION: str = "writer-archive-v2"
 
 #: Versión a mano del prompt del Editor, mismo criterio que
 #: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al

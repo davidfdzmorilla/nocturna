@@ -12,12 +12,12 @@ Solo lleva los marcadores `manual` y `anyio` (ver `test_manual_markers_guard.py`
 
 ## Que demuestra
 
-Que el prompt real de `prompts/writer-archive-v1.md` produce, contra el modelo
+Que el prompt real de `prompts/writer-archive-v2.md` produce, contra el modelo
 de verdad, un JSON con titulo y los tres niveles a partir de una tension del
 archivo (masa de HD 202206 c, Cao et al. 2026 frente a Benedict & Harrison
 2017, ~8,2 sigma), que la llamada pasa por `BudgetGuard` (Run de prueba de
 26.000 tokens, 2 llamadas como maximo) y queda registrada como `AgentCall` de
-rol `writer` con `prompt_version = writer-archive-v1`. Imprime el texto para
+rol `writer` con `prompt_version = writer-archive-v2`. Imprime el texto para
 que el autor lo lea. La siembra (`helpers.solution_tension_smoke`) pasa por
 `ComputeSolutionTensions` real y la comprueba, sin Claude, un test `-m db`.
 """
@@ -25,6 +25,7 @@ que el autor lo lea. La siembra (`helpers.solution_tension_smoke`) pasa por
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -68,6 +69,15 @@ _NO_API_KEY_REMEDY = (
     "del entorno y repite con: "
     "env -u ANTHROPIC_API_KEY NOCTURNA_ALLOW_REAL_CLAUDE=1 uv run pytest -m manual -s"
 )
+
+# Nombres de campo del bloque que nunca deben aparecer en el texto (T96, D4).
+_FIELD_NAMES = (
+    r"\b(role|default|not_default|most_recent|value_change|relative_difference(_pct)?"
+    r"|ratio|labels|model_dependent|controversial|extreme_sigma|threshold|sigma_of)\b"
+)
+# "diferencia relativa" o "cambio relativo" con una cifra que no va seguida de %
+# (admite separador de miles en la parte entera: 1.055,2 %).
+_RELATIVE_WITHOUT_PCT = r"(diferencia|cambio) relativ[ao]\b\D{0,30}[\d.]+(,\d+)?(?![\d.]|,\d|\s?%)"
 
 # Dentro de la ventana real de ejecución (00:00-04:45).
 _WITHIN_WINDOW = datetime(2026, 1, 1, 2, 0, 0, tzinfo=UTC)
@@ -224,7 +234,7 @@ async def test_smoke_write_solution_tension_llamada_real_redacta_hd_202206_c_y_c
             f"la llamada real al redactor no produjo un texto válido: outcome="
             f"{result.outcome.value} tras {result.attempts} intento(s) (tokens_spent="
             f"{result.tokens_spent}, ya contabilizados). Revisa el output_text crudo de "
-            "arriba: si es sistemático, prompts/writer-archive-v1.md necesita ajuste."
+            "arriba: si es sistemático, prompts/writer-archive-v2.md necesita ajuste."
         )
 
     finding = result.finding
@@ -262,3 +272,18 @@ async def test_smoke_write_solution_tension_llamada_real_redacta_hd_202206_c_y_c
         assert call.prompt_version == WRITER_ARCHIVE_PROMPT_VERSION
         assert call.model == config.models.writer
         assert call.tokens_in > 0 and call.tokens_out > 0
+
+    # Estilo de writer-archive-v2 (T96, D4): fallan el humo, no solo se imprimen.
+    text = " ".join(
+        (finding.title, finding.level_curious, finding.level_amateur, finding.level_technical)
+    )
+    assert not re.search(r"pipeline", text, re.IGNORECASE), "usa 'pipeline'"
+    # La siembra (HD 202206 c, masa) no tiene etiquetas: con una que las tenga, quitar esto.
+    assert not re.search(r"etiqueta", text, re.IGNORECASE), "habla de etiquetas sin haberlas"
+    assert not re.search(r"\bbloque\b", text, re.IGNORECASE), "menciona el bloque de datos"
+    # Un punto seguido de 3 cifras es separador de miles (5.689), no decimal.
+    assert not re.search(r"\d\.(?!\d{3}\b)\d", text), "usa punto decimal"
+    assert not re.search(_FIELD_NAMES, text), "copia nombres de campo"
+    assert not re.search(_RELATIVE_WITHOUT_PCT, text, re.IGNORECASE), (
+        "da la diferencia relativa sin porcentaje"
+    )

@@ -53,6 +53,7 @@ def test_editor_prompt_version_sigue_a_writer_enabled(tmp_path: Path) -> None:
 
 
 def test_los_prompts_nuevos_existen_y_editor_v3_no_conoce_solution_tension() -> None:
+    assert WRITER_ARCHIVE_PROMPT_VERSION == "writer-archive-v2"
     assert "<solution_tension>" in load_prompt(WRITER_ARCHIVE_PROMPT_VERSION)
     assert "`solution_tension`" in load_prompt(EDITOR_V4_PROMPT_VERSION)
     assert "solution_tension" not in load_prompt(EDITOR_PROMPT_VERSION)

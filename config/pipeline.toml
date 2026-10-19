@@ -469,7 +469,7 @@ since = "2026-08-01"
 # archivo acaba de catalogar no es una novedad.
 max_pubdate_age_months = 24
 # writer_enabled: interruptor del redactor de estas tensiones (T85.e, ADR 0030).
-# false: cero llamadas, no se carga writer-archive-v1 y el Editor sigue en
+# false: cero llamadas, no se carga ningún writer-archive-* y el Editor sigue en
 # editor-v3. true: tras el redactor de arXiv redacta las del archivo y el Editor
 # usa editor-v4 (que conoce solution_tension). Se activa a mano y NO antes de
 # cerrar T85.w (D8): el Editor publica la noche en que se redacta, y la web aún

@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from nocturna import cli
+from nocturna.application.agents.prompt_loader import load_prompt
 from nocturna.application.budget import BudgetGuard
 from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.domain.entities import (
@@ -196,7 +197,10 @@ def test_interruptor_encendido_redacta_las_dos_tensiones_y_el_editor_es_v4(
 
     assert code == 0
     calls = _agent_calls(db_session_factory, AgentRole.WRITER)
-    assert [c.prompt_version for c in calls] == ["writer-archive-v1", "writer-archive-v1"]
+    assert [c.prompt_version for c in calls] == ["writer-archive-v2", "writer-archive-v2"]
+    writer_requests = [c for c in fake.calls if c.role is AgentRole.WRITER]
+    assert len(writer_requests) == 2
+    assert all(c.system_prompt == load_prompt("writer-archive-v2") for c in writer_requests)
     with db_session_factory() as session:
         findings = list(session.execute(select(FindingRow)).scalars())
         item = session.get(ItemRow, seeded.item.id)

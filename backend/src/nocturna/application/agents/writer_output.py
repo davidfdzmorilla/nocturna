@@ -23,6 +23,26 @@ class WriterOutput(BaseModel):
     level_amateur: str
     level_technical: str
 
+    @field_validator("title", "level_curious", "level_amateur", "level_technical", mode="before")
+    @classmethod
+    def _unescape_literal_newlines(cls, value: object) -> object:
+        """Convierte la barra invertida + `n` literal en un salto de línea (T96).
+
+        Los prompts piden "`\\n` escapado entre párrafos" y a veces el modelo lo
+        escapa dos veces (JSON `"\\\\n"`), de modo que el texto llegaría con los dos
+        caracteres `\\` y `n` en vez de un salto, y la web los mostraría tal cual.
+        Se sustituye toda aparición, sea cual sea el carácter siguiente: los
+        prompts piden prosa en español sin LaTeX, así que un `\\nu` legítimo no
+        existe, y distinguir por mayúscula/minúscula dejaría sin cubrir un párrafo
+        que empiece en minúscula. Corre antes de `_not_blank` (modo `before`):
+        un campo hecho solo de `\\n` literales queda en blanco y falla. Los
+        valores que no son `str` pasan intactos para que la validación estricta
+        los rechace.
+        """
+        if isinstance(value, str):
+            return value.replace("\\n", "\n")
+        return value
+
     @field_validator("title", "level_curious", "level_amateur", "level_technical")
     @classmethod
     def _not_blank(cls, value: str) -> str:

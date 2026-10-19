@@ -251,3 +251,18 @@ async def test_pending_evaluacion_sin_planeta_del_archivo_es_invalid_tension() -
 
     assert pending.candidates == ()
     assert pending.skipped == ((evaluation.id, "invalid_tension"),)
+
+
+async def test_t96_barra_n_literal_no_llega_al_finding_guardado() -> None:
+    env, _item, evaluation = _env()
+    fake = FakeLLMProvider()
+    _ok(fake, level_amateur="Uno.\\nNo hay otras.", level_technical="A.\\n\\nB.")
+    (candidate,) = make_selector(env).pending().candidates
+
+    result = await make_writer(env, fake)(candidate)
+
+    finding = result.finding
+    assert finding is not None
+    assert finding.level_amateur == "Uno.\nNo hay otras."
+    assert finding.level_technical == "A.\n\nB."
+    assert "\\n" not in finding.level_amateur + finding.level_technical
