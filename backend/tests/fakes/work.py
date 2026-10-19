@@ -32,6 +32,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from uuid import UUID
 
+from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
 from nocturna.application.budget import BudgetGuard
 from nocturna.application.unit_of_work import AgentWork, AgentWorkFactory
 from nocturna.application.use_cases.generate_measurement_findings import (
@@ -389,6 +390,7 @@ def make_solution_tension_writer_work_factory(
     findings: InMemoryFindingRepository,
     solution_tensions: SolutionTensionRepository,
     agent_calls: InMemoryAgentCallRepository,
+    evaluations: TensionEvaluationRepository | None = None,
 ) -> SolutionTensionWriterWorkFactory:
     """Fábrica en memoria de la selección de tensiones del archivo (T85.e):
     solo lectura, sin `BudgetGuard`, como la real."""
@@ -400,6 +402,9 @@ def make_solution_tension_writer_work_factory(
             findings=findings,
             solution_tensions=solution_tensions,
             agent_calls=agent_calls,
+            evaluations=(
+                evaluations if evaluations is not None else InMemoryTensionEvaluationRepository()
+            ),
         )
 
     return _work

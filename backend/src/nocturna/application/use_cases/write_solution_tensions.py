@@ -33,6 +33,7 @@ from nocturna.application.use_cases.write_tensions import (
     WriteTensionResult,
 )
 from nocturna.domain.entities import (
+    ITEM_SOURCE_ARXIV,
     ITEM_SOURCE_EXOPLANET_ARCHIVE,
     AgentCallStatus,
     CatalogSolution,
@@ -50,17 +51,29 @@ from nocturna.domain.repositories import (
     FindingRepository,
     ItemRepository,
     SolutionTensionRepository,
+    TensionEvaluationRepository,
 )
 from nocturna.domain.solution_tension import (
     EXTREME_SIGMA_LABEL,
+    SAME_PAPER_ARXIV,
+    ArxivFindingKey,
     SolutionTension,
     is_extreme_sigma,
     solution_tension_data_from,
     solution_writer_skip_reason,
+    told_by_arxiv,
     value_change,
 )
 
 _logger = logging.getLogger(__name__)
+
+#: Tipos de hallazgo de la vía arXiv que cuentan un planeta y parámetro de un paper
+#: (T95, ADR 0034): si existe alguno, publicado o no, el archivo no lo repite.
+ARXIV_FINDING_TYPES = (
+    FindingType.CATALOG_TENSION,
+    FindingType.PRIMERA_MEDIDA,
+    FindingType.CONFIRMACION_INDEPENDIENTE,
+)
 
 #: Cuántas "otras soluciones" lleva como máximo el bloque del redactor (las más
 #: recientes primero, orden de `SolutionTension.others`); el resto se cuenta.
@@ -89,6 +102,7 @@ class SolutionTensionWriterWork:
     findings: FindingRepository
     solution_tensions: SolutionTensionRepository
     agent_calls: AgentCallRepository
+    evaluations: TensionEvaluationRepository
 
 
 SolutionTensionWriterWorkFactory = Callable[[], AbstractContextManager[SolutionTensionWriterWork]]
@@ -146,6 +160,30 @@ class SelectSolutionTensions:
         self._planet_overview_url = planet_overview_url
         self._max_attempts = max_attempts
 
+    @staticmethod
+    def _arxiv_finding_keys(w: SolutionTensionWriterWork) -> frozenset[ArxivFindingKey]:
+        """Claves `(arxiv_id, planeta, parámetro)` de los hallazgos arXiv ya existentes
+        (publicados o no), para no repetirlos por la vía del archivo (T95, ADR 0034).
+
+        Lanza `InvariantViolation` si una evaluación con hallazgo apunta a un `Item`
+        inexistente: no se filtra a medias."""
+        with_finding: set[UUID] = set()
+        for finding_type in ARXIV_FINDING_TYPES:
+            with_finding |= w.findings.evaluation_ids_with_finding(finding_type)
+        keys: set[ArxivFindingKey] = set()
+        for evaluation in w.evaluations.all():
+            if evaluation.id not in with_finding or evaluation.archive_planet_name is None:
+                continue
+            item = w.items.get(evaluation.item_id)
+            if item is None:
+                raise InvariantViolation(
+                    "ItemRepository.get(evaluation.item_id) no debería devolver None: "
+                    f"toda evaluación proviene de un Item persistido ({evaluation.item_id})"
+                )
+            if item.source == ITEM_SOURCE_ARXIV:
+                keys.add((item.external_id, evaluation.archive_planet_name, evaluation.parameter))
+        return frozenset(keys)
+
     def pending(self) -> PendingSolutionTensions:
         """Tensiones por redactar, en orden σ desc, `releasedate` de la alta desc, id.
         Solo lectura: no escribe nada ni autoriza gasto."""
@@ -153,6 +191,7 @@ class SelectSolutionTensions:
         skipped: list[tuple[UUID, str]] = []
         with self._candidates_work() as w:
             written = w.findings.solution_tension_ids_with_finding()
+            arxiv_keys = self._arxiv_finding_keys(w)
             for tension in w.solution_tensions.all():
                 reason = solution_writer_skip_reason(tension)
                 if reason is not None:
@@ -175,6 +214,9 @@ class SelectSolutionTensions:
                     )
                 if tension.id in written:
                     skipped.append((tension.id, "already_written"))
+                    continue
+                if told_by_arxiv(tension, arxiv_keys):
+                    skipped.append((tension.id, SAME_PAPER_ARXIV))
                     continue
                 if (
                     w.agent_calls.count_for_item(

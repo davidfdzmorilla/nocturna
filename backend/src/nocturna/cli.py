@@ -1765,6 +1765,7 @@ def _solution_tension_writer_work(session: Session) -> SolutionTensionWriterWork
         findings=SqlAlchemyFindingRepository(session),
         solution_tensions=SqlAlchemySolutionTensionRepository(session),
         agent_calls=SqlAlchemyAgentCallRepository(session),
+        evaluations=SqlAlchemyTensionEvaluationRepository(session),
     )
 
 
