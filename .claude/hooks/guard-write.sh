@@ -2,32 +2,27 @@
 # PreToolUse:Edit|Write — protege ficheros y contenido. Falla cerrado.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-raw=$(python3 "$HERE/hook_input.py" file_path content 2>/dev/null) || { echo "BLOQUEADO: el hook no pudo leer la entrada." >&2; exit 2; }
+IFS= read -r -d '' input || true
+raw=$(printf '%s' "$input" | python3 "$HERE/hook_input.py" file_path content 2>/dev/null) || { echo "BLOQUEADO: el hook no pudo leer la entrada." >&2; exit 2; }
 path="${raw%%$'\x1f'*}"
 content="${raw#*$'\x1f'}"
 
 case "$path" in
   *.env|*.env.*)
     echo "BLOQUEADO: no se escriben ficheros .env desde Claude Code. El autor los gestiona a mano." >&2; exit 2;;
-  */docs/adr/*)
+  "")
+    ;;
+  *)
     # Un ADR es inmutable cuando está en git (índice o commit) en el repo del
-    # propio fichero; un borrador sin rastrear se puede editar (T80). Falla
-    # cerrado si no se puede comprobar.
-    # Un symlink podría apuntar a un ADR publicado: falla cerrado. El pathspec
-    # es literal (sin globs) e insensible a mayúsculas, porque en APFS
-    # "0001-A.md" es el mismo fichero que "0001-a.md".
-    if [ -L "$path" ]; then
-      echo "BLOQUEADO: no se escribe en un ADR a través de un symlink. Falla cerrado." >&2; exit 2
-    fi
-    dir=$(dirname "$path"); name=$(basename "$path")
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
-      git -C "$dir" ls-files --error-unmatch -- ":(literal,icase)$name" >/dev/null 2>&1
-    rc=$?
-    case $rc in
-      0) echo "BLOQUEADO: este ADR ya está en git (commit o índice); se supersede con uno nuevo." >&2; exit 2;;
-      1) ;;
-      *) echo "BLOQUEADO: no se pudo comprobar con git si el ADR está publicado (rc=$rc). Falla cerrado." >&2; exit 2;;
-    esac;;
+    # propio fichero; un borrador sin rastrear se puede editar (T80). Variantes
+    # de ruta, rutas relativas al cwd del JSON y symlinks los resuelve
+    # adr_guard.py (T97); falla cerrado si no se puede comprobar.
+    cwd=$(printf '%s' "$input" | python3 "$HERE/hook_input.py" cwd 2>/dev/null) || cwd=""
+    adr_err=$(python3 "$HERE/adr_guard.py" write --cwd "$cwd" -- "$path" 2>&1 >/dev/null)
+    if [ $? -ne 0 ]; then
+      [ -n "$adr_err" ] && printf '%s\n' "$adr_err" >&2
+      exit 2
+    fi;;
 esac
 
 if printf '%s' "$content" | grep -qE 'ANTHROPIC_API_KEY\s*='; then
