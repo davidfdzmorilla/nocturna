@@ -148,6 +148,10 @@ editor_tokens_per_candidate = 850
 # budget.reader_v3_estimated_tokens) pueda leer los ítems de
 # [reader] measurement_categories. max_turns_per_agent: fijado en CLAUDE.md.
 max_items_per_night = 30
+# max_unread_age_days (T94, ADR 0033): un ítem `new` de arXiv cuya published_at
+# (fecha de la v1) es anterior a ahora - 7 días caduca (`expired`) al empezar
+# la noche, sin gastar tokens. Los exoplanet_match no caducan.
+max_unread_age_days = 7
 max_turns_per_agent = 3
 # item_timeout_s y run_timeout_s: propuestos, se calibran en T60.
 item_timeout_s = 180

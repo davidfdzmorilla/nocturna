@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from nocturna.infrastructure.db.models import Base
 
 _REVISION = "a3f6d9c1b852"
-_HEAD = "b6d2f8a4c917"  # el downgrade fallido es una sola transaccion: el head sigue puesto
+_HEAD = "e3a7c5b9d214"  # el downgrade fallido es una sola transaccion: el head sigue puesto
 _REVISION_BEFORE = "c9e4b2a7d135"
 _CHECK = "ck_findings_tension_evaluation_id_iff_type"
 _UNIQUE = "uq_findings_tension_evaluation_id_type"

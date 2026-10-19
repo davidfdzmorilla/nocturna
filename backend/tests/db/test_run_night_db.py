@@ -212,6 +212,7 @@ def _build_run_night(
         ),
         run_id=run_id,
         max_items=policy.max_items_per_night,
+        max_unread_age_days=7,
         max_consecutive_failures=5,
         deadline_s=3_600,
     )

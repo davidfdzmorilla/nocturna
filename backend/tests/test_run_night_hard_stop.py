@@ -190,6 +190,7 @@ def _make_run_night(
         write_tensions=make_writer(env, provider),
         run_id=env.run.id,
         max_items=10,
+        max_unread_age_days=7,
         max_consecutive_failures=5,
         deadline_s=deadline_s,
         deadline_reason=deadline_reason,

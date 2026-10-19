@@ -157,8 +157,18 @@ class InMemoryItemRepository:
             for item in self._items.values()
             if item.status is ItemStatus.NEW and item.source == ITEM_SOURCE_ARXIV
         ]
-        new.sort(key=lambda i: (not i.exoplanet_match, i.fetched_at, i.external_id))
+        new.sort(key=lambda i: (not i.exoplanet_match, -i.published_at.timestamp(), i.external_id))
         return new[:limit]
+
+    def stale_unread(self, published_before: datetime) -> list[Item]:
+        return [
+            item
+            for item in self._items.values()
+            if item.status is ItemStatus.NEW
+            and item.source == ITEM_SOURCE_ARXIV
+            and item.published_at < published_before
+            and not item.exoplanet_match
+        ]
 
     def save(self, item: Item) -> None:
         self._items[item.id] = item

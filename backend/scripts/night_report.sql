@@ -195,7 +195,11 @@ ORDER BY items DESC;
 SELECT
     COUNT(*) AS items_en_cola,
     MIN(fetched_at) AS mas_antiguo_fetched_at,
-    ROUND(EXTRACT(EPOCH FROM (now() - MIN(fetched_at))) / 3600.0, 1) AS antiguedad_horas
+    ROUND(EXTRACT(EPOCH FROM (now() - MIN(fetched_at))) / 3600.0, 1) AS antiguedad_horas,
+    MIN(published_at) AS mas_antiguo_published_at,
+    -- T94: acumulado histórico de ítems de arXiv caducados (no es de esta noche).
+    (SELECT COUNT(*) FROM items WHERE status = 'expired' AND source = 'arxiv')
+        AS caducados_acumulados
 FROM items
 WHERE status = 'new' AND source = 'arxiv';
 

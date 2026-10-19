@@ -1,5 +1,5 @@
 """`RunNight` lee los ítems en el orden priorizado por `next_unread` (T79):
-los marcados `exoplanet_match` primero, luego `fetched_at`, luego `external_id`."""
+los marcados `exoplanet_match` primero, luego `published_at` descendente, luego `external_id`."""
 
 from __future__ import annotations
 
@@ -28,21 +28,22 @@ def _ingest_result(items: list) -> IngestResult:
     )
 
 
-async def test_la_fase_de_lectura_lee_primero_los_marcados_y_luego_por_fetched_at_y_external_id():
-    plain_old = make_item(external_id="2501.900001", fetched_at=WITHIN_WINDOW)
+async def test_la_fase_de_lectura_lee_primero_los_marcados_y_luego_por_published_at_y_external_id():
+    # T94: dentro de cada grupo manda `published_at DESC`; `fetched_at` ya no cuenta.
+    plain_old = make_item(external_id="2501.900001", published_at=WITHIN_WINDOW)
     plain_new = make_item(
-        external_id="2501.900002", fetched_at=WITHIN_WINDOW + timedelta(minutes=5)
+        external_id="2501.900002", published_at=WITHIN_WINDOW + timedelta(minutes=5)
     )
     exo_late = make_item(
         external_id="2501.900003",
-        fetched_at=WITHIN_WINDOW + timedelta(minutes=9),
+        published_at=WITHIN_WINDOW + timedelta(minutes=9),
         exoplanet_match=True,
     )
     exo_early_b = make_item(
-        external_id="2501.900005", fetched_at=WITHIN_WINDOW, exoplanet_match=True
+        external_id="2501.900005", published_at=WITHIN_WINDOW, exoplanet_match=True
     )
     exo_early_a = make_item(
-        external_id="2501.900004", fetched_at=WITHIN_WINDOW, exoplanet_match=True
+        external_id="2501.900004", published_at=WITHIN_WINDOW, exoplanet_match=True
     )
     items = [plain_old, plain_new, exo_late, exo_early_b, exo_early_a]
     env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
@@ -60,11 +61,11 @@ async def test_la_fase_de_lectura_lee_primero_los_marcados_y_luego_por_fetched_a
 
     read_order = [c.item_id for c in fake.calls if c.role is AgentRole.READER]
     assert read_order == [
+        exo_late.id,
         exo_early_a.id,
         exo_early_b.id,
-        exo_late.id,
-        plain_old.id,
         plain_new.id,
+        plain_old.id,
     ]
 
 

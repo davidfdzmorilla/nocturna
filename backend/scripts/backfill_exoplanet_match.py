@@ -93,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cambiados: {changed}{' (dry-run, sin escribir)' if args.dry_run else ''}")
 
         # Misma consulta que usa la noche; ve las marcas recién flusheadas.
+        # Nota: no aplica la caducidad de la noche (T94, ADR 0033), así que
+        # puede listar ítems que la noche marcaría `expired` antes de leer.
         print(f"\nprimeros {limit} de next_unread:")
         for item in SqlAlchemyItemRepository(session).next_unread(limit):
             variant = (

@@ -228,6 +228,7 @@ def _refusal_cases():
     return [
         (_item(ItemStatus.NEW), None, RereadRefusal.STATUS_NOT_REREADABLE),
         (_item(ItemStatus.FAILED), None, RereadRefusal.STATUS_NOT_REREADABLE),
+        (_item(ItemStatus.EXPIRED), None, RereadRefusal.STATUS_NOT_REREADABLE),
         (
             _item(categories=["astro-ph.GA"]),
             None,
@@ -240,7 +241,7 @@ def _refusal_cases():
     ]
 
 
-@pytest.mark.parametrize("idx", range(7))
+@pytest.mark.parametrize("idx", range(8))
 async def test_rechazos_no_llaman_al_proveedor_ni_dejan_agentcall(idx):
     item, overrides, expected = _refusal_cases()[idx]
     if overrides == "con_medidas":

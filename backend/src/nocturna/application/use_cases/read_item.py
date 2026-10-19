@@ -85,7 +85,8 @@ _EVIDENCE_LOG_PREVIEW_CHARS = 200
 class RereadRefusal(StrEnum):
     """Por qué un ítem no se puede releer con `reader-v3` (T82)."""
 
-    #: El ítem está `NEW` (camino normal) o `FAILED` (sin `Reading`).
+    #: El ítem está `NEW` (camino normal), `FAILED` (sin `Reading`) o
+    #: `EXPIRED` (caducó sin leerse, T94: no tiene `Reading`).
     STATUS_NOT_REREADABLE = "status_not_rereadable"
     #: No cumple ADR 0018 §2: categoría fuera de `measurement_categories` o
     #: `exoplanet_match` falso.
@@ -113,7 +114,7 @@ def reread_refusal(
     `discarded`, `published`) cuya lectura vigente no tiene medidas
     (`measurements is None`) y que cumple los criterios de ADR 0018 §2.
     """
-    if item.status in (ItemStatus.NEW, ItemStatus.FAILED):
+    if item.status in (ItemStatus.NEW, ItemStatus.FAILED, ItemStatus.EXPIRED):
         return RereadRefusal.STATUS_NOT_REREADABLE
     if previous.item_id != item.id:
         return RereadRefusal.READING_MISMATCH

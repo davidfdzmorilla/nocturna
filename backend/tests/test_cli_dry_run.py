@@ -65,6 +65,7 @@ editor_tokens_per_candidate = 700
 
 [limits]
 max_items_per_night = 40
+max_unread_age_days = 7
 max_turns_per_agent = 3
 item_timeout_s = 180
 editor_timeout_s = 300
@@ -489,6 +490,7 @@ def _build_run_night_kwargs(**overrides: object) -> dict[str, object]:
         "write_tensions": object(),
         "run_id": "run-a",
         "max_items": 10,
+        "max_unread_age_days": 7,
         "max_consecutive_failures": 5,
         "deadline_s": 100,
     }

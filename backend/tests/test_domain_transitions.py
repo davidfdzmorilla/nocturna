@@ -363,6 +363,7 @@ def test_item_status_contiene_exactamente_los_valores_esperados():
         "discarded",
         "published",
         "failed",
+        "expired",
     }
 
 
@@ -401,11 +402,12 @@ def test_finding_type_contiene_exactamente_los_valores_esperados():
 
 def test_item_transitions_tiene_exactamente_las_transiciones_esperadas():
     assert _ITEM_TRANSITIONS == {
-        ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED}),
+        ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED, ItemStatus.EXPIRED}),
         ItemStatus.READ: frozenset({ItemStatus.DISCARDED, ItemStatus.PUBLISHED}),
         ItemStatus.DISCARDED: frozenset(),
         ItemStatus.PUBLISHED: frozenset(),
         ItemStatus.FAILED: frozenset(),
+        ItemStatus.EXPIRED: frozenset(),
     }
 
 

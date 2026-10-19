@@ -402,6 +402,7 @@ async def _run_minimal_night_for_night_item_log() -> None:
         ),
         run_id=run.id,
         max_items=10,
+        max_unread_age_days=7,
         max_consecutive_failures=5,
         deadline_s=16_200,
     )

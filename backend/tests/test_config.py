@@ -36,6 +36,7 @@ editor_tokens_per_candidate = 700
 
 [limits]
 max_items_per_night = 40
+max_unread_age_days = 7
 max_turns_per_agent = 3
 item_timeout_s = 180
 editor_timeout_s = 300
@@ -352,6 +353,23 @@ def test_valores_de_presupuesto_no_positivos_fallan(tmp_path, old, new):
     path = _write_toml(tmp_path, content)
 
     with pytest.raises(ValidationError):
+        load_pipeline_config(path)
+
+
+def test_falta_max_unread_age_days_falla(tmp_path):
+    content = BASE_TOML.replace("max_unread_age_days = 7\n", "")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="max_unread_age_days"):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_max_unread_age_days_menor_que_uno_falla(tmp_path, value):
+    content = BASE_TOML.replace("max_unread_age_days = 7", f"max_unread_age_days = {value}")
+    path = _write_toml(tmp_path, content)
+
+    with pytest.raises(ValidationError, match="max_unread_age_days"):
         load_pipeline_config(path)
 
 

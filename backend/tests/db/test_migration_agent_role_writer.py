@@ -16,7 +16,7 @@ from nocturna.infrastructure.db.models import Base
 
 _REVISION = "c9e4b2a7d135"
 _REVISION_BEFORE = "f7c2d8e4a951"
-_HEAD = "b6d2f8a4c917"  # el downgrade es una sola transaccion: el head sigue puesto
+_HEAD = "e3a7c5b9d214"  # el downgrade es una sola transaccion: el head sigue puesto
 _CHECK = "ck_agent_calls_agent_role"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

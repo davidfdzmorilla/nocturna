@@ -47,7 +47,16 @@ class ItemRepository(Protocol):
 
         Contrato (T85): solo `source = 'arxiv'`. Los ítems de la vía del archivo
         (`exoplanet_archive`) nacen `NEW` pero ningún agente los lee.
+
+        Orden (T94, ADR 0033): primero los `exoplanet_match`, luego `published_at`
+        descendente (lo más reciente primero) y `external_id` ascendente como
+        desempate determinista. El límite se aplica después de ordenar.
         """
+        ...
+
+    def stale_unread(self, published_before: datetime) -> list[Item]:
+        """Ítems `NEW` de `source = 'arxiv'` con `published_at < published_before`
+        y `exoplanet_match` falso: los que caducan (T94)."""
         ...
 
     def save(self, item: Item) -> None:
