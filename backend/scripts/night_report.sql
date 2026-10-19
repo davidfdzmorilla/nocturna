@@ -269,7 +269,7 @@ WITH n AS (
     SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
 )
 -- Desde T85.e agrupa también por `prompt_version`: writer-v1 (arXiv) y
--- writer-archive-v1 (archivo) comparten el rol `writer`.
+-- writer-archive-vN (archivo) comparten el rol `writer`.
 SELECT ac.prompt_version, ac.status, COUNT(*) AS llamadas, COUNT(DISTINCT ac.item_id) AS items,
        COALESCE(SUM(ac.tokens_in + ac.tokens_out), 0) AS tokens
 FROM agent_calls ac JOIN n ON ac.run_id = n.id

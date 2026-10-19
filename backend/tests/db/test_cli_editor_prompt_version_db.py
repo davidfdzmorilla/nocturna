@@ -144,5 +144,5 @@ def test_con_el_interruptor_apagado_run_night_no_llama_al_redactor_ni_carga_su_p
 
     _run(db_session_factory, fake, ["run-night"])
 
-    assert "writer-archive-v1" not in loaded
+    assert not any(n.startswith("writer-archive") for n in loaded)
     assert [c for c in fake.calls if c.role is AgentRole.WRITER] == []

@@ -416,7 +416,7 @@ async def test_orden_writer_v1_antes_que_writer_archive_v1_en_agent_calls() -> N
     await _night(env, fake)()
 
     versions = [c.prompt_version for c in env.agent_calls.calls if c.agent is AgentRole.WRITER]
-    assert versions == ["writer-v1", "writer-archive-v1"]
+    assert versions == ["writer-v1", "writer-archive-v2"]
 
 
 async def test_el_editor_recibe_los_tres_tipos_en_una_sola_llamada() -> None:

@@ -84,7 +84,7 @@ async def test_valido_crea_solution_tension_sin_publicar_y_no_toca_el_item() -> 
     assert env.items.get(item.id).status is ItemStatus.NEW
     (call,) = env.agent_calls.calls
     assert call.agent is AgentRole.WRITER and call.item_id == item.id
-    assert call.prompt_version == "writer-archive-v1"
+    assert call.prompt_version == "writer-archive-v2"
     assert [c.role for c in fake.calls] == [AgentRole.WRITER]
 
 
@@ -131,7 +131,7 @@ async def test_prompt_lleva_los_datos_sin_abstract_ni_pubdate_y_sin_marcas() -> 
     assert "planet: HD 114082 b" in prompt and "parameter: period" in prompt
     assert "sigma: 289.50 (threshold 3.0)" in prompt
     assert "Zakhozhay et al. 2022" in prompt and "role=most_recent" in prompt
-    assert "ratio=2.0551" in prompt and "relative_difference=1.0551" in prompt
+    assert "ratio=2.0551" in prompt and "relative_difference_pct=105.5" in prompt
     assert "new_solution_entered_archive: 2026-09" in prompt
     assert "abstract" not in prompt.lower() and "pubdate" not in prompt.lower()
     assert "Nueva solución en el archivo" not in prompt  # sin abstract del ítem
@@ -164,7 +164,7 @@ async def test_en_masa_el_prompt_lleva_value_change_con_la_razon() -> None:
     await make_solution_writer(env, fake)(candidate)
 
     prompt = fake.calls[0].prompt
-    assert "value_change: relative_difference=" in prompt and "labels: none" in prompt
+    assert "value_change: relative_difference_pct=" in prompt and "labels: none" in prompt
 
 
 async def test_pending_excluye_no_elegibles_ya_redactadas_y_fallidas() -> None:
@@ -243,3 +243,19 @@ async def test_pending_item_inexistente_o_que_no_casa_es_invariante_rota() -> No
 
     with pytest.raises(InvariantViolation):
         make_solution_selector(env).pending()
+
+
+async def test_t96_barra_n_literal_no_llega_al_finding_guardado() -> None:
+    env, item = _env()
+    _add(env, item)
+    fake = FakeLLMProvider()
+    _ok(fake, level_amateur="Uno.\\nNo hay otras.", level_technical="A.\\n\\nB.")
+    (candidate,) = make_solution_selector(env).pending().candidates
+
+    result = await make_solution_writer(env, fake)(candidate)
+
+    finding = result.finding
+    assert finding is not None
+    assert finding.level_amateur == "Uno.\nNo hay otras."
+    assert finding.level_technical == "A.\n\nB."
+    assert "\\n" not in finding.level_amateur + finding.level_technical
