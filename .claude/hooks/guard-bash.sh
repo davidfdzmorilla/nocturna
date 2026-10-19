@@ -3,7 +3,8 @@
 # Falla cerrado: si no puede leer la entrada, bloquea.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cmd=$(python3 "$HERE/hook_input.py" command) || { echo "BLOQUEADO: el hook no pudo leer la entrada (python3 ausente o JSON inválido)." >&2; exit 2; }
+IFS= read -r -d '' input || true
+cmd=$(printf '%s' "$input" | python3 "$HERE/hook_input.py" command) || { echo "BLOQUEADO: el hook no pudo leer la entrada (python3 ausente o JSON inválido)." >&2; exit 2; }
 [ -z "$cmd" ] && exit 0
 
 # 1. Nunca llamar a la API con credenciales de suscripción ni exportar API key
@@ -38,6 +39,14 @@ fi
 # 4. Comandos destructivos
 if printf '%s' "$cmd" | grep -qE 'rm\s+-rf\s+/|git\s+push\s+.*(-f|--force)|docker\s+compose\s+down\s+.*-v'; then
   echo "BLOQUEADO: comando destructivo. Pide confirmación explícita al autor fuera del hook." >&2
+  exit 2
+fi
+
+# 5. ADR publicados (en git) no se modifican, mueven ni borran por Bash (T97)
+cwd=$(printf '%s' "$input" | python3 "$HERE/hook_input.py" cwd 2>/dev/null) || cwd=""
+adr_err=$(printf '%s' "$cmd" | python3 "$HERE/adr_guard.py" bash --cwd "$cwd" 2>&1 >/dev/null)
+if [ $? -ne 0 ]; then
+  [ -n "$adr_err" ] && printf '%s\n' "$adr_err" >&2
   exit 2
 fi
 

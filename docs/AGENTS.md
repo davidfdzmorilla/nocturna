@@ -40,8 +40,8 @@ Elección de modelos: Opus donde el juicio importa (diseño, revisión), Sonnet 
 
 | Evento | Script | Qué impone |
 |---|---|---|
-| `PreToolUse` Bash | `guard-bash.sh` | Sin `ANTHROPIC_API_KEY` ni llamadas a `/v1/messages`; commits sin atribución a IA, sin `--no-verify` y solo con aprobación (`.claude/.commit-approved`); nada de Traefik/Hetzner en fase 1; sin comandos destructivos |
-| `PreToolUse` Edit/Write | `guard-write.sh` | Sin escribir `.env`; ADR ya en git (índice o commit) inmutables, el borrador sin rastrear es editable y, si no se puede comprobar con git, bloquea (T80); sin `ANTHROPIC_API_KEY` en contenido; sin atribución a IA; `domain/` sin imports de infraestructura |
+| `PreToolUse` Bash | `guard-bash.sh` | Sin `ANTHROPIC_API_KEY` ni llamadas a `/v1/messages`; commits sin atribución a IA, sin `--no-verify` y solo con aprobación (`.claude/.commit-approved`); nada de Traefik/Hetzner en fase 1; sin comandos destructivos; ADR ya en git (índice o commit) intocables por Bash: `adr_guard.py` analiza el comando por segmentos y bloquea las escrituras, borrados y movimientos sobre ellos o sobre un directorio que los contiene; falla cerrado y con plazo propio de 6 s, por debajo del timeout del hook; límites conocidos en `TECHNICAL_DEBT.md` (T97) |
+| `PreToolUse` Edit/Write | `guard-write.sh` | Sin escribir `.env`; ADR ya en git (índice o commit) inmutables, el borrador sin rastrear es editable y, si no se puede comprobar con git, bloquea (T80); desde T97 con el mismo `adr_guard.py` que Bash, que normaliza la ruta (mayúsculas, `./`, `//`, relativas al `cwd`); sin `ANTHROPIC_API_KEY` en contenido; sin atribución a IA; `domain/` sin imports de infraestructura |
 | `PostToolUse` Edit/Write | `post-edit-format.sh` | `ruff` / `prettier` sobre el fichero tocado |
 | `SubagentStop` | `subagent-stop.sh` | Traza en `.claude/logs/subagents.log` |
 | `Stop` | `stop-check.sh` | Avisa si hay cambios sin reflejar en `PLAN_TAREAS.md`; borra `.commit-approved` |

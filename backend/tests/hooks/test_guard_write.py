@@ -97,6 +97,7 @@ def _run(
     payload: dict | None = None,
     extra_env: dict[str, str] | None = None,
     stdin: str | None = None,
+    json_cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     e = dict(env)
     e.update(extra_env or {})
@@ -104,7 +105,10 @@ def _run(
     if data is None:
         ti: dict = {"file_path": str(file_path)}
         ti.update(payload if payload is not None else {"content": content})
-        data = json.dumps({"tool_input": ti})
+        top: dict = {"tool_input": ti}
+        if json_cwd is not None:
+            top["cwd"] = str(json_cwd)
+        data = json.dumps(top)
     return subprocess.run(
         [BASH, str(HOOK)], input=data, text=True, capture_output=True, cwd=cwd, env=e
     )  # fmt: skip
@@ -309,3 +313,50 @@ def test_25_git_index_file_heredado_no_desvia_la_consulta(env, tmp_path):
     draft = _draft(q, "0050-x.md")
     r = _run(env, draft, cwd=p, extra_env={"GIT_INDEX_FILE": str(p / ".git" / "index")})
     assert r.returncode == 0, r.stderr
+
+
+# ---- T97: variantes de ruta y ruta relativa con cwd ----
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["docs/ADR/0001-a.md", "docs/./adr/0001-a.md", "docs//adr/0001-a.md"],
+    ids=["adr-mayusculas", "punto-medio", "doble-barra"],
+)
+def test_26_variantes_de_ruta_de_un_adr_rastreado_bloquean(env, tmp_path, rel):
+    repo = _repo(env, tmp_path / "r", {"0001-a.md": "a"})
+    assert _run(env, f"{repo}/{rel}", cwd=repo).returncode == 2
+
+
+def test_27_ruta_relativa_con_cwd_del_json_bloquea(env, tmp_path):
+    repo = _repo(env, tmp_path / "r", {"0001-a.md": "a"})
+    r = _run(env, "docs/adr/0001-a.md", cwd=tmp_path, json_cwd=repo)
+    assert r.returncode == 2
+    assert "ya está en git" in r.stderr
+
+
+def test_28_ruta_relativa_a_borrador_con_cwd_del_json_pasa(env, tmp_path):
+    repo = _repo(env, tmp_path / "r", {"0001-a.md": "a"})
+    _draft(repo)
+    r = _run(env, "docs/adr/0099-borrador.md", cwd=tmp_path, json_cwd=repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_29_symlink_a_destino_sin_rastrear_bloquea(env, tmp_path):
+    repo = _repo(env, tmp_path / "r", {"0001-a.md": "a"})
+    fuera = tmp_path / "fuera.md"
+    fuera.write_text("x")
+    link = repo / "docs" / "adr" / "0099-link.md"
+    link.symlink_to(fuera)
+    r = _run(env, link, cwd=repo)
+    assert r.returncode == 2
+    assert "symlink" in r.stderr
+
+
+def test_30_git_ls_files_con_rc_desconocido_falla_cerrado(env, tmp_path):
+    repo = _repo(env, tmp_path / "r", {"0001-a.md": "a"})
+    draft = _draft(repo)
+    (repo / ".git" / "index").write_bytes(b"basura")
+    r = _run(env, draft, cwd=repo)
+    assert r.returncode == 2
+    assert "Falla cerrado" in r.stderr

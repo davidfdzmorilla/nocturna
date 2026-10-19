@@ -1,5 +1,5 @@
 """Lee el JSON del hook por stdin y devuelve campos concretos. Uso: python3 hook_input.py <campo>...
-Campos: command | file_path | content | agent | session
+Campos: command | file_path | content | agent | session | cwd
 Si el JSON no se puede leer, sale con 3 para que el guard falle cerrado."""
 import json, sys
 try:
@@ -19,6 +19,8 @@ for f in sys.argv[1:]:
         out.append("\n".join(parts))
     elif f == "agent":
         out.append(str(d.get("agent_name") or d.get("agent_type") or "?"))
+    elif f == "cwd":
+        out.append(str(d.get("cwd") or ""))
     elif f == "session":
         out.append(str(d.get("session_id") or ""))
 print("\x1f".join(out))
