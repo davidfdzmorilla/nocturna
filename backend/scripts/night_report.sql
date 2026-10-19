@@ -1,6 +1,6 @@
 -- night_report.sql — Informe de la mañana (T60).
 --
--- Nueve consultas (Q1-Q9, más Q9b y Q9c) de solo lectura sobre la última noche ejecutada, pensadas
+-- Diez consultas (Q1-Q10, más Q9b y Q9c) de solo lectura sobre la última noche ejecutada, pensadas
 -- para leerse con café en dos minutos en vez de reconstruirse a mano cada
 -- mañana durante las catorce noches de calibración. Uso:
 --
@@ -29,6 +29,10 @@
 \set reserva 60000
 -- reserva del redactor (T75): debe seguir a `writer_reserve_tokens`.
 \set reserva_redactor 24000
+-- estimación del Editor (T98): debe seguir a `editor_base_tokens` y
+-- `editor_tokens_per_candidate` de `config/pipeline.toml`.
+\set editor_base 4000
+\set editor_k 900
 
 \echo '=== Q1 · Cabecera de la noche ==='
 WITH n AS (
@@ -313,3 +317,23 @@ SELECT t.solution_tension->>'planet_name' AS planeta,
        CASE WHEN t.rn = 1 THEN w.tokens END AS tokens_writer_del_item
 FROM t LEFT JOIN w ON w.item_id = t.item_id
 ORDER BY sigma DESC, planeta, parametro, t.id;
+
+\echo ''
+\echo '=== Q10 · Estimación del Editor vs gasto real (T98) ==='
+-- Por cada llamada del Editor de la noche: gasto real, N de candidatos (de
+-- `runs.notes`, `candidates=N`), estimación base + k*N y diferencia. Diferencia
+-- positiva = la estimación se queda corta. Revisar en cada versión nueva del
+-- prompt del Editor.
+WITH n AS (
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
+)
+SELECT ac.prompt_version, ac.status,
+       ac.tokens_in + ac.tokens_out AS total_real,
+       substring(n.notes from 'candidates=([0-9]+)')::int AS candidatos,
+       :editor_base + :editor_k * substring(n.notes from 'candidates=([0-9]+)')::int AS estimado,
+       ac.tokens_in + ac.tokens_out
+           - (:editor_base + :editor_k * substring(n.notes from 'candidates=([0-9]+)')::int)
+           AS real_menos_estimado
+FROM agent_calls ac JOIN n ON ac.run_id = n.id
+WHERE ac.agent = 'editor'
+ORDER BY ac.id;

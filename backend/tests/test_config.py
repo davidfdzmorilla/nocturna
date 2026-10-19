@@ -5,12 +5,14 @@ modifica `config/pipeline.toml` del repositorio. Ningún test toca la red
 ni la base de datos.
 """
 
+import json
 from datetime import time
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from nocturna.application.use_cases.edit_night import estimate_editor_tokens
 from nocturna.infrastructure.arxiv.retry import MAX_JITTER_FACTOR
 from nocturna.infrastructure.config import Settings, load_pipeline_config
 
@@ -133,8 +135,8 @@ def test_carga_el_pipeline_toml_del_repositorio():
     config = load_pipeline_config(REAL_PIPELINE_TOML)
 
     assert config.budget.nightly_tokens == 300000
-    assert config.budget.editor_base_tokens == 2500
-    assert config.budget.editor_tokens_per_candidate == 850
+    assert config.budget.editor_base_tokens == 4000
+    assert config.budget.editor_tokens_per_candidate == 900
     assert config.limits.max_items_per_night == 30
     assert config.limits.max_turns_per_agent == 3
     assert config.limits.max_editor_calls_per_night == 2
@@ -153,6 +155,31 @@ def test_carga_el_pipeline_toml_del_repositorio():
     assert config.sources.arxiv.retry_max_attempts == 4
     assert config.sources.arxiv.retry_base_delay_s == 5.0
     assert config.sources.arxiv.retry_max_elapsed_s == 60.0
+
+
+EDITOR_CALLS_FIXTURE = Path(__file__).parent / "fixtures" / "t98" / "editor_calls.json"
+
+
+def test_la_estimacion_del_editor_cubre_las_llamadas_observadas():
+    """T98: con el toml real, la estimacion no queda por debajo del gasto
+    real de ninguna llamada del Editor observada (ok o invalid_output)."""
+    config = load_pipeline_config(REAL_PIPELINE_TOML)
+    calls = json.loads(EDITOR_CALLS_FIXTURE.read_text())
+    excesos = []
+    for call in calls:
+        if call["status"] not in ("ok", "invalid_output"):
+            continue
+        estimate = estimate_editor_tokens(
+            candidates=call["n"],
+            base_tokens=config.budget.editor_base_tokens,
+            tokens_per_candidate=config.budget.editor_tokens_per_candidate,
+        )
+        if estimate < call["total"]:
+            excesos.append(
+                f"{call['noche']} {call['prompt_version']} {call['status']}: "
+                f"real {call['total']} > estimado {estimate} (exceso {call['total'] - estimate})"
+            )
+    assert not excesos, "estimacion por debajo del gasto real:\n" + "\n".join(excesos)
 
 
 def test_la_reserva_del_editor_cubre_el_peor_caso_en_el_toml_real():

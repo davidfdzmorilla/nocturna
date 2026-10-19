@@ -136,7 +136,7 @@ def test_q9c_lista_la_tension_del_archivo_con_el_gasto_del_item_una_sola_vez(
         )
 
     q9b = _psql(test_database_url, _segment("=== Q9b", "=== Q9c"))
-    q9c = _psql(test_database_url, _segment("=== Q9c", None))
+    q9c = _psql(test_database_url, _segment("=== Q9c", "=== Q10"))
 
     assert q9b == [["writer-archive-v1", "ok", "1", "1", "1000"]]
     (row,) = q9c
@@ -198,7 +198,7 @@ def test_q9c_el_gasto_del_item_va_en_la_fila_que_se_ve_primero(
             )
         )
 
-    q9c = _psql(test_database_url, _segment("=== Q9c", None))
+    q9c = _psql(test_database_url, _segment("=== Q9c", "=== Q10"))
 
     assert len(q9c) == 2
     assert q9c[0][2] == "900.00" and q9c[0][8] == "1000"
