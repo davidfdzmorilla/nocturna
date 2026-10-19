@@ -423,6 +423,22 @@ async def test_item_no_new_lanza_invalid_transition_sin_llamar_a_nada():
     )
 
 
+async def test_item_expired_lanza_invalid_transition_sin_autorizar_ni_llamar():
+    """T94: `run-item` sobre un caducado falla antes de autorizar."""
+    item = _make_item()
+    item.expire()
+    env = _make_environment(item=item, count_work=True)
+    fake = FakeLLMProvider()
+    read_item = _make_read_item(work=env.work, provider=fake)
+
+    with pytest.raises(InvalidTransition):
+        await read_item(item)
+
+    assert fake.calls == []
+    assert env.agent_calls.calls == []
+    assert env.work_calls == [0]
+
+
 # --- 10. El AgentRequest construido ----------------------------------------
 
 

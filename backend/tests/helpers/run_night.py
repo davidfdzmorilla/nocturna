@@ -235,6 +235,7 @@ def make_run_night(
     provider: FakeLLMProvider,
     ingest_result: IngestResult,
     max_items: int = 10,
+    max_unread_age_days: int = 7,
     max_consecutive_failures: int = 5,
     deadline_s: int = 16_200,
     measurement_findings: GenerateMeasurementFindings | None = None,
@@ -301,6 +302,7 @@ def make_run_night(
         write_solution_tensions=write_solution_tensions,
         run_id=env.run.id,
         max_items=max_items,
+        max_unread_age_days=max_unread_age_days,
         max_consecutive_failures=max_consecutive_failures,
         deadline_s=deadline_s,
     )

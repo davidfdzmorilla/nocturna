@@ -75,14 +75,16 @@ class ItemStatus(StrEnum):
     DISCARDED = "discarded"
     PUBLISHED = "published"
     FAILED = "failed"
+    EXPIRED = "expired"
 
 
 _ITEM_TRANSITIONS: Mapping[ItemStatus, frozenset[ItemStatus]] = {
-    ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED}),
+    ItemStatus.NEW: frozenset({ItemStatus.READ, ItemStatus.FAILED, ItemStatus.EXPIRED}),
     ItemStatus.READ: frozenset({ItemStatus.DISCARDED, ItemStatus.PUBLISHED}),
     ItemStatus.DISCARDED: frozenset(),
     ItemStatus.PUBLISHED: frozenset(),
     ItemStatus.FAILED: frozenset(),
+    ItemStatus.EXPIRED: frozenset(),
 }
 
 
@@ -156,6 +158,14 @@ class Item:
         retroactivamente por esta vía.
         """
         self._transition_to(ItemStatus.FAILED)
+
+    def expire(self) -> None:
+        """Caduca un ítem `NEW` que lleva demasiado tiempo sin leerse (T94).
+
+        No gasta tokens y no es un descarte del Reader: ningún agente lo vio.
+        Terminal; solo alcanzable desde `NEW`.
+        """
+        self._transition_to(ItemStatus.EXPIRED)
 
 
 class MeasuredParameter(StrEnum):

@@ -146,6 +146,8 @@ def fake_provider(monkeypatch: pytest.MonkeyPatch) -> FakeLLMProvider:
 
 
 def _seed_item(db_session_factory, **overrides: object) -> UUID:
+    # T94: reciente respecto al reloj fijo de la noche, para que no caduque.
+    overrides.setdefault("published_at", _WITHIN_WINDOW)
     item = make_item(**overrides)
     with unit_of_work(db_session_factory) as session:
         added = SqlAlchemyItemRepository(session).add_many([item])
@@ -413,6 +415,30 @@ def test_fuera_de_la_ventana_devuelve_8_y_cierra_el_run_killed(
     run = runs[0]
     assert run.status is RunStatus.KILLED
     assert run.finished_at is not None
+
+
+def test_item_viejo_sin_leer_queda_expired_aunque_el_reader_no_llegue_a_correr(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """T94 (ADR 0033): la caducidad corre entre la ingesta y el Reader y es
+    solo base de datos; con la ventana cerrada (el Reader es denegado) el
+    ítem viejo ya quedó `expired` y el fresco sigue `new`."""
+    monkeypatch.setattr(cli, "SystemClock", _ClockStub(_OUTSIDE_WINDOW))
+    old_id = _seed_item(
+        db_session_factory,
+        status=ItemStatus.NEW,
+        published_at=datetime(2025, 12, 1, 12, 0, tzinfo=UTC),
+    )
+    fresh_id = _seed_item(db_session_factory, status=ItemStatus.NEW, external_id="2601.00002")
+
+    code = main(["run-night"])
+
+    assert code == 8
+    assert fake_provider.calls == []
+    assert _item_status(db_session_factory, old_id) is ItemStatus.EXPIRED
+    assert _item_status(db_session_factory, fresh_id) is ItemStatus.NEW
 
 
 # --- --dry-run: sin Run, sin llamada a ningún agente ------------------------

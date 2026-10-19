@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from nocturna.infrastructure.db.models import Base
 
 _REVISION = "b6d2f8a4c917"
+_HEAD = "e3a7c5b9d214"  # el head posterior; el downgrade es una sola transaccion
 _REVISION_BEFORE = "d8b1e4f7a203"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _KEY_A = "a" * 64
@@ -209,10 +210,10 @@ def test_downgrade_con_items_no_arxiv_falla_y_no_toca_nada(scratch_database_url)
             _insert_item(connection, "exoplanet_archive")
 
         with pytest.raises(RuntimeError, match="source <> 'arxiv'"):
-            run_alembic_downgrade(scratch_database_url, "-1")
+            run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE)
 
         with engine.connect() as connection:
-            assert _version(connection) == _REVISION
+            assert _version(connection) == _HEAD
             assert "solution_tension" in sa.inspect(connection).get_table_names()
     finally:
         engine.dispose()
@@ -227,10 +228,10 @@ def test_downgrade_con_tensiones_falla_y_no_toca_nada(scratch_database_url):
             _insert_tension(connection)
 
         with pytest.raises(RuntimeError, match="solution_tension"):
-            run_alembic_downgrade(scratch_database_url, "-1")
+            run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE)
 
         with engine.connect() as connection:
-            assert _version(connection) == _REVISION
+            assert _version(connection) == _HEAD
             assert (
                 connection.execute(sa.text("SELECT count(*) FROM solution_tension")).scalar_one()
                 == 1
@@ -241,7 +242,7 @@ def test_downgrade_con_tensiones_falla_y_no_toca_nada(scratch_database_url):
 
 def test_downgrade_vacio_funciona_y_upgrade_vuelve(scratch_database_url):
     run_alembic_upgrade(scratch_database_url, "head")
-    run_alembic_downgrade(scratch_database_url, "-1")
+    run_alembic_downgrade(scratch_database_url, _REVISION_BEFORE)
     engine = sa.create_engine(scratch_database_url)
     try:
         with engine.connect() as connection:
@@ -252,7 +253,7 @@ def test_downgrade_vacio_funciona_y_upgrade_vuelve(scratch_database_url):
             assert not {"solution_tension", "solution_tension_id"} & columns
         run_alembic_upgrade(scratch_database_url, "head")
         with engine.connect() as connection:
-            assert _version(connection) == _REVISION
+            assert _version(connection) == _HEAD
             assert "solution_tension" in sa.inspect(connection).get_table_names()
     finally:
         engine.dispose()

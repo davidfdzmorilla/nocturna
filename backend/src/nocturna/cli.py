@@ -242,6 +242,7 @@ from nocturna.application.use_cases.compute_tensions import (
     TensionReport,
 )
 from nocturna.application.use_cases.edit_night import EditNight, EditNightResult, EditOutcome
+from nocturna.application.use_cases.expire_unread import expire_stale_unread
 from nocturna.application.use_cases.generate_measurement_findings import (
     GenerateMeasurementFindings,
     MeasurementFindingsReport,
@@ -911,6 +912,8 @@ def _print_budget_plan(
     would_read: int,
     would_read_v3: int | None = None,
     writer_estimated_tokens: int,
+    would_expire: int | None = None,
+    expire_cutoff: datetime | None = None,
 ) -> None:
     """Plan de gasto de la noche, que imprime `--dry-run` ("ingesta + plan de
     gasto, sin llamar a agentes"; no escribe nada en la base), sin instanciar el
@@ -947,6 +950,11 @@ def _print_budget_plan(
         f"  porción del Editor: {policy.editor_reserve_tokens} tokens "
         f"(ve el presupuesto completo, {editor_available})"
     )
+    if would_expire is not None and expire_cutoff is not None:
+        print(
+            f"  ítems que caducarían esta noche: {would_expire} "
+            f"(published_at anterior a {expire_cutoff.isoformat()}, sin exoplanet_match)"
+        )
     print(f"  ítems que se leerían esta noche: {would_read}")
     if would_read_v3 is not None:
         print(
@@ -2038,6 +2046,7 @@ def _build_run_night(
     write_tensions: WriteTensions,
     run_id: UUID,
     max_items: int,
+    max_unread_age_days: int,
     max_consecutive_failures: int,
     deadline_s: int,
     deadline_reason: str = "hard_stop",
@@ -2090,6 +2099,7 @@ def _build_run_night(
         write_solution_tensions=write_solution_tensions,
         run_id=run_id,
         max_items=max_items,
+        max_unread_age_days=max_unread_age_days,
         max_consecutive_failures=max_consecutive_failures,
         deadline_s=deadline_s,
         deadline_reason=deadline_reason,
@@ -2134,7 +2144,10 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
     la ingesta se escribe en esa transacción para que `_would_read_items` vea
     los ítems recién traídos, y al salir desaparece. La sección de tensiones
     (T88) corre en esa misma sesión: lee el snapshot del archivo de la base y
-    solo el servicio de alias puede salir a la red. Códigos de salida:
+    solo el servicio de alias puede salir a la red. La caducidad de ítems sin
+    leer (T94, ADR 0033) se calcula dentro de esa transacción que se deshace,
+    antes del reparto v3/v2, de modo que el plan ya excluye lo que caducaría.
+    Códigos de salida:
     0; 1 si falla arXiv o el archivo (en ambos casos sin escribir nada)."""
     settings = Settings()
     config = load_pipeline_config()
@@ -2158,6 +2171,11 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
 
             policy = budget_policy_from_config(config)
             clock = system_clock_from_config(config)
+            expiry = expire_stale_unread(
+                SqlAlchemyItemRepository(session),
+                now=clock.now(),
+                max_age_days=config.limits.max_unread_age_days,
+            )
             to_read = _would_read_items(session, config)
             measures_categories = frozenset(config.reader.measurement_categories)
             would_read_v3 = sum(
@@ -2172,6 +2190,8 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
                 would_read=len(to_read),
                 would_read_v3=would_read_v3,
                 writer_estimated_tokens=config.budget.writer_estimated_tokens,
+                would_expire=expiry.expired,
+                expire_cutoff=expiry.cutoff,
             )
             _print_measurement_findings_section(session, config, clock)
             _print_writer_section(session, config)
@@ -2322,6 +2342,7 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         write_solution_tensions=write_solution_tensions,
         run_id=run_id,
         max_items=config.limits.max_items_per_night,
+        max_unread_age_days=config.limits.max_unread_age_days,
         max_consecutive_failures=config.limits.max_consecutive_failures,
         deadline_s=deadline_s,
         deadline_reason=deadline_reason,
@@ -2813,8 +2834,8 @@ def _read_one_item(
     try:
         result = asyncio.run(read_item(item))
     except InvalidTransition:
-        # El ítem existe pero no está en NEW: ya se leyó, descartó, publicó
-        # o falló antes. `ReadItem` lo comprueba antes de tocar el
+        # El ítem existe pero no está en NEW: ya se leyó, descartó, publicó,
+        # falló o caducó antes. `ReadItem` lo comprueba antes de tocar el
         # presupuesto (ver su docstring), así que no se ha gastado nada.
         print(
             f"el Item {item.external_id} ya está en estado '{item.status.value}'; "

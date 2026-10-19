@@ -109,6 +109,9 @@ class LimitsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_items_per_night: int = Field(gt=0)
+    # T94 (ADR 0033): días tras `published_at` a partir de los cuales un ítem
+    # `new` sin `exoplanet_match` caduca. Sin default: que falte ruidosamente.
+    max_unread_age_days: int = Field(ge=1)
     max_turns_per_agent: int = Field(gt=0)
     item_timeout_s: int = Field(gt=0)
     run_timeout_s: int = Field(gt=0)

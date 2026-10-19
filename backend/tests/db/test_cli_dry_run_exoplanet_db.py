@@ -10,10 +10,12 @@ import os
 import subprocess
 import sys
 import textwrap
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import pytest
+from fakes.clock import FakeClock
 from test_cli_dry_run_db import _load, _patch_arxiv_transport, _Recorder
 
 from nocturna import cli
@@ -36,6 +38,13 @@ def _via_api(monkeypatch: pytest.MonkeyPatch) -> None:
         return config.model_copy(update={"sources": sources})
 
     monkeypatch.setattr(cli, "load_pipeline_config", _patched)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T94: el feed es de 2026-09-15; con el reloj real caducaría (7 días)."""
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(cli, "SystemClock", lambda *a, **k: FakeClock(now))
 
 
 @pytest.fixture(autouse=True)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,7 @@ from factories import (
     make_run,
     seed_archive_snapshot,
 )
+from fakes.clock import FakeClock
 from helpers.archive import alias_handler, load_t71c_measurements, v1298_archive_solutions
 
 from nocturna import cli
@@ -226,9 +228,15 @@ def test_el_plan_cuenta_los_items_nuevos_nunca_guardados_y_les_da_prioridad(
         return config.model_copy(update={"limits": limits})
 
     monkeypatch.setattr(cli, "load_pipeline_config", _limited)
+    # T94: reloj fijo un día después del feed (2026-09-15) para que nada caduque.
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(cli, "SystemClock", lambda *a, **k: FakeClock(now))
     with unit_of_work(db_session_factory) as session:
         SqlAlchemyItemRepository(session).add_many(
-            [make_item(external_id=f"2601.0000{n}") for n in (1, 2, 3)]
+            [
+                make_item(external_id=f"2601.0000{n}", published_at=now - timedelta(days=1))
+                for n in (1, 2, 3)
+            ]
         )
     before = _snapshot(db_session_factory)
     _route(monkeypatch, feed=_feed_with_only("2609.17505"))
@@ -241,6 +249,39 @@ def test_el_plan_cuenta_los_items_nuevos_nunca_guardados_y_les_da_prioridad(
     assert "ítems que se leerían esta noche: 2" in out
     assert "de los 2 a leer, 1 con reader-v3 y 1 con reader-v2" in out
     assert _snapshot(db_session_factory) == before
+
+
+def test_el_plan_cuenta_los_que_caducarian_sin_caducar_nada(
+    monkeypatch, db_session_factory, capsys
+):
+    """T94: la caducidad corre en la transacción del dry-run y se deshace; la
+    línea del plan la cuenta y la cola resultante alimenta el reparto v3/v2."""
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(cli, "SystemClock", lambda *a, **k: FakeClock(now))
+    with unit_of_work(db_session_factory) as session:
+        SqlAlchemyItemRepository(session).add_many(
+            [
+                make_item(external_id=f"2601.0000{n}", published_at=now - timedelta(days=15))
+                for n in (1, 2)
+            ]
+        )
+    before = _snapshot(db_session_factory)
+    _route(monkeypatch, feed=_feed_with_only("2609.17505"))
+
+    code = main(ARGS)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (
+        "ítems que caducarían esta noche: 2 "
+        "(published_at anterior a 2026-09-09T12:00:00+00:00, sin exoplanet_match)"
+    ) in out
+    assert "ítems que se leerían esta noche: 1" in out
+    assert "de los 1 a leer, 1 con reader-v3 y 0 con reader-v2" in out
+    assert _snapshot(db_session_factory) == before
+    with db_session_factory() as session:
+        statuses = session.execute(sa.text("select distinct status from items")).scalars().all()
+    assert list(statuses) == ["new"]
 
 
 def test_si_el_alias_del_archivo_cae_devuelve_1_y_la_base_queda_intacta(

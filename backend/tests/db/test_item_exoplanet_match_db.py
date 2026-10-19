@@ -15,16 +15,18 @@ def _external_ids(items) -> list[str]:
     return [i.external_id for i in items]
 
 
-def test_next_unread_pone_primero_los_marcados_luego_fetched_at_luego_external_id(db_session):
+def test_next_unread_pone_primero_los_marcados_luego_published_at_desc_luego_external_id(
+    db_session,
+):
     repo = SqlAlchemyItemRepository(db_session)
     repo.add_many(
         [
-            make_item(external_id="2601.00001", fetched_at=aware(1)),
-            make_item(external_id="2601.00002", fetched_at=aware(2)),
-            make_item(external_id="2601.00009", fetched_at=aware(5), exoplanet_match=True),
-            make_item(external_id="2601.00008", fetched_at=aware(3), exoplanet_match=True),
-            # mismo fetched_at que el anterior: desempata external_id
-            make_item(external_id="2601.00007", fetched_at=aware(3), exoplanet_match=True),
+            make_item(external_id="2601.00001", published_at=aware(1)),
+            make_item(external_id="2601.00002", published_at=aware(2)),
+            make_item(external_id="2601.00009", published_at=aware(5), exoplanet_match=True),
+            make_item(external_id="2601.00008", published_at=aware(3), exoplanet_match=True),
+            # mismo published_at que el anterior: desempata external_id
+            make_item(external_id="2601.00007", published_at=aware(3), exoplanet_match=True),
         ]
     )
     db_session.flush()
@@ -32,26 +34,26 @@ def test_next_unread_pone_primero_los_marcados_luego_fetched_at_luego_external_i
     result = repo.next_unread(10)
 
     assert _external_ids(result) == [
+        "2601.00009",
         "2601.00007",
         "2601.00008",
-        "2601.00009",
-        "2601.00001",
         "2601.00002",
+        "2601.00001",
     ]
 
 
 def test_next_unread_aplica_el_limit_despues_de_priorizar(db_session):
     repo = SqlAlchemyItemRepository(db_session)
     repo.add_many(
-        [make_item(external_id=f"2601.0000{i}", fetched_at=aware(i)) for i in range(1, 5)]
-        + [make_item(external_id="2601.00099", fetched_at=aware(60), exoplanet_match=True)]
+        [make_item(external_id=f"2601.0000{i}", published_at=aware(i)) for i in range(1, 5)]
+        + [make_item(external_id="2601.00099", published_at=aware(-60), exoplanet_match=True)]
     )
     db_session.flush()
 
     result = repo.next_unread(2)
 
-    # El marcado es el más reciente de todos: sin priorizar antes del LIMIT no entraría.
-    assert _external_ids(result) == ["2601.00099", "2601.00001"]
+    # El marcado es el más antiguo de todos: sin priorizar antes del LIMIT no entraría.
+    assert _external_ids(result) == ["2601.00099", "2601.00004"]
 
 
 def test_next_unread_excluye_los_que_no_son_new_aunque_esten_marcados(db_session):
@@ -128,11 +130,14 @@ def test_save_no_toca_la_marca(db_session):
     assert reloaded.exoplanet_match is True
 
 
-def test_orden_estable_con_fetched_at_identico_y_sin_marcas(db_session):
+def test_orden_estable_con_published_at_identico_y_sin_marcas(db_session):
     repo = SqlAlchemyItemRepository(db_session)
     same = aware(1)
     repo.add_many(
-        [make_item(external_id=f"2601.0000{i}", fetched_at=same + timedelta(0)) for i in (3, 1, 2)]
+        [
+            make_item(external_id=f"2601.0000{i}", published_at=same + timedelta(0))
+            for i in (3, 1, 2)
+        ]
     )
     db_session.flush()
 

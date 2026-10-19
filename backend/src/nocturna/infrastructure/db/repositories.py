@@ -161,27 +161,37 @@ class SqlAlchemyItemRepository:
     def next_unread(self, limit: int) -> list[Item]:
         # T79: los ítems marcados `exoplanet_match` van primero, para que con
         # `limit` (max_items_per_night) los candidatos a `reader-v3` no queden
-        # detrás de ítems de v2. Dentro de cada grupo, orden de llegada:
-        # `fetched_at ASC` refleja cuándo entró el ítem a la base. No basta
-        # como criterio único: dos ítems de la misma ingesta pueden compartir
-        # `fetched_at` al milisegundo, y sin desempate PostgreSQL puede
-        # devolverlos en cualquier orden entre ellos. `external_id ASC`
-        # desempata de forma determinista para que `run-item` y una
-        # re-ejecución de la noche vean siempre el mismo orden. El LIMIT se
-        # aplica después de ordenar. T85, guarda de gasto: solo `source = 'arxiv'`;
-        # los ítems del archivo (`exoplanet_archive`) no los lee ningún agente.
+        # detrás de ítems de v2. T94 (ADR 0033): dentro de cada grupo, lo más
+        # reciente primero (`published_at DESC`): la cola ya no es FIFO, así
+        # un atasco no deja leer solo lo más viejo. `external_id ASC` desempata
+        # de forma determinista (run-item y re-ejecuciones ven el mismo orden).
+        # El LIMIT se aplica después de ordenar. T85, guarda de gasto: solo
+        # `source = 'arxiv'`; los ítems del archivo no los lee ningún agente.
         stmt = (
             select(ItemRow)
             .where(ItemRow.status == ItemStatus.NEW, ItemRow.source == ITEM_SOURCE_ARXIV)
             .order_by(
                 ItemRow.exoplanet_match.desc(),
-                ItemRow.fetched_at.asc(),
+                ItemRow.published_at.desc(),
                 ItemRow.external_id.asc(),
             )
             .limit(limit)
         )
         rows = self._session.execute(stmt).scalars().all()
         return [item_from_row(row) for row in rows]
+
+    def stale_unread(self, published_before: datetime) -> list[Item]:
+        stmt = (
+            select(ItemRow)
+            .where(
+                ItemRow.status == ItemStatus.NEW,
+                ItemRow.source == ITEM_SOURCE_ARXIV,
+                ItemRow.published_at < published_before,
+                ItemRow.exoplanet_match.is_(False),
+            )
+            .order_by(ItemRow.published_at.asc(), ItemRow.external_id.asc())
+        )
+        return [item_from_row(row) for row in self._session.execute(stmt).scalars().all()]
 
     def save(self, item: Item) -> None:
         row = self._session.get(ItemRow, item.id)

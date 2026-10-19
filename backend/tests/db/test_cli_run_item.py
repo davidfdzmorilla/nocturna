@@ -322,6 +322,25 @@ def test_item_ya_leido_en_segunda_ejecucion_devuelve_3_sin_integrity_error_ni_ll
     assert statuses == {RunStatus.COMPLETED, RunStatus.PARTIAL}
 
 
+def test_item_expired_devuelve_3_con_mensaje_sin_agent_call(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """T94 (ADR 0033): un ítem caducado no se lee; `ReadItem` lo rechaza con
+    `InvalidTransition` antes de tocar presupuesto o proveedor."""
+    item_id = _seed_item(db_session_factory, status=ItemStatus.EXPIRED)
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 3
+    assert "ya está en estado 'expired'" in capsys.readouterr().err
+    assert fake_provider.calls == []
+    assert _all_agent_calls(db_session_factory) == []
+    assert _all_readings(db_session_factory) == []
+    assert _item_status(db_session_factory, item_id) is ItemStatus.EXPIRED
+
+
 # --- Fuera de la ventana horaria: código 4 ---------------------------------
 
 

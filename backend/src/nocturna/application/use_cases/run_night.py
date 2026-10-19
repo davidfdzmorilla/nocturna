@@ -25,6 +25,12 @@ T76: tras `_phase_measurement_findings` y antes del Editor corre
 siempre vía `AgentRunner`) las tensiones `catalog_tension` que elige
 `SelectTensions` (solo lectura); el Editor las decide en la misma llamada.
 
+T94 (ADR 0033): entre la ingesta y el Reader corre `_phase_expire`
+(`expire_stale_unread`), que marca `expired` los ítems `new` más viejos que
+el límite de caducidad antes de que el Reader forme la cola. Es solo base de
+datos (cero agentes, cero tokens); si falla, la noche cierra `PARTIAL`
+(`expire_error`) y el Reader sigue con lo que haya.
+
 ## El modelo de "degradación monótona" que decide `RunNightResult.status`
 
 La noche empieza optimista (`RunStatus.COMPLETED`) y solo empeora: cada
@@ -208,6 +214,7 @@ from uuid import UUID
 from nocturna.application.budget import BudgetDenied, DenyReason, terminal_status_for
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases.edit_night import EditNight, EditOutcome
+from nocturna.application.use_cases.expire_unread import expire_stale_unread
 from nocturna.application.use_cases.generate_measurement_findings import (
     GenerateMeasurementFindings,
 )
@@ -321,6 +328,7 @@ class RunNight:
         write_solution_tensions: WriteSolutionTensions | None = None,
         run_id: UUID,
         max_items: int,
+        max_unread_age_days: int,
         max_consecutive_failures: int,
         deadline_s: int,
         deadline_reason: str = "hard_stop",
@@ -342,6 +350,7 @@ class RunNight:
         self._write_solution_tensions = write_solution_tensions
         self._run_id = run_id
         self._max_items = max_items
+        self._max_unread_age_days = max_unread_age_days
         self._max_consecutive_failures = max_consecutive_failures
         self._deadline_s = deadline_s
         #: Motivo con el que `_build_killed_result` cierra `notes` si el
@@ -362,6 +371,7 @@ class RunNight:
         self._skip_editor: bool = False
         self._hard_stop_fired: bool = False
         self._items_fetched: int = 0
+        self._items_expired: int = 0
         self._items_read: int = 0
         self._items_failed: int = 0
         self._candidates: int = 0
@@ -369,6 +379,7 @@ class RunNight:
         self._ingest_status: str = "ok"
         self._ingest_error: str | None = None
         self._ingest_fetched: int = 0
+        self._expire_error: str | None = None
 
     async def __call__(self) -> RunNightResult:
         """Ejecuta la noche completa. Ver el docstring del módulo para el
@@ -378,6 +389,7 @@ class RunNight:
         self._skip_editor = False
         self._hard_stop_fired = False
         self._items_fetched = 0
+        self._items_expired = 0
         self._items_read = 0
         self._items_failed = 0
         self._candidates = 0
@@ -385,6 +397,7 @@ class RunNight:
         self._ingest_status = "ok"
         self._ingest_error = None
         self._ingest_fetched = 0
+        self._expire_error = None
 
         with self._work() as w:
             run = w.runs.get(self._run_id)
@@ -459,8 +472,12 @@ class RunNight:
         return self._result(tokens_used=tokens_used, notes=notes)
 
     async def _run_body(self, started_at: float) -> RunNightResult:
-        """Cuerpo de la noche, en este orden: ingesta, Reader, Popularizer,
-        findings de medidas (T89), redactor de tensiones (T76) y Editor.
+        """Cuerpo de la noche, en este orden: ingesta, caducidad de ítems sin
+        leer (T94), Reader, Popularizer, findings de medidas (T89), redactor
+        de tensiones (T76) y Editor.
+
+        T94 (ADR 0033): la caducidad (`_phase_expire`) es solo base de datos,
+        sin agentes ni tokens, y corre antes de que el Reader forme su cola.
 
         Lanzado como `asyncio.Task` por `__call__`; puede cancelarse a mitad
         de cualquier `await` de aquí abajo (el corte de `hard_stop`). Ningún
@@ -473,6 +490,7 @@ class RunNight:
         relacionadas.
         """
         await self._run_ingest_phase()
+        self._phase_expire()
 
         read_pairs = await self._phase_reader()
         await self._phase_popularizer(read_pairs)
@@ -569,6 +587,45 @@ class RunNight:
                 "truncated": result.truncated,
                 "status": "ok",
                 "error": None,
+            },
+        )
+
+    # --- caducidad (T94) ---------------------------------------------------
+
+    def _phase_expire(self) -> None:
+        """Caduca los `NEW` viejos sin `exoplanet_match` antes de leer (T94,
+        ADR 0033). No gasta tokens ni llama a agentes. Un fallo degrada a
+        `PARTIAL` (`expire_error`) y el Reader sigue con lo que haya."""
+        now = self._clock.now()
+        try:
+            with self._work() as w:
+                result = expire_stale_unread(
+                    w.items, now=now, max_age_days=self._max_unread_age_days
+                )
+        except Exception as exc:
+            self._expire_error = type(exc).__name__
+            self._degrade(RunStatus.PARTIAL, "expire_error")
+            _logger.exception(
+                "night.expire",
+                extra={
+                    "event": "night.expire",
+                    "run_id": str(self._run_id),
+                    "status": "error",
+                    "error": self._expire_error,
+                    "max_age_days": self._max_unread_age_days,
+                },
+            )
+            return
+        self._items_expired = result.expired
+        _logger.info(
+            "night.expire",
+            extra={
+                "event": "night.expire",
+                "run_id": str(self._run_id),
+                "status": "ok",
+                "expired": result.expired,
+                "cutoff": result.cutoff.isoformat(),
+                "max_age_days": self._max_unread_age_days,
             },
         )
 
@@ -1112,11 +1169,15 @@ class RunNight:
         if self._ingest_error is not None:
             ingest_part += f":{self._ingest_error}"
         ingest_part += f" fetched={self._ingest_fetched} new={self._items_fetched}"
+        expire_part = f"expired={self._items_expired}"
+        if self._expire_error is not None:
+            expire_part += f":{self._expire_error}"
         read_part = f"read={self._items_read}(failed={self._items_failed})"
         editor_part = f"candidates={self._candidates} published={self._findings_published}"
         tokens_part = f"tokens={tokens_used}"
         end_part = f"end={self._end_reason or 'unknown'}"
-        return f"{ingest_part} | {read_part} | {editor_part} | {tokens_part} | {end_part}"
+        parts = (ingest_part, expire_part, read_part, editor_part, tokens_part, end_part)
+        return " | ".join(parts)
 
     def _log_night_end(self, *, tokens_used: int, elapsed_s: float, notes: str) -> None:
         _logger.info(

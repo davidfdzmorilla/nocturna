@@ -70,7 +70,7 @@ def _config(monkeypatch: pytest.MonkeyPatch, *, writer_enabled: bool) -> None:
 
 
 def _run(db_session_factory, fake: FakeLLMProvider, argv: list[str]) -> UUID:
-    item = make_item()
+    item = make_item(published_at=_WITHIN_WINDOW)  # T94: reciente, no caduca
     with unit_of_work(db_session_factory) as session:
         SqlAlchemyItemRepository(session).add_many([item])
     fake.respond(AgentRole.READER, json=READING, tokens_in=1000, tokens_out=200)
