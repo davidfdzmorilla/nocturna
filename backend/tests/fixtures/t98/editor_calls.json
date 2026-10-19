@@ -1,0 +1,83 @@
+[
+  {
+    "noche": "2026-10-09",
+    "prompt_version": "editor-v3",
+    "status": "ok",
+    "tokens_in": 14905,
+    "tokens_out": 3051,
+    "total": 17956,
+    "n": 18
+  },
+  {
+    "noche": "2026-10-10",
+    "prompt_version": "editor-v3",
+    "status": "ok",
+    "tokens_in": 9146,
+    "tokens_out": 1851,
+    "total": 10997,
+    "n": 10
+  },
+  {
+    "noche": "2026-10-14",
+    "prompt_version": "editor-v3",
+    "status": "ok",
+    "tokens_in": 12982,
+    "tokens_out": 2654,
+    "total": 15636,
+    "n": 15
+  },
+  {
+    "noche": "2026-10-15",
+    "prompt_version": "editor-v4",
+    "status": "ok",
+    "tokens_in": 10233,
+    "tokens_out": 1985,
+    "total": 12218,
+    "n": 10
+  },
+  {
+    "noche": "2026-10-16",
+    "prompt_version": "editor-v4",
+    "status": "ok",
+    "tokens_in": 10789,
+    "tokens_out": 1199,
+    "total": 11988,
+    "n": 11
+  },
+  {
+    "noche": "2026-10-17",
+    "prompt_version": "editor-v4",
+    "status": "invalid_output",
+    "tokens_in": 10322,
+    "tokens_out": 955,
+    "total": 11277,
+    "n": 10
+  },
+  {
+    "noche": "2026-10-17",
+    "prompt_version": "editor-v4",
+    "status": "ok",
+    "tokens_in": 10322,
+    "tokens_out": 1105,
+    "total": 11427,
+    "n": 10
+  },
+  {
+    "noche": "2026-10-18",
+    "prompt_version": "editor-v4",
+    "status": "ok",
+    "tokens_in": 15066,
+    "tokens_out": 2887,
+    "total": 17953,
+    "n": 17
+  },
+  {
+    "noche": "2026-10-19",
+    "prompt_version": "editor-v4",
+    "status": "ok",
+    "tokens_in": 10359,
+    "tokens_out": 2143,
+    "total": 12502,
+    "n": 10
+  }
+]

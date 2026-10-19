@@ -683,16 +683,16 @@ def test_editor_denegado_por_presupuesto_devuelve_4_run_partial_y_finding_sin_pu
     (`run_reused=False`) para que se cierre `PARTIAL` al terminar.
 
     Las cifras sembradas dependen de las constantes de estimación del
-    Editor en `config/pipeline.toml` (T60: `editor_base_tokens=2500`,
-    `editor_tokens_per_candidate=850`; antes de T60 eran 4000/700) y de
+    Editor en `config/pipeline.toml` (T98: `editor_base_tokens=4000`,
+    `editor_tokens_per_candidate=900`) y de
     `nightly_tokens=300000`. Con 1 candidato, el Editor estima
-    2500 + 850*1 = 3350 tokens. Para que `BudgetGuard` lo deniegue, lo
-    gastado de verdad por Reader+Popularizer tiene que dejar menos de 3350
+    4000 + 900*1 = 4900 tokens. Para que `BudgetGuard` lo deniegue, lo
+    gastado de verdad por Reader+Popularizer tiene que dejar menos de 4900
     tokens disponibles de los 300000: 200_000 + 99_000 = 299_000 gastados,
-    1_000 restantes, por debajo de los 3350 que el Editor necesita. Si
+    1_000 restantes, por debajo de los 4900 que el Editor necesita. Si
     `editor_base_tokens`/`editor_tokens_per_candidate` se recalibran otra
     vez (el propio comentario de `pipeline.toml` los marca PROVISIONAL,
-    a reajustar por regresión sobre ~14 noches al cierre de T60), este test
+    revisables con Q10 de night_report.sql), este test
     se pone en rojo -- no es un fallo del código, es que el margen volvió a
     moverse y hay que repetir esta cuenta con las constantes nuevas."""
     fake_provider.respond(

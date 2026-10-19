@@ -86,60 +86,23 @@ reader_v3_estimated_tokens = 13000
 # día se sube max_items_per_night, hay que repetirlo (ver también el
 # comentario de [limits] sobre por qué T71.c lo bajó de 40 a 30).
 popularizer_estimated_tokens = 7000
-# editor_base_tokens: parte fija de la estimación de coste del Editor, la
-# única llamada de la noche a Opus, sobre la que `PipelineConfig` exige que
-# `editor_base_tokens + (max_items_per_night + max_candidates_per_night +
-# max_writer_calls_per_night) * editor_tokens_per_candidate` quepa en
-# `editor_reserve_tokens` (ver el validador de `PipelineConfig`).
-# T60: con dos observaciones reales del coste del Editor -- T43 humo,
-# N=3 -> 3.381 tokens; primera noche real (2026-09-18), N=14 -> 11.890
-# tokens -- se ajusta la recta que pasa por ambos puntos: ~774
-# tokens/candidato sobre ~1.060 fijos.
-#
-# Las dos rectas de estimación (la vieja, 4.000 + 700xN, y esta) se cruzan
-# exactamente en N=10 (ambas dan 11.000); por debajo de N=10 la nueva es
-# MENOS conservadora que la vieja: el margen baja de 1,80x a 1,49x en N=3,
-# y de 2,56x a 1,83x en N=1. Lo que motiva el cambio no es una monotonía
-# inexistente sino el peor caso que la guarda existe para cubrir: en N=40,
-# que era `max_items_per_night` cuando se hizo este ajuste (T71.c lo bajó a
-# 30, ver [limits]), la vieja estimación (32.000) ya caía por DEBAJO de la
-# recta observada (≈32.002) -- ya era un subestimador justo donde más
-# importa. La nueva queda por ENCIMA de la recta observada en todo el rango
-# 1-40 (nuevo - recta = 1.440 + 76xN, estrictamente positivo y creciente):
-# margen mínimo 1,14x en N=40; N=3 -> 1,49x; N=14 -> 1,21x. Con
-# `max_items_per_night = 30` el peor caso real hoy es N=30, dentro de ese
-# mismo rango y con margen aún mayor: 1,15x.
-#
-# Es un ajuste PROVISIONAL: dos observaciones para dos parámetros es un
-# sistema exactamente determinado (residuo cero, cero confianza), no una
-# regresión con la que fiarse. Se reajusta por regresión sobre ~14 noches
-# al cierre de T60. Ver docs/CALIBRACION.md ("Hallazgo 2").
-#
-# El invariante que valida `PipelineConfig` (arriba) cubre UN intento del
-# Editor; `max_editor_calls_per_night = 2` autoriza un segundo intento
-# contra el presupuesto completo si el primero falla por JSON inválido. Con
-# `max_items_per_night = 40` (el valor de cuando se hizo este ajuste), dos
-# intentos a N=40 suman 73.000 tokens (2 x 36.500) frente a los 60.000 de
-# `editor_reserve_tokens`. Es propiedad preexistente -- el segundo intento
-# se autoriza contra el presupuesto completo y se deniega si no cabe,
-# cerrando la noche `partial` --, pero este ajuste sube ese peor caso de
-# 64.000 (con los valores viejos: 2 x 32.000) a 73.000, y merece constar.
-# Con `max_items_per_night = 30` (T71.c) el peor caso real hoy es menor:
-# dos intentos a N=30 suman 56.000 tokens (2 x 28.000), holgado frente a
-# los 60.000 de `editor_reserve_tokens`.
-editor_base_tokens = 2500
-# editor_tokens_per_candidate: coste marginal, por candidato, de la única
-# llamada al Editor. Multiplicado por `max_items_per_night` en el
-# validador de `PipelineConfig` para comprobar que la reserva del Editor
-# basta en el peor caso (todos los ítems de la noche llegando como
-# candidatos). Ajustado junto con editor_base_tokens (ver comentario ahí)
-# a partir de las mismas dos observaciones reales (N=3 -> 3.381; N=14 ->
-# 11.890): recta ~774 tokens/candidato sobre ~1.060 fijos, redondeada a
-# 850 sobre 2.500 fijos para quedar por encima de lo observado en todo el
-# rango, no solo en los dos puntos medidos. Mismo carácter PROVISIONAL que
-# editor_base_tokens: a reajustar por regresión sobre ~14 noches al cierre
-# de T60.
-editor_tokens_per_candidate = 850
+# Estimación del coste de UN intento del Editor (única llamada a Opus):
+# `editor_base_tokens + N * editor_tokens_per_candidate`, con N = candidatos.
+# Origen (ADR 0036, docs/CALIBRACION.md cfg-2026-10-19): regresión sobre 9
+# llamadas reales de editor-v3/v4 (2026-10-09 a 2026-10-19). OLS de v4:
+# a=2952, b=877, r²=0,95, N entre 10 y 17. Se sube la base al mayor residuo
+# (+777,5) y se redondea al alza: 4000/900. Cubre las 9 llamadas; la más justa
+# cuesta 12.502 frente a 13.000 estimados.
+# `PipelineConfig` exige que `editor_base_tokens + (max_items_per_night +
+# max_candidates_per_night + max_writer_calls_per_night) *
+# editor_tokens_per_candidate` quepa en `editor_reserve_tokens`: peor caso
+# 4000 + 37 x 900 = 37.300 <= 60.000 (un intento; el reintento se autoriza
+# con el gasto real del primero).
+# Revisar con Q10 de backend/scripts/night_report.sql en cada versión nueva
+# del prompt del Editor.
+editor_base_tokens = 4000
+# editor_tokens_per_candidate: coste marginal por candidato (ver arriba).
+editor_tokens_per_candidate = 900
 
 [limits]
 # max_items_per_night: valor inicial de CLAUDE.md ("Control de gasto") era
@@ -179,7 +142,7 @@ max_editor_calls_per_night = 2
 # datos dan 0-1 tensiones por noche). Con writer_estimated_tokens = 12.000
 # cabe exacto en writer_reserve_tokens (24.000). Además entra como cota
 # superior de candidatos en el validador de la reserva del Editor:
-# 2.500 + (30 + 5 + 2) x 850 = 33.950 <= 60.000.
+# 4.000 + (30 + 5 + 2) x 900 = 37.300 <= 60.000.
 max_writer_calls_per_night = 2
 # max_calls_per_item: tope de llamadas de Reader/Popularizer por ítem (el
 # intento más el reintento por JSON inválido que concede CLAUDE.md). El tope
@@ -443,7 +406,7 @@ pubdate_margin_months = 6
 # la reserva del Editor: editor_base_tokens + (max_items_per_night +
 # max_candidates_per_night + max_writer_calls_per_night) *
 # editor_tokens_per_candidate <= editor_reserve_tokens
-# (2500 + (30 + 5 + 2) * 850 = 33950 <= 60000; validado al cargar, T75).
+# (4000 + (30 + 5 + 2) * 900 = 37300 <= 60000; validado al cargar, T75).
 max_candidates_per_night = 5
 # confirmation_max_sigma: una confirmación exige todas las medidas del paper a
 # σ <= este valor de la referencia del archivo (D4).

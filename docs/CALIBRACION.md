@@ -225,6 +225,11 @@ Cada vez que se toque `config/pipeline.toml`, se incrementa el `config_version` 
   - PROVISIONAL: sin datos de campo sobre cuánto dura el 406 del CDN más allá del caso único observado; se recalibra en T60 si vuelve a aparecer.
   - No afecta a `reader-v2`/`popularizer-v2`/`editor-v1` ni a las constantes de gasto (`nightly_tokens`, reservas del Editor, etc.): la serie de calibración de esas magnitudes sigue comparable.
 
+- **cfg-2026-10-19** (T98, ADR 0036, estimación del Editor con `editor-v4`):
+  - `editor_base_tokens = 4000` (antes 2.500) y `editor_tokens_per_candidate = 900` (antes 850).
+  - Motivo: 8 de 9 llamadas reales de `editor-v3`/`editor-v4` (2026-10-09 a 2026-10-19, N entre 10 y 17) superaron `2.500 + 850×N`, hasta en 1.502 tokens (13,7 %). Regresión de v4: `2.952 + 877×N`, r² = 0,95; desplazada al mayor residuo de v3 y v4 (+777,5) y redondeada al alza. Cubre las 9 llamadas (la más justa, 12.502 frente a 13.000). Peor caso validado: 4.000 + 37×900 = 37.300 ≤ 60.000.
+  - Resto de `pipeline.toml` sin cambios; la serie de Reader, Popularizer y redactor sigue comparable.
+
 **Nota importante**: las versiones de `reader-v2`, `popularizer-v2` y `editor-v1` rompen comparabilidad con cualquier dato anterior a ellas. El campo `prompt_version` en `AgentCall` permite segregar los datos históricos si es necesario.
 
 ---
@@ -426,6 +431,7 @@ Al final de catorce noches (o cuando haya mínimo **7 noches con par (A,B) limpi
 - Recopila todos los puntos (N candidatos, tokens gastados) de las N=14 noches.
 - Ajusta recta `tokens = a + b×N` por mínimos cuadrados (ej. usando `numpy.polyfit`).
 - Si `a` y `b` difieren >20% de los valores de `config/pipeline.toml`, **actualiza los valores redondeando hacia el conservador** (margen mayor, nunca menor). Documenta el cambio en un nuevo `config_version`.
+- Desde T98 (ADR 0036): se revisa con cada versión nueva del prompt del Editor usando Q10 de `night_report.sql`, también si alguna llamada supera su estimación; la recta se desplaza al mayor residuo positivo y se redondea al alza (base a 500, pendiente a 50).
 
 ### Regla 4: Máximo de ítems por noche
 - `max_items_per_night = 40` hoy. Si todas las noches leen 40 y Popularizer no agota candidatos (hay margen), es seguro subir a 50.
