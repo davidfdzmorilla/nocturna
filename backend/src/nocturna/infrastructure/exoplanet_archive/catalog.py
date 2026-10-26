@@ -28,6 +28,9 @@ class ExoplanetArchiveCatalog:
         self._alias_client = alias_client
         self._index: dict[str, str] | None = None
         self._alias_cache: dict[str, str | None] = {}
+        # T99: nombres cuyo alias no respondió en esta instancia (vida = una
+        # pasada). Nunca se guardan como ausentes: solo evitan repetir la petición.
+        self._alias_failures: dict[str, str] = {}
 
     def _planet_index(self) -> dict[str, str]:
         if self._index is None:
@@ -46,8 +49,17 @@ class ExoplanetArchiveCatalog:
         exact = index.get(norm)
         if exact is not None:
             return exact
+        if norm in self._alias_failures:
+            raise PlanetResolutionFailed(self._alias_failures[norm])
         if norm not in self._alias_cache:
-            payload = await self._alias_client.lookup_alias(clean_name(name))
+            try:
+                payload = await self._alias_client.lookup_alias(clean_name(name))
+            except ExoplanetArchiveUnavailable as exc:
+                # T99: el alias no responde (timeout, HTTP, JSON inválido, tope de
+                # peticiones): fallo de resolución de ESTE planeta, no aborto.
+                message = f"alias de {name!r}: {exc}"
+                self._alias_failures[norm] = message
+                raise PlanetResolutionFailed(message) from exc
             # D16: un fallo de resolución lanza antes de tocar la caché; solo
             # "System Not Found" queda cacheado como ausente.
             self._alias_cache[norm] = _default_name_from_alias(payload, norm)

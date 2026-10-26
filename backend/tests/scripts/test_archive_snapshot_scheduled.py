@@ -1,9 +1,10 @@
 """Tests de `backend/scripts/archive-snapshot-scheduled.sh` y de su plantilla launchd (T81).
 
-Sin Docker, `uv` ni red reales: `uv` y `docker` son scripts de shell falsos en un
+Sin Docker, `uv` ni red reales: `uv`, `docker` y `caffeinate` son scripts de shell falsos en un
 directorio aislado bajo `tmp_path`, y `NOCTURNA_PATH` apunta solo a ese
-directorio mas `/usr/bin:/bin:/usr/sbin:/sbin` (de ahi salen `date`, `mkdir`,
-`sleep` y `caffeinate`). Mismo esquema que `test_run_night_scheduled.py`.
+directorio mas `/usr/bin:/bin:/usr/sbin:/sbin` (de ahi salen `date`, `mkdir`
+y `sleep`; `caffeinate` es falso: el real queda huerfano en esta maquina, T99).
+Mismo esquema que `test_run_night_scheduled.py`.
 `HOME` es siempre un `tmp_path`: los logs caen en `<home>/nocturna-logs`.
 """
 
@@ -35,6 +36,23 @@ fi
 exit "${UV_EXIT_CODE:-0}"
 """
 
+_FAKE_CAFFEINATE = """#!/usr/bin/env bash
+# Sustituto de /usr/bin/caffeinate (T99): el real queda huerfano (ppid 1, ~35% CPU)
+# en esta maquina al lanzarlo desde el entorno de tests. Como el real, ejecuta la
+# utilidad como proceso hijo (no exec) y devuelve su codigo de salida.
+if [ -n "${CAFFEINATE_CALL_LOG_FILE:-}" ]; then
+    printf '%s\\n' "$*" >> "$CAFFEINATE_CALL_LOG_FILE"
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+"$@"
+exit $?
+"""
+
 _FAKE_DOCKER = """#!/usr/bin/env bash
 if [ -n "${DOCKER_CALL_LOG_FILE:-}" ]; then
     printf '%s\\n' "$*" >> "$DOCKER_CALL_LOG_FILE"
@@ -59,12 +77,14 @@ class Env:
         self.home.mkdir()
         self.bin = tmp_path / "bin"
         self.bin.mkdir()
+        _install(self.bin / "caffeinate", _FAKE_CAFFEINATE)
         if uv:
             _install(self.bin / "uv", _FAKE_UV)
         if docker:
             _install(self.bin / "docker", _FAKE_DOCKER)
         self.uv_log = tmp_path / "uv-calls.log"
         self.docker_log = tmp_path / "docker-calls.log"
+        self.caffeinate_log = tmp_path / "caffeinate-calls.log"
         self.tmp_path = tmp_path
 
     @property
@@ -79,6 +99,7 @@ class Env:
             "NOCTURNA_WAIT_S": "1",
             "UV_CALL_LOG_FILE": str(self.uv_log),
             "DOCKER_CALL_LOG_FILE": str(self.docker_log),
+            "CAFFEINATE_CALL_LOG_FILE": str(self.caffeinate_log),
             **extra,
         }
         return subprocess.run(
@@ -154,7 +175,7 @@ def test_postgres_no_healthy_sale_75_sin_lanzar_el_comando(tmp_path, status):
     assert not env.uv_log.exists()
 
 
-@pytest.mark.parametrize("code", [0, 1, 2, 3])
+@pytest.mark.parametrize("code", [0, 1, 2, 3, 4])
 def test_propaga_el_codigo_de_archive_snapshot(tmp_path, code):
     env = Env(tmp_path)
 
@@ -179,6 +200,35 @@ def test_codigo_3_registra_el_aviso_de_evaluacion_fallida_en_el_log(tmp_path):
     assert out.rstrip().endswith("código de salida: 3")
 
 
+def test_codigo_4_registra_un_aviso_propio_distinto_del_del_codigo_3(tmp_path):
+    """T99 (D6): 4 = todo guardado pero hay planetas sin resolver (se reintentan);
+    no es el aviso de "falló" del código 3."""
+    env = Env(tmp_path)
+
+    result = env.run(UV_EXIT_CODE="4")
+
+    assert result.returncode == 4
+    out = next(env.logs.glob("archive-*.out.log")).read_text()
+    assert "aviso: planetas sin resolver en la evaluación de tensiones (código 4)" in out
+    assert "se reintentan" in out
+    assert "fallaron (código 3)" not in out
+    assert out.rstrip().endswith("código de salida: 4")
+
+
+def test_codigo_3_no_registra_el_aviso_del_codigo_4(tmp_path):
+    env = Env(tmp_path)
+
+    env.run(UV_EXIT_CODE="3")
+
+    out = next(env.logs.glob("archive-*.out.log")).read_text()
+    assert "planetas sin resolver" not in out
+
+
+def test_la_cabecera_documenta_el_codigo_4():
+    header = SCRIPT_PATH.read_text().split("set -euo pipefail", 1)[0]
+    assert "4" in header and "planetas sin resolver" in header
+
+
 @pytest.mark.parametrize("code", [0, 1, 2])
 def test_otros_codigos_no_registran_el_aviso_de_evaluacion(tmp_path, code):
     env = Env(tmp_path)
@@ -197,6 +247,19 @@ def test_lanza_uv_con_frozen_y_el_subcomando_y_reenvia_los_argumentos(tmp_path):
     assert env.uv_log.read_text().splitlines() == [
         "run --frozen nocturna archive-snapshot --full --dry-run"
     ]
+
+
+def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path):
+    """T99: el envoltorio sigue lanzando `caffeinate -is uv run --frozen nocturna
+    archive-snapshot ...`, y cada llamada a `uv` pasa por el caffeinate falso."""
+    env = Env(tmp_path)
+
+    assert env.run("--full").returncode == 0
+
+    caffeinate_calls = env.caffeinate_log.read_text().splitlines()
+    assert caffeinate_calls == ["-is uv run --frozen nocturna archive-snapshot --full"]
+    uv_calls = env.uv_log.read_text().splitlines()
+    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls]
 
 
 def test_levanta_postgres_con_el_compose_del_repositorio(tmp_path):

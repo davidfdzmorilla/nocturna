@@ -29,9 +29,9 @@ Flujo por par (`Item`, `Reading`):
    `CONSISTENT_WITH_LIMIT` o `INCOMPATIBLE_WITH_LIMIT`.
 10. Sin nada y con solución propia: `CLOSED_LOOP`; sin nada: `AWAITING_REFERENCE`.
 
-`resolve_planet` lanza `PlanetResolutionFailed` (D16, T89) ante una respuesta
-anómala del alias: el grupo no produce evaluación y se anota en
-`TensionReport.failures`; `None` significa solo "ausente del archivo".
+`resolve_planet` lanza `PlanetResolutionFailed` (D16, T89; T99) ante una respuesta
+anómala del alias o si el servicio de alias no responde: el grupo no produce
+evaluación y se anota en `TensionReport.failures`; `None` significa solo "ausente del archivo".
 """
 
 from collections.abc import Sequence

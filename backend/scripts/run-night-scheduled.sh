@@ -26,7 +26,9 @@
 # Códigos de salida:
 #     0-8   Los de `nocturna run-night`, propagados sin modificar. El
 #           `nocturna evaluate-tensions` posterior (T89) no los altera: su
-#           fallo solo queda en el log.
+#           fallo solo queda en el log. Su código 4 (T99) significa que
+#           guardó el resto pero quedaron planetas sin resolver (se
+#           reintentan); se registra como aviso, no como fallo.
 #     75    Precondiciones no listas (Docker o `nocturna-postgres` no
 #           alcanzaron el estado esperado dentro de NOCTURNA_WAIT_S), o no
 #           se pudo crear el centinela (permisos de NOCTURNA_LOG_DIR).
@@ -295,7 +297,9 @@ else
     caffeinate -is uv run --frozen nocturna evaluate-tensions >>"$out_log" 2>>"$err_log"
     evaluate_exit_code=$?
     set -e
-    if [[ "$evaluate_exit_code" -ne 0 ]]; then
+    if [[ "$evaluate_exit_code" -eq 4 ]]; then
+        echo "run-night-scheduled: evaluate-tensions terminó con planetas sin resolver (código 4); se reintentan la próxima vez; la noche conserva el código de run-night ($exit_code)." >>"$err_log"
+    elif [[ "$evaluate_exit_code" -ne 0 ]]; then
         echo "run-night-scheduled: evaluate-tensions falló (código $evaluate_exit_code); la noche conserva el código de run-night ($exit_code)." >>"$err_log"
     fi
 fi

@@ -19,11 +19,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+import sqlalchemy as sa
 from factories import make_item, make_reading, seed_archive_snapshot
 from helpers.archive import alias_handler, load_t71c_measurements, v1298_archive_solutions
 
 from nocturna import cli
 from nocturna.cli import main
+from nocturna.infrastructure.db.models import TensionEvaluationRow
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
@@ -128,11 +130,13 @@ def test_dry_run_sin_lecturas_con_medidas_no_llama_al_archivo(
     assert requests == []
 
 
-def test_si_el_alias_del_archivo_falla_el_dry_run_imprime_error_por_stderr_y_devuelve_1(
+def test_si_el_alias_del_archivo_falla_el_dry_run_lista_el_fallo_por_planeta_y_devuelve_0(
     monkeypatch, db_session_factory, capsys
 ):
-    """Un planeta que el índice local no conoce obliga a consultar el alias;
-    si el archivo cae, el dry-run falla con 1 (sin escribir nada)."""
+    """T99 D1 a: un planeta que el índice local no conoce obliga a consultar el
+    alias; si el archivo cae (503) es un fallo de resolución de ESE planeta, no
+    un aborto: el dry-run sigue, lo lista en la sección de tensiones, devuelve 0
+    y no escribe nada."""
     _seed_v1298_reading(db_session_factory)
     with unit_of_work(db_session_factory) as session:
         odd = make_item(external_id="2609.99999")
@@ -148,14 +152,15 @@ def test_si_el_alias_del_archivo_falla_el_dry_run_imprime_error_por_stderr_y_dev
     code = main(["run-night", "--dry-run", "--since", "2000-01-01"])
 
     captured = capsys.readouterr()
-    assert code == 1
-    # La ingesta y el plan ya se habian impreso antes del fallo.
-    assert "fetched=" in captured.out
+    assert code == 0
     assert "Plan de gasto de la noche:" in captured.out
-    assert "Tensiones frente al NASA Exoplanet Archive:" not in captured.out
-    assert "error consultando el NASA Exoplanet Archive" in captured.err
-    assert "503" in captured.err
+    assert "Tensiones frente al NASA Exoplanet Archive:" in captured.out
+    assert "FALLOS de resolución del planeta (sin evaluación, se reintentan): 1" in captured.out
+    assert "Planeta Raro b" in captured.out
+    assert "evaluaciones: 2" in captured.out  # V1298 b y e se calculan igualmente
     assert "Traceback" not in captured.err
+    with unit_of_work(db_session_factory) as session:
+        assert session.execute(sa.select(sa.func.count(TensionEvaluationRow.id))).scalar_one() == 0
 
 
 def test_dry_run_con_lecturas_y_sin_snapshot_local_falla_con_1_y_explica_el_motivo(
