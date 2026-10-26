@@ -39,10 +39,15 @@ fija `NOCTURNA_LOG_DIR` a una ruta real, y los que sí la fijan explícitamente
 de vuelta desde `<home>/nocturna-logs` salvo que se diga lo contrario.
 
 `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` sí son los reales del sistema
-(`date`, `mkdir`, `rm`, `sleep`, `caffeinate`): no son ni Claude, ni Docker,
+(`date`, `mkdir`, `rm`, `sleep`): no son ni Claude, ni Docker,
 ni `uv`, y el propio script los necesita para su lógica de centinela/plazo.
 Confirmado que ninguno de los tres binarios reales (`uv`, `claude`, `docker`)
 vive en esos cuatro directorios en esta máquina.
+
+`caffeinate` NO es el real (T99): el de /usr/bin queda huerfano en esta maquina
+cuando lo lanza el entorno de tests (414 en un dia), asi que `bin_dir` lleva un
+`caffeinate` falso que ejecuta la utilidad como hijo y registra sus argumentos
+en `CAFFEINATE_CALL_LOG_FILE`.
 
 Los tres binarios falsos:
 
@@ -120,6 +125,23 @@ fi
 exit 0
 """
 
+_FAKE_CAFFEINATE = """#!/usr/bin/env bash
+# Sustituto de /usr/bin/caffeinate (T99): el real queda huerfano (ppid 1, ~35% CPU)
+# en esta maquina al lanzarlo desde el entorno de tests. Como el real, ejecuta la
+# utilidad como proceso hijo (no exec) y devuelve su codigo de salida.
+if [ -n "${CAFFEINATE_CALL_LOG_FILE:-}" ]; then
+    printf '%s\\n' "$*" >> "$CAFFEINATE_CALL_LOG_FILE"
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+"$@"
+exit $?
+"""
+
 _FAKE_DOCKER = """#!/usr/bin/env bash
 if [ -n "${DOCKER_CALL_LOG_FILE:-}" ]; then
     printf '%s\\n' "$*" >> "$DOCKER_CALL_LOG_FILE"
@@ -155,6 +177,7 @@ def _install_fake_bins(
     bin_dir: Path, *, uv: bool = True, claude: bool = True, docker: bool = True
 ) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
+    _install_executable(bin_dir / "caffeinate", _FAKE_CAFFEINATE)
     if uv:
         _install_executable(bin_dir / "uv", _FAKE_UV)
     if claude:
@@ -211,6 +234,7 @@ def _base_env(
         "PATH": path,
         "NOCTURNA_PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
         "NOCTURNA_WAIT_S": wait_s,
+        "CAFFEINATE_CALL_LOG_FILE": str(bin_dir.parent / "caffeinate-calls.log"),
     }
     if extra:
         env.update(extra)
@@ -470,6 +494,61 @@ def test_fallo_de_evaluate_tensions_no_cambia_el_codigo_de_la_noche(tmp_path, ni
     assert "evaluate-tensions, código de salida: 3" in out_log.read_text()
 
 
+@pytest.mark.parametrize("night_exit_code", [0, 4, 7])
+def test_evaluate_tensions_con_codigo_4_es_aviso_propio_y_no_cambia_el_codigo_de_la_noche(
+    tmp_path, night_exit_code
+):
+    """T99 (D4): `evaluate-tensions` sale con 4 cuando guardó el resto pero hubo
+    planetas sin resolver. No es "falló": mensaje propio en el log de errores y
+    el código de la noche (`run-night`) se conserva, incluido un 4 propio de la noche."""
+    home, bin_dir = _setup_env(tmp_path)
+    env = _base_env(
+        home,
+        bin_dir,
+        extra={"UV_EXIT_CODE": str(night_exit_code), "UV_EVALUATE_EXIT_CODE": "4"},
+    )
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == night_exit_code
+    err = (_log_dir(home) / f"night-{_night_key()}.err.log").read_text()
+    assert "evaluate-tensions terminó con planetas sin resolver (código 4)" in err
+    assert "evaluate-tensions falló" not in err
+    out = (_log_dir(home) / f"night-{_night_key()}.out.log").read_text()
+    assert "evaluate-tensions, código de salida: 4" in out
+
+
+@pytest.mark.parametrize("evaluate_code", [1, 3])
+def test_evaluate_tensions_con_otros_codigos_distintos_de_0_y_4_siguen_siendo_fallo(
+    tmp_path, evaluate_code
+):
+    home, bin_dir = _setup_env(tmp_path)
+    env = _base_env(home, bin_dir, extra={"UV_EVALUATE_EXIT_CODE": str(evaluate_code)})
+
+    _run_wrapper([], env, cwd=tmp_path)
+
+    err = (_log_dir(home) / f"night-{_night_key()}.err.log").read_text()
+    assert f"evaluate-tensions falló (código {evaluate_code})" in err
+    assert "planetas sin resolver" not in err
+
+
+def test_evaluate_tensions_con_codigo_0_no_deja_aviso_en_el_log_de_errores(tmp_path):
+    home, bin_dir = _setup_env(tmp_path)
+    env = _base_env(home, bin_dir, extra={"UV_EVALUATE_EXIT_CODE": "0"})
+
+    _run_wrapper([], env, cwd=tmp_path)
+
+    err_log = _log_dir(home) / f"night-{_night_key()}.err.log"
+    text = err_log.read_text() if err_log.exists() else ""
+    assert "evaluate-tensions" not in text
+
+
+def test_la_cabecera_documenta_el_codigo_4_de_evaluate_tensions():
+    header = SCRIPT_PATH.read_text().split("set -euo pipefail", 1)[0]
+    assert "evaluate-tensions" in header and "4" in header
+    assert "planetas sin resolver" in header
+
+
 def test_no_se_evalua_si_run_night_no_llega_a_lanzarse(tmp_path):
     """Sin precondiciones (Docker caído) no se invoca ni `run-night` ni `evaluate-tensions`."""
     home, bin_dir = _setup_env(tmp_path)
@@ -516,6 +595,26 @@ def test_reenvia_otros_argumentos_y_evalua(tmp_path):
         "run --frozen nocturna run-night --foo",
         "run --frozen nocturna evaluate-tensions",
     ]
+
+
+def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path):
+    """T99: el envoltorio sigue lanzando `caffeinate -is uv run --frozen nocturna ...`
+    (comportamiento de producción), y cada llamada a `uv` pasa por el caffeinate
+    falso de `bin_dir` (el real dejaría un proceso huérfano)."""
+    home, bin_dir = _setup_env(tmp_path)
+    uv_call_log = tmp_path / "uv-calls.log"
+    env = _base_env(home, bin_dir, extra={"UV_CALL_LOG_FILE": str(uv_call_log)})
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    caffeinate_calls = (tmp_path / "caffeinate-calls.log").read_text().splitlines()
+    assert caffeinate_calls == [
+        "-is uv run --frozen nocturna run-night",
+        "-is uv run --frozen nocturna evaluate-tensions",
+    ]
+    uv_calls = uv_call_log.read_text().splitlines()
+    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls]
 
 
 def test_centinela_impide_el_segundo_lanzamiento(tmp_path):

@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import anyio
 import httpx
 import pytest
 import sqlalchemy as sa
@@ -157,9 +158,11 @@ def test_evaluate_tensions_dry_run_informa_pero_no_escribe(monkeypatch, db_sessi
     assert _count(db_session_factory, "tension_evaluation") == 0
 
 
-def test_evaluate_tensions_con_alias_caido_sale_con_1_y_no_escribe(
+def test_evaluate_tensions_con_alias_caido_es_fallo_parcial_y_sale_con_4(
     monkeypatch, db_session_factory, capsys
 ):
+    """T99 (D4): un 503 del alias es un fallo POR PLANETA, no un aborto: no hay
+    fila para ese planeta, se informa y el código es 4 (antes 1 con traza)."""
     seed_archive_snapshot(db_session_factory, v1298_archive_solutions())
     _seed_reading(db_session_factory, planet_name="Planeta Raro b")
     _serve(monkeypatch, lambda request: httpx.Response(503))
@@ -167,9 +170,10 @@ def test_evaluate_tensions_con_alias_caido_sale_con_1_y_no_escribe(
     code = cli.main(["evaluate-tensions"])
 
     captured = capsys.readouterr()
-    assert code == 1
-    assert "evaluate-tensions falló" in captured.err and "503" in captured.err
-    assert "Traceback" not in captured.err and captured.out == ""
+    assert code == 4
+    assert "FALLOS de resolución (sin fila, se reintentan): 1 grupos, 1 planetas" in captured.out
+    assert "Planeta Raro b (mass)" in captured.out and "503" in captured.out
+    assert "Traceback" not in captured.err
     assert _count(db_session_factory, "tension_evaluation") == 0
 
 
@@ -391,3 +395,197 @@ def test_awaiting_con_resultado_informado_es_idempotente_tras_el_round_trip_json
     assert "sin cambios: 1" in out and "reevaluadas: 0" in out
     ((again_id, _, _, _),) = _evaluation_rows(db_session_factory)
     assert again_id == first_id
+
+
+# --- T99: el alias que no responde aísla al planeta, no a la pasada -----------
+
+HANG_PLANET = "TOI-210 b"
+FAILURES_LINE = "FALLOS de resolución (sin fila, se reintentan): 1 grupos, 1 planetas"
+
+
+def _fast_alias_timeout(monkeypatch: pytest.MonkeyPatch, seconds: float = 0.2) -> None:
+    """Reduce `sources.exoplanet_archive.request_timeout_s` (sin tocar el .toml)."""
+    real = cli.load_pipeline_config
+
+    def _patched(*args: object, **kwargs: object):
+        config = real(*args, **kwargs)
+        archive = config.sources.exoplanet_archive.model_copy(update={"request_timeout_s": seconds})
+        sources = config.sources.model_copy(update={"exoplanet_archive": archive})
+        return config.model_copy(update={"sources": sources})
+
+    monkeypatch.setattr(cli, "load_pipeline_config", _patched)
+
+
+def _hanging_alias(inner: Callable[[httpx.Request], httpx.Response] | None = None):
+    """Handler asíncrono: el alias de TOI-210 b no contesta nunca; el resto, normal."""
+    normal = inner or alias_handler()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "aliaslookup" in request.url.path and request.url.params["objname"] == HANG_PLANET:
+            await anyio.sleep(30)
+        return normal(request)
+
+    return handler
+
+
+def _seed_with_hanging_planet(factory) -> None:
+    """V1298 Tau b y e (en el índice local) + TOI-210 b (fuera: pide el alias)."""
+    measurements = load_t71c_measurements(MEASURES)
+    extra = dataclasses.replace(measurements[0], planet_name=HANG_PLANET)
+    with unit_of_work(factory) as session:
+        item = make_item(external_id=PAPER)
+        SqlAlchemyItemRepository(session).add_many([item])
+        session.flush()
+        SqlAlchemyReadingRepository(session).add(
+            make_reading(item.id, measurements=(*measurements, extra))
+        )
+
+
+def test_evaluate_tensions_con_alias_colgado_guarda_el_resto_y_sale_con_4(
+    monkeypatch, db_session_factory, capsys
+):
+    """La tarea T99: el alias de un planeta agota `request_timeout_s`; antes
+    abortaba la pasada entera (salida 1, nada escrito)."""
+    seed_archive_snapshot(db_session_factory, v1298_archive_solutions())
+    _seed_with_hanging_planet(db_session_factory)
+    _fast_alias_timeout(monkeypatch)
+    _serve(monkeypatch, _hanging_alias())
+
+    code = cli.main(["evaluate-tensions"])
+
+    captured = capsys.readouterr()
+    assert code == 4
+    assert _statuses(db_session_factory) == {
+        "V1298 Tau b": "evaluated",
+        "V1298 Tau e": "evaluated",
+    }
+    assert "creadas: 2" in captured.out
+    assert FAILURES_LINE in captured.out
+    assert f"{HANG_PLANET} (mass)" in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_evaluate_tensions_con_alias_colgado_se_reintenta_y_sale_con_0_al_volver(
+    monkeypatch, db_session_factory, capsys
+):
+    seed_archive_snapshot(db_session_factory, v1298_archive_solutions())
+    _seed_with_hanging_planet(db_session_factory)
+    _fast_alias_timeout(monkeypatch)
+    _serve(monkeypatch, _hanging_alias())
+    assert cli.main(["evaluate-tensions"]) == 4
+    capsys.readouterr()
+
+    _serve(
+        monkeypatch, alias_handler(alias_body='{"manifest": {"lookup_status": "System Not Found"}}')
+    )
+    code = cli.main(["evaluate-tensions"])
+
+    out = capsys.readouterr().out
+    assert code == 0 and "FALLOS" not in out
+    assert _statuses(db_session_factory)[HANG_PLANET] == "awaiting_reference"
+    assert _count(db_session_factory, "tension_evaluation") == 3
+
+
+def test_evaluate_tensions_dry_run_con_alias_colgado_sale_con_4_y_no_escribe(
+    monkeypatch, db_session_factory, capsys
+):
+    seed_archive_snapshot(db_session_factory, v1298_archive_solutions())
+    _seed_with_hanging_planet(db_session_factory)
+    _fast_alias_timeout(monkeypatch)
+    _serve(monkeypatch, _hanging_alias())
+
+    code = cli.main(["evaluate-tensions", "--dry-run"])
+
+    out = capsys.readouterr().out
+    assert code == 4
+    assert "dry-run: no se escribió nada" in out and "creadas: 2" in out
+    assert FAILURES_LINE in out
+    assert _count(db_session_factory, "tension_evaluation") == 0
+
+
+def test_evaluate_tensions_sin_fallos_sigue_saliendo_con_0(monkeypatch, db_session_factory):
+    seed_archive_snapshot(db_session_factory, v1298_archive_solutions())
+    _seed_reading(db_session_factory)
+    _serve(monkeypatch, alias_handler())
+
+    assert cli.main(["evaluate-tensions"]) == 0
+
+
+def test_evaluate_tensions_con_indice_vacio_sigue_abortando_con_1_aunque_haya_alias(
+    monkeypatch, db_session_factory, capsys
+):
+    """El índice local vacío no es un fallo por planeta: aborta (exit 1) sin
+    pedir el alias y sin escribir."""
+    _seed_with_hanging_planet(db_session_factory)
+    requests = _serve(monkeypatch, alias_handler())
+
+    code = cli.main(["evaluate-tensions"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "evaluate-tensions falló" in captured.err and "vacío" in captured.err
+    assert "FALLOS" not in captured.out
+    assert requests == []
+    assert _count(db_session_factory, "tension_evaluation") == 0
+
+
+def _snapshot_and_hanging_alias():
+    snapshot = snapshot_handler()
+    alias = _hanging_alias()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "aliaslookup" in request.url.path:
+            return await alias(request)
+        return snapshot(request)
+
+    return handler
+
+
+def test_archive_snapshot_con_alias_colgado_guarda_todo_y_sale_con_4(
+    monkeypatch, db_session_factory, capsys
+):
+    """D6: snapshot + evaluación del resto + tensiones entre soluciones guardados;
+    el planeta sin resolver solo cambia el código a 4."""
+    _seed_with_hanging_planet(db_session_factory)
+    _fast_alias_timeout(monkeypatch)
+    _serve(monkeypatch, _snapshot_and_hanging_alias())
+
+    code = cli.main(["archive-snapshot"])
+
+    captured = capsys.readouterr()
+    assert code == 4
+    assert _count(db_session_factory, "archive_snapshot") == 1
+    assert _statuses(db_session_factory) == {
+        "V1298 Tau b": "evaluated",
+        "V1298 Tau e": "evaluated",
+    }
+    assert FAILURES_LINE in captured.out
+    # La pasada de tensiones entre soluciones corrió (su informe está en stdout).
+    assert "Tensiones entre soluciones del NASA Exoplanet Archive" in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_archive_snapshot_el_3_prevalece_sobre_el_4(monkeypatch, db_session_factory, capsys):
+    """Fallos parciales (4) y, además, excepción en tensiones entre soluciones (3)."""
+    _seed_with_hanging_planet(db_session_factory)
+    _fast_alias_timeout(monkeypatch)
+    _serve(monkeypatch, _snapshot_and_hanging_alias())
+
+    def _boom(*args: object, **kwargs: object):
+        raise RuntimeError("tensiones entre soluciones caídas")
+
+    monkeypatch.setattr(cli, "compute_solution_tensions_from_config", _boom)
+
+    code = cli.main(["archive-snapshot"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert "tensiones entre soluciones fallaron" in captured.err
+    assert _count(db_session_factory, "archive_snapshot") == 1
+
+
+def test_archive_snapshot_sin_fallos_sale_con_0(monkeypatch, db_session_factory):
+    _seed_reading(db_session_factory)
+    _serve(monkeypatch, snapshot_handler())
+
+    assert cli.main(["archive-snapshot"]) == 0

@@ -12,6 +12,7 @@ import dataclasses
 from datetime import UTC, datetime
 from pathlib import Path
 
+import anyio
 import httpx
 import pytest
 import sqlalchemy as sa
@@ -254,5 +255,53 @@ def test_la_seccion_de_tensiones_muestra_los_fallos_de_resolucion_del_planeta(
     # TOI-6981 b sigue pendiente y se vuelve a resolver: también falla esta vez.
     assert "Raro-1 b (radius)" in out and "TOI-6981 b (radius)" in out
     assert "estado guardado (terminales, no recalculado)=1" in out
+    assert MARKER in out
+    assert _snapshot(db_session_factory) == before
+
+
+def _route_hanging_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El feed OAI responde; el alias del archivo no contesta nunca."""
+    oai = OAI_FIXTURE.read_bytes()
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == ARCHIVE_HOST:
+            assert "aliaslookup" in request.url.path, f"petición inesperada: {request.url}"
+            await anyio.sleep(30)
+        return httpx.Response(200, content=oai)
+
+    real_async_client = httpx.AsyncClient
+
+    def _fake(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = httpx.MockTransport(handle)
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _fake)
+
+    real_config = cli.load_pipeline_config
+
+    def _fast(*args: object, **kwargs: object):
+        config = real_config(*args, **kwargs)
+        archive = config.sources.exoplanet_archive.model_copy(update={"request_timeout_s": 0.2})
+        sources = config.sources.model_copy(update={"exoplanet_archive": archive})
+        return config.model_copy(update={"sources": sources})
+
+    monkeypatch.setattr(cli, "load_pipeline_config", _fast)
+
+
+def test_dry_run_con_alias_colgado_sale_con_0_lista_el_fallo_y_no_escribe(
+    monkeypatch, db_session_factory, capsys
+):
+    """T99: el alias que no contesta (timeout) ya no tumba el ensayo; la sección
+    de tensiones lo lista como fallo de resolución y el código sigue siendo 0."""
+    _seed(db_session_factory)
+    before = _snapshot(db_session_factory)
+    _route_hanging_alias(monkeypatch)
+
+    code = main(ARGS)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "FALLOS de resolución del planeta (sin evaluación, se reintentan): 1" in out
+    assert "TOI-6981 b (radius)" in out
     assert MARKER in out
     assert _snapshot(db_session_factory) == before

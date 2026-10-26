@@ -19,6 +19,7 @@ transaccional del llamador), no llama a Claude y no captura excepciones del
 catálogo.
 """
 
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
@@ -35,6 +36,8 @@ from nocturna.domain.repositories import (
     TensionEvaluationRepository,
 )
 from nocturna.domain.tension import EvaluationStatus, TensionEvaluation
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +130,13 @@ class RecordTensionEvaluations:
                     resulting = candidate
             by_status[resulting.status] += 1
             final.append(resulting)
+        self._log_outcome(
+            created=created,
+            reevaluated=reevaluated,
+            unchanged=unchanged,
+            kept_terminal=kept_terminal,
+            failures=report.failures,
+        )
         return EvaluationRunReport(
             created=created,
             reevaluated=reevaluated,
@@ -136,4 +146,40 @@ class RecordTensionEvaluations:
             skipped=report.skipped,
             evaluations=tuple(final),
             failures=report.failures,
+        )
+
+    @staticmethod
+    def _log_outcome(
+        *,
+        created: int,
+        reevaluated: int,
+        unchanged: int,
+        kept_terminal: int,
+        failures: tuple[ResolutionFailure, ...],
+    ) -> None:
+        """T99: un WARNING por planeta distinto sin resolver y un resumen INFO."""
+        by_planet: dict[str, list[ResolutionFailure]] = {}
+        for failure in failures:
+            by_planet.setdefault(failure.planet_name, []).append(failure)
+        for planet_name, group in by_planet.items():
+            _logger.warning(
+                "tension.resolution_failed",
+                extra={
+                    "event": "tension.resolution_failed",
+                    "planet_name": planet_name,
+                    "parameters": sorted({f.parameter.value for f in group}),
+                    "reason": group[0].reason,
+                },
+            )
+        _logger.info(
+            "tension.evaluation_summary",
+            extra={
+                "event": "tension.evaluation_summary",
+                "evaluations_created": created,
+                "reevaluated": reevaluated,
+                "unchanged": unchanged,
+                "kept_terminal": kept_terminal,
+                "failed_groups": len(failures),
+                "failed_planets": len(by_planet),
+            },
         )

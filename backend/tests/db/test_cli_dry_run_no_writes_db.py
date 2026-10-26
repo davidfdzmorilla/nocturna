@@ -284,11 +284,12 @@ def test_el_plan_cuenta_los_que_caducarian_sin_caducar_nada(
     assert list(statuses) == ["new"]
 
 
-def test_si_el_alias_del_archivo_cae_devuelve_1_y_la_base_queda_intacta(
+def test_si_el_alias_del_archivo_cae_el_dry_run_lista_el_fallo_devuelve_0_y_la_base_queda_intacta(
     monkeypatch, db_session_factory, capsys
 ):
     """T88: soluciones e índice salen de la base; el archivo solo se consulta
-    para el alias de un planeta que el índice local no conoce."""
+    para el alias de un planeta que el índice local no conoce. T99 D1 a: si cae
+    es un fallo de resolución de ese planeta, no un aborto: sale 0 y lo lista."""
     _seed_base(db_session_factory)
     with unit_of_work(db_session_factory) as session:
         odd = make_item(external_id="2609.99999", status=ItemStatus.READ)
@@ -305,9 +306,11 @@ def test_si_el_alias_del_archivo_cae_devuelve_1_y_la_base_queda_intacta(
     code = main(ARGS)
 
     captured = capsys.readouterr()
-    assert code == 1
-    assert "error consultando el NASA Exoplanet Archive" in captured.err
-    assert MARKER not in captured.out
+    assert code == 0
+    assert "FALLOS de resolución del planeta (sin evaluación, se reintentan): 1" in captured.out
+    assert "Planeta Raro b" in captured.out
+    assert MARKER in captured.out
+    assert "Traceback" not in captured.err
     assert _snapshot(db_session_factory) == before
 
 

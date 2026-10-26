@@ -672,7 +672,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Calcula la tensión de las medidas del Reader frente al snapshot local del NASA "
             "Exoplanet Archive y guarda una evaluación por (lectura, planeta, parámetro). "
             "Reevalúa las que esperan referencia; no toca las terminales. No usa Claude ni "
-            "gasta tokens. Código 1 si el archivo (alias) no está disponible."
+            "gasta tokens. Código 4 si algún planeta quedó sin resolver; 1 si aborta."
         ),
     )
     evaluate_tensions.add_argument(
@@ -1203,8 +1203,10 @@ def _format_evaluation_report(report: EvaluationRunReport, *, dry_run: bool) -> 
         ),
     ]
     if report.failures:
+        planets = len({f.planet_name for f in report.failures})
         lines.append(
-            f"  FALLOS de resolución del planeta (sin fila, se reintentan): {len(report.failures)}"
+            "  FALLOS de resolución (sin fila, se reintentan): "
+            f"{len(report.failures)} grupos, {planets} planetas"
         )
         lines.extend(
             f"    {f.planet_name} ({f.parameter.value}): {f.reason}" for f in report.failures
@@ -1231,10 +1233,10 @@ async def _record_tension_evaluations(
 
 
 def _evaluate_tensions(args: argparse.Namespace) -> int:
-    """`evaluate-tensions`: `0` ok; `1` archivo/alias no disponible o violación
-    de invariante (no se persiste nada), o algún planeta sin resolver (D16: el resto
-    sí se guardó); `2` argumentos (argparse). Sin LLM: no
-    importa `claude_agent_sdk`."""
+    """`evaluate-tensions`: `0` ok; `1` aborto (índice local vacío o violación
+    de invariante; no se persiste nada); `2` argumentos (argparse); `4` algún
+    planeta sin resolver (D16, T99: el resto sí se guardó; también con
+    `--dry-run`). Sin LLM: no importa `claude_agent_sdk`."""
     if not args.dry_run:
         configure_json_logging()
     settings = Settings()
@@ -1254,12 +1256,14 @@ def _evaluate_tensions(args: argparse.Namespace) -> int:
         engine.dispose()
     print(_format_evaluation_report(report, dry_run=args.dry_run))
     # D16: fallos de resolución (sin fila, se reintentan); el resto sí se guardó.
-    return 1 if report.failures else 0
+    return _EXIT_PARTIAL_EVALUATION if report.failures else 0
 
 
 #: Código de salida de `archive-snapshot` cuando el snapshot se guardó pero la
 #: evaluación de tensiones posterior falló (T88). El snapshot NO se deshace.
 _EXIT_EVALUATION_FAILED = 3
+#: Todo guardado, pero hubo planetas sin resolver en la evaluación (T99).
+_EXIT_PARTIAL_EVALUATION = 4
 
 #: Código de salida de `run-item` (con y sin `--reader v3 --force`) cuando el
 #: ítem no es de arXiv (T85): los ítems del archivo no los lee ningún agente.
@@ -1382,12 +1386,11 @@ def _solution_tensions(args: argparse.Namespace) -> int:
 def _archive_snapshot(args: argparse.Namespace) -> int:
     """`archive-snapshot`: `0` ok; `1` el snapshot falló (nada confirmado);
     `3` el snapshot está guardado pero falló la evaluación de tensiones (T88)
-    o el cálculo de tensiones entre soluciones (T85), o hubo fallos parciales
-    en la evaluación."""
-    """`archive-snapshot`: `0` ok; `1` archivo no disponible, dato inválido o
-    guarda de cambios masivos (no se persiste nada); `2` argumentos (argparse);
-    `3` snapshot guardado pero la evaluación de tensiones posterior falló (el
-    snapshot queda guardado). Sin LLM: no importa `claude_agent_sdk`."""
+    o el cálculo de tensiones entre soluciones (T85); `4` todo guardado pero
+    hubo planetas sin resolver (T99; el 3 prevalece). `1` también si el archivo
+    no está disponible, dato inválido o guarda de cambios masivos (no se
+    persiste nada); `2` argumentos (argparse). Sin LLM: no importa
+    `claude_agent_sdk`."""
     if not args.dry_run:
         configure_json_logging()
     settings = Settings()
@@ -1424,7 +1427,7 @@ def _archive_snapshot(args: argparse.Namespace) -> int:
     else:
         print(_format_evaluation_report(evaluation, dry_run=False))
         if evaluation.failures:
-            exit_code = _EXIT_EVALUATION_FAILED
+            exit_code = _EXIT_PARTIAL_EVALUATION
 
     # T85: tensiones entre soluciones, en una tercera unidad de trabajo (no
     # depende de la evaluación; solo lee el snapshot ya confirmado). Un fallo
@@ -1580,7 +1583,8 @@ def _print_tension_section(
 ) -> None:
     """Calcula e imprime las tensiones de las lecturas con medidas, leyendo el
     snapshot del archivo de la base (solo lee; el alias puede requerir red).
-    Lanza `ExoplanetArchiveUnavailable` si el alias o el índice local fallan."""
+    Lanza `ExoplanetArchiveUnavailable` si el índice local está vacío; un
+    alias que no responde es un fallo de resolución de ese planeta (T99)."""
     evaluation, requests_made = asyncio.run(_compute_tensions(session, config, clock))
     report = TensionReport(evaluations=evaluation.evaluations, skipped=evaluation.skipped)
     print(
