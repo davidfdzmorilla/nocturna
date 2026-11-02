@@ -33,7 +33,10 @@ describe("página /archivo", () => {
     });
     const html = await render();
     expect(html).toContain("Resumen semanal del NASA Exoplanet Archive");
-    expect(html).toContain("esta sección no contiene texto generado por IA.");
+    expect(html).toContain(
+      "Datos del NASA Exoplanet Archive presentados con plantillas fijas. Algunas semanas incluyen un resumen redactado por IA, señalado como tal.",
+    );
+    expect(html).not.toContain("esta sección no contiene texto generado por IA.");
     expect(html).toContain('href="/archivo/2026-W41"');
     expect(html).toContain("Semana 41 de 2026 (5–11 de octubre)");
     expect(html).toContain(

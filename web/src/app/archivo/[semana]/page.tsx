@@ -3,13 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchArchiveWeek } from "@/lib/api/client";
 import {
-  AI_FREE_NOTE,
+  digestNote,
   SECTION_ORDER,
   entriesByKind,
   parseWeekParam,
   weekLabel,
 } from "@/lib/archiveDigest";
 import { archiveWeekState } from "@/lib/archiveRoute";
+import { DigestWriterText } from "@/components/DigestWriterText";
 import { DigestSection } from "@/components/DigestSection";
 import { Notice } from "@/components/Notice";
 
@@ -59,7 +60,12 @@ export default async function ArchiveWeekPage({ params }: Props) {
       <h1 className="mt-2 text-2xl font-semibold text-text">
         {weekLabel(state.week)}
       </h1>
-      <p className="mt-2 text-sm text-text-muted">{AI_FREE_NOTE}</p>
+      {state.data.writer_text !== null && (
+        <DigestWriterText text={state.data.writer_text} />
+      )}
+      <p className="mt-2 text-sm text-text-muted">
+        {digestNote(state.data.writer_text)}
+      </p>
       <p className="mt-2 text-sm text-text">{INTRO}</p>
       {SECTION_ORDER.map((kind) => (
         <DigestSection

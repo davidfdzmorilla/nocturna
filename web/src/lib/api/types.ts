@@ -177,10 +177,16 @@ export type DigestEntry = {
   parameter_changes: ParameterChange[];
 };
 
+export type DigestText = {
+  title: string;
+  summary: string;
+};
+
 export type WeeklyDigest = {
   week: string;
   snapshots: number;
   entries: DigestEntry[];
+  writer_text: DigestText | null;
 };
 
 export type DigestWeek = {
