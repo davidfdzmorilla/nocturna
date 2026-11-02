@@ -36,7 +36,7 @@ from nocturna.domain.archive import (
     SnapshotDiff,
     SnapshotKind,
 )
-from nocturna.domain.archive_digest import DefaultTransition, iso_week_of
+from nocturna.domain.archive_digest import DefaultTransition, DigestText, iso_week_of
 from nocturna.domain.entities import (
     ITEM_SOURCE_ARXIV,
     AgentCall,
@@ -63,6 +63,8 @@ from nocturna.infrastructure.db.mappers import (
     archive_snapshot_to_row,
     archive_solution_from_row,
     archive_solution_to_values,
+    digest_text_from_row,
+    digest_text_to_row,
     finding_from_row,
     finding_to_row,
     item_from_row,
@@ -78,6 +80,7 @@ from nocturna.infrastructure.db.mappers import (
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
     ArchiveDefaultChangeRow,
+    ArchiveDigestTextRow,
     ArchiveSnapshotRow,
     ArchiveSolutionRow,
     FindingRow,
@@ -833,4 +836,27 @@ class SqlAlchemySolutionTensionRepository:
         if row is None:
             raise LookupError(f"no existe SolutionTension con id={tension_id}")
         row.item_id = item_id
+        self._session.flush()
+
+
+class SqlAlchemyArchiveDigestTextRepository:
+    """Persistencia de `DigestText` (T84.r). Cumple
+    `domain.repositories.ArchiveDigestTextRepository`; no confirma ni deshace."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, week: str) -> DigestText | None:
+        row = self._session.get(ArchiveDigestTextRow, week)
+        return None if row is None else digest_text_from_row(row)
+
+    def all(self) -> dict[str, DigestText]:
+        rows = self._session.execute(select(ArchiveDigestTextRow)).scalars()
+        return {r.week: digest_text_from_row(r) for r in rows}
+
+    def add(self, text: DigestText) -> None:
+        # Sin `relationship()` el ORM no ordena por claves ajenas: vaciar antes
+        # lo pendiente (el `Run` de la FK) para que exista cuando se inserte.
+        self._session.flush()
+        self._session.add(digest_text_to_row(text))
         self._session.flush()

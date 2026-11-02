@@ -485,6 +485,33 @@ class SolutionTensionsConfig(BaseModel):
         raise ValueError("'since' debe ser una fecha 'YYYY-MM-DD'")
 
 
+class ArchiveDigestConfig(BaseModel):
+    """Redactor del resumen semanal del archivo (T84.r, `[archive_digest]`).
+    Sin defaults en código.
+
+    `writer_enabled`: interruptor; con `false` no se carga el prompt, no se
+    autoriza gasto y la noche es la de antes. `since_week`: primera semana ISO
+    (`YYYY-Www`, existente) que se redacta.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    writer_enabled: StrictBool
+    since_week: str
+
+    @field_validator("since_week")
+    @classmethod
+    def _since_week_is_iso_week(cls, value: str) -> str:
+        match = re.fullmatch(r"([0-9]{4})-W([0-9]{2})", value)
+        if match is None:
+            raise ValueError("'since_week' debe ser una semana ISO 'YYYY-Www'")
+        try:
+            date.fromisocalendar(int(match.group(1)), int(match.group(2)), 1)
+        except ValueError as exc:
+            raise ValueError(f"'since_week' no es una semana ISO válida: {exc}") from exc
+        return value
+
+
 class PipelineConfig(BaseModel):
     """Configuración completa del pipeline, agregando todas las secciones."""
 
@@ -501,6 +528,7 @@ class PipelineConfig(BaseModel):
     exoplanet_filter: ExoplanetFilterConfig
     measurement_findings: MeasurementFindingsConfig
     solution_tensions: SolutionTensionsConfig
+    archive_digest: ArchiveDigestConfig
 
     @model_validator(mode="after")
     def _extreme_sigma_above_threshold(self) -> "PipelineConfig":

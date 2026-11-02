@@ -1,6 +1,6 @@
 -- night_report.sql — Informe de la mañana (T60).
 --
--- Diez consultas (Q1-Q10, más Q9b y Q9c) de solo lectura sobre la última noche ejecutada, pensadas
+-- Trece consultas (Q1-Q10, más Q9b, Q9c y Q9d) de solo lectura sobre la última noche ejecutada, pensadas
 -- para leerse con café en dos minutos en vez de reconstruirse a mano cada
 -- mañana durante las catorce noches de calibración. Uso:
 --
@@ -317,6 +317,20 @@ SELECT t.solution_tension->>'planet_name' AS planeta,
        CASE WHEN t.rn = 1 THEN w.tokens END AS tokens_writer_del_item
 FROM t LEFT JOIN w ON w.item_id = t.item_id
 ORDER BY sigma DESC, planeta, parametro, t.id;
+
+\echo ''
+\echo '=== Q9d · Resúmenes semanales del archivo de la noche (redactor, T84.r) ==='
+-- Los textos de `archive_digest_text` escritos con el run_id de la noche: semana,
+-- estado (`failed` = dos salidas inválidas; no se reintenta), versión del prompt,
+-- título y longitud del resumen. El gasto de estas llamadas (sin item_id) sale en
+-- Q9b, bajo `writer-digest-vN`.
+WITH n AS (
+    SELECT * FROM runs WHERE notes IS DISTINCT FROM 'reread' ORDER BY started_at DESC LIMIT 1
+)
+SELECT d.week AS semana, d.status AS estado, d.prompt_version, d.title,
+       LENGTH(d.summary) AS caracteres_resumen
+FROM archive_digest_text d JOIN n ON d.run_id = n.id
+ORDER BY d.week DESC;
 
 \echo ''
 \echo '=== Q10 · Estimación del Editor vs gasto real (T98) ==='

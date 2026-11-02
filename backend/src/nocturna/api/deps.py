@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from nocturna.infrastructure.config import Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyArchiveDigestReader,
+    SqlAlchemyArchiveDigestTextRepository,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
 )
@@ -98,6 +99,12 @@ def get_items_repository(session: _SessionDep) -> SqlAlchemyItemRepository:
 
 def get_archive_digest_reader(session: _SessionDep) -> SqlAlchemyArchiveDigestReader:
     return SqlAlchemyArchiveDigestReader(session)
+
+
+def get_archive_digest_text_repository(
+    session: _SessionDep,
+) -> SqlAlchemyArchiveDigestTextRepository:
+    return SqlAlchemyArchiveDigestTextRepository(session)
 
 
 @lru_cache

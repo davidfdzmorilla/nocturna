@@ -64,6 +64,7 @@ def test_dry_run_lista_la_tension_del_archivo_sin_escribir_ni_gastar(
     out = capsys.readouterr().out
     assert code == 0
     section = out.split("Tensiones del archivo pendientes del redactor", 1)[1]
+    section = section.split("Resumen semanal", 1)[0]  # la sección siguiente es la del resumen
     assert "HD 202206 c (mass)" in section
     assert ("desactivado (writer_enabled = false)" in section) is (not enabled)
     assert _snapshot(db_session_factory) == before

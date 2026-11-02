@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from nocturna.infrastructure.db.models import Base
 
 _REVISION = "b6d2f8a4c917"
-_HEAD = "e3a7c5b9d214"  # el head posterior; el downgrade es una sola transaccion
+_HEAD = "a4d9e1b7c352"  # el head posterior; el downgrade es una sola transaccion
 _REVISION_BEFORE = "d8b1e4f7a203"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _KEY_A = "a" * 64

@@ -546,3 +546,30 @@ class SolutionTensionRow(Base):
             unique=True,
         ),
     )
+
+
+class ArchiveDigestTextRow(Base):
+    """Texto del redactor del resumen semanal del archivo (T84.r), una fila por semana."""
+
+    __tablename__ = "archive_digest_text"
+
+    week: Mapped[str] = mapped_column(sa.String(10), primary_key=True)
+    status: Mapped[str] = mapped_column(sa.String(16), nullable=False)
+    title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    input_sha256: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(sa.String(50), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), sa.ForeignKey("runs.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("week ~ '^[0-9]{4}-W[0-9]{2}$'", name="week_format"),
+        sa.CheckConstraint("status IN ('written', 'failed')", name="status"),
+        sa.CheckConstraint(
+            "(status = 'written' AND title IS NOT NULL AND summary IS NOT NULL) "
+            "OR (status = 'failed' AND title IS NULL AND summary IS NULL)",
+            name="text_by_status",
+        ),
+    )

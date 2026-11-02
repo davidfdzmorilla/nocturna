@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from nocturna.domain.archive import (
@@ -191,3 +192,73 @@ def week_bounds(week: str, tz: ZoneInfo) -> tuple[datetime, datetime]:
     start = datetime.combine(monday, time.min, tzinfo=tz)
     end = datetime.combine(monday + timedelta(days=7), time.min, tzinfo=tz)
     return start, end
+
+
+_DIGEST_WEEK_RE = re.compile(r"^[0-9]{4}-W[0-9]{2}$")
+
+
+class DigestTextStatus(StrEnum):
+    WRITTEN = "written"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class DigestText:
+    """Texto del redactor para una semana cerrada (T84.r); una fila por semana.
+
+    `written` lleva título y resumen; `failed` (dos salidas inválidas) ninguno.
+    `input_sha256` es el hash del bloque de entrada con el que se redactó.
+    """
+
+    week: str
+    status: DigestTextStatus
+    input_sha256: str
+    prompt_version: str
+    run_id: UUID
+    created_at: datetime
+    title: str | None = None
+    summary: str | None = None
+
+    def __post_init__(self) -> None:
+        if _DIGEST_WEEK_RE.fullmatch(self.week) is None:
+            raise InvariantViolation(f"semana inválida {self.week!r}: se esperaba YYYY-Www")
+        if self.status is DigestTextStatus.WRITTEN:
+            if not (self.title and self.title.strip() and self.summary and self.summary.strip()):
+                raise InvariantViolation("un texto written exige título y resumen no vacíos")
+        elif self.title is not None or self.summary is not None:
+            raise InvariantViolation("un texto failed no lleva título ni resumen")
+
+
+def is_week_closed(week: str, now: datetime, tz: ZoneInfo) -> bool:
+    """La semana ha terminado: `now` >= lunes siguiente 00:00 local (`ValueError` si inválida)."""
+    return now >= week_bounds(week, tz)[1]
+
+
+class DigestSkipReason(StrEnum):
+    BEFORE_SINCE = "before_since"
+    OPEN_WEEK = "open_week"
+    NO_TRANSITIONS = "no_transitions"
+    ALREADY_WRITTEN = "already_written"
+    WRITER_FAILED = "writer_failed"
+
+
+def digest_writer_skip_reason(
+    digest: WeeklyDigest,
+    *,
+    now: datetime,
+    tz: ZoneInfo,
+    since_week: str,
+    existing: DigestText | None,
+) -> DigestSkipReason | None:
+    """Por qué una semana no va al redactor; `None` si es elegible. Orden fijo."""
+    if digest.week < since_week:
+        return DigestSkipReason.BEFORE_SINCE
+    if not is_week_closed(digest.week, now, tz):
+        return DigestSkipReason.OPEN_WEEK
+    if not digest.entries:
+        return DigestSkipReason.NO_TRANSITIONS
+    if existing is not None:
+        if existing.status is DigestTextStatus.WRITTEN:
+            return DigestSkipReason.ALREADY_WRITTEN
+        return DigestSkipReason.WRITER_FAILED
+    return None

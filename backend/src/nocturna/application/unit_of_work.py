@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from nocturna.application.budget import BudgetGuard
 from nocturna.domain.repositories import (
     AgentCallRepository,
+    ArchiveDigestTextRepository,
     FindingRepository,
     ItemRepository,
     ReadingRepository,
@@ -77,6 +78,9 @@ class AgentWork:
     readings: ReadingRepository
     findings: FindingRepository
     agent_calls: AgentCallRepository
+    #: Textos del resumen semanal (T84.r): solo lo usa `WriteDigestText`; `None` en el
+    #: resto de las unidades de trabajo, que no lo necesitan.
+    digest_texts: ArchiveDigestTextRepository | None = None
 
 
 #: Fábrica de unidades de trabajo: cada llamada abre una transacción nueva

@@ -362,7 +362,8 @@ def test_weekly_digest_out_claves_exactas_en_cada_nivel() -> None:
         _digest_domain(), planet_url=lambda name: f"https://x.test/{name}"
     ).model_dump(mode="json")
 
-    assert set(out) == {"week", "snapshots", "entries"}
+    assert set(out) == {"week", "snapshots", "entries", "writer_text"}  # T84.r
+    assert out["writer_text"] is None
     changed, new, lost = out["entries"]
     entry_keys = {"kind", "pl_name", "planet_url", "detected_at", "old", "new", "parameter_changes"}
     for entry in (changed, new, lost):

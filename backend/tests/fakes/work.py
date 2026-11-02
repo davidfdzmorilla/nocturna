@@ -259,8 +259,12 @@ def make_work_factory(
     readings: InMemoryReadingRepository,
     agent_calls: InMemoryAgentCallRepository,
     findings: InMemoryFindingRepository | None = None,
+    digest_texts: object | None = None,
 ) -> AgentWorkFactory:
     """Construye el `AgentWorkFactory` en memoria que `ReadItem` espera.
+
+    `digest_texts` (T84.r): repositorio de textos del resumen semanal; solo se
+    reenvia a `AgentWork` si se pasa, para no tocar los tests previos.
 
     Cada llamada cede el mismo `AgentWork` (los mismos objetos en memoria,
     no copias por unidad de trabajo): ver el docstring del módulo.
@@ -274,6 +278,8 @@ def make_work_factory(
     """
     resolved_findings = findings if findings is not None else InMemoryFindingRepository()
 
+    extra: dict[str, object] = {} if digest_texts is None else {"digest_texts": digest_texts}
+
     @contextmanager
     def _work() -> Iterator[AgentWork]:
         yield AgentWork(
@@ -283,6 +289,7 @@ def make_work_factory(
             readings=readings,
             findings=resolved_findings,
             agent_calls=agent_calls,
+            **extra,  # type: ignore[arg-type]
         )
 
     return _work
