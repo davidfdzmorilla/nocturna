@@ -14,17 +14,19 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from nocturna.api.deps import (
     get_archive_digest_reader,
+    get_archive_digest_text_repository,
     get_digest_timezone,
     get_planet_overview_url,
 )
 from nocturna.api.schemas import DigestWeekOut, DigestWeeksResponse, WeeklyDigestOut
 from nocturna.application.use_cases.archive_digest import GetWeeklyDigest, ListDigestWeeks
 from nocturna.domain.archive_digest import TransitionKind
-from nocturna.domain.repositories import ArchiveDigestReader
+from nocturna.domain.repositories import ArchiveDigestReader, ArchiveDigestTextRepository
 
 router = APIRouter()
 
 _ReaderDep = Annotated[ArchiveDigestReader, Depends(get_archive_digest_reader)]
+_TextsDep = Annotated[ArchiveDigestTextRepository, Depends(get_archive_digest_text_repository)]
 _TzDep = Annotated[ZoneInfo, Depends(get_digest_timezone)]
 _UrlDep = Annotated[Callable[[str], str], Depends(get_planet_overview_url)]
 
@@ -48,13 +50,16 @@ def list_weeks(reader: _ReaderDep, tz: _TzDep) -> DigestWeeksResponse:
 
 
 @router.get("/archive/weeks/{week}", response_model=WeeklyDigestOut)
-def get_week(week: str, reader: _ReaderDep, tz: _TzDep, planet_url: _UrlDep) -> WeeklyDigestOut:
+def get_week(
+    week: str, reader: _ReaderDep, texts: _TextsDep, tz: _TzDep, planet_url: _UrlDep
+) -> WeeklyDigestOut:
     """Resumen de una semana ISO (`YYYY-Www`). `422` si el formato es inválido;
-    `404` si la semana no tiene ningún snapshot."""
+    `404` si la semana no tiene ningún snapshot. `writer_text` lleva el titular y el
+    resumen del redactor (T84.r) si existen y no es una fila fallida."""
     try:
         digest = GetWeeklyDigest(reader, tz)(week)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="invalid week, expected YYYY-Www") from exc
     if digest is None:
         raise HTTPException(status_code=404, detail="week not found")
-    return WeeklyDigestOut.from_domain(digest, planet_url=planet_url)
+    return WeeklyDigestOut.from_domain(digest, planet_url=planet_url, text=texts.get(week))

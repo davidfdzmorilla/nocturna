@@ -8,6 +8,7 @@ from datetime import UTC, datetime, time
 from uuid import UUID
 
 from fakes.clock import FakeClock
+from fakes.digest import FakeDigestReader, InMemoryArchiveDigestTextRepository
 from fakes.llm import FakeLLMProvider
 from fakes.solution_tensions import InMemorySolutionTensionRepository
 from fakes.tension_evaluations import InMemoryTensionEvaluationRepository
@@ -99,7 +100,14 @@ def valid_reading_json(**overrides: object) -> dict:
 
 
 class Environment:
-    def __init__(self, *, items: list[Item], policy: BudgetPolicy, now: datetime) -> None:
+    def __init__(
+        self,
+        *,
+        items: list[Item],
+        policy: BudgetPolicy,
+        now: datetime,
+        with_digest: bool = False,
+    ) -> None:
         self.run = Run(started_at=now, budget_tokens=policy.nightly_tokens)
         self.runs = InMemoryRunRepository(self.run)
         self.items = InMemoryItemRepository(*items)
@@ -108,6 +116,8 @@ class Environment:
         self.agent_calls = InMemoryAgentCallRepository()
         self.evaluations = InMemoryTensionEvaluationRepository()
         self.solution_tensions = InMemorySolutionTensionRepository()
+        self.digest_texts = InMemoryArchiveDigestTextRepository()
+        self.digest_reader = FakeDigestReader()
         self.clock = FakeClock(now)
         self.guard = BudgetGuard(
             run_id=self.run.id,
@@ -123,6 +133,8 @@ class Environment:
             readings=self.readings,
             findings=self.findings,
             agent_calls=self.agent_calls,
+            # T84.r: solo con `with_digest` el `AgentWork` lleva el repositorio de textos.
+            digest_texts=self.digest_texts if with_digest else None,
         )
 
 
@@ -244,6 +256,8 @@ def make_run_night(
     select_tensions: SelectTensions | None = None,
     select_solution_tensions: SelectSolutionTensions | None = None,
     write_solution_tensions: WriteSolutionTensions | None = None,
+    select_digest_weeks: object | None = None,
+    write_digest_text: object | None = None,
 ) -> RunNight:
     read_item = ReadItem(
         work=env.work,
@@ -289,7 +303,15 @@ def make_run_night(
     async def _ingest() -> IngestResult:
         return ingest_result
 
+    # T84.r: se reenvian solo si se pasan (los tests previos no los conocen).
+    digest_kwargs: dict[str, object] = {}
+    if select_digest_weeks is not None:
+        digest_kwargs["select_digest_weeks"] = select_digest_weeks
+    if write_digest_text is not None:
+        digest_kwargs["write_digest_text"] = write_digest_text
+
     return RunNight(
+        **digest_kwargs,  # type: ignore[arg-type]
         work=env.work,
         clock=env.clock,
         ingest=_ingest,

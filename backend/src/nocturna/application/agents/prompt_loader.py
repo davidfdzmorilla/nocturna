@@ -42,6 +42,11 @@ WRITER_PROMPT_VERSION: str = "writer-v1"
 #: reales); `writer-archive-v1.md` queda congelado porque hay hallazgos que lo citan.
 WRITER_ARCHIVE_PROMPT_VERSION: str = "writer-archive-v2"
 
+#: Versión a mano del prompt del redactor del resumen semanal del archivo
+#: (T84.r, `writer-digest-v1.md`): un titular y un resumen por semana cerrada.
+#: Fichero propio; los de las tensiones no cambian.
+WRITER_DIGEST_PROMPT_VERSION: str = "writer-digest-v1"
+
 #: Versión a mano del prompt del Editor, mismo criterio que
 #: `READER_PROMPT_VERSION`/`POPULARIZER_PROMPT_VERSION`: se sube a mano al
 #: editar el prompt. `editor-v1` (T43, `editor.md`, que se conserva) decidía

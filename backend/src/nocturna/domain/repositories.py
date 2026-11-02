@@ -15,7 +15,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from nocturna.domain.archive import ArchiveSnapshot, ArchiveSolution, SnapshotDiff
-from nocturna.domain.archive_digest import DefaultTransition
+from nocturna.domain.archive_digest import DefaultTransition, DigestText
 from nocturna.domain.entities import (
     AgentCall,
     AgentCallStatus,
@@ -319,4 +319,20 @@ class SolutionTensionRepository(Protocol):
 
     def set_item(self, tension_id: UUID, item_id: UUID) -> None:
         """Enlaza la tensión con su `Item` del archivo (D12). `LookupError` si no existe."""
+        ...
+
+
+class ArchiveDigestTextRepository(Protocol):
+    """Persistencia de `DigestText` (T84.r). Una fila por semana ISO."""
+
+    def get(self, week: str) -> DigestText | None:
+        """El texto de la semana, o `None`."""
+        ...
+
+    def all(self) -> dict[str, DigestText]:
+        """Todos los textos por semana."""
+        ...
+
+    def add(self, text: DigestText) -> None:
+        """Inserta; la semana es clave primaria."""
         ...

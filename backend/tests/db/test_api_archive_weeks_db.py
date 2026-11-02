@@ -110,7 +110,8 @@ async def test_detalle_contenido_orden_y_unidades(client, db_session):
     response = await client.get(f"/archive/weeks/{_WEEK}")
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"week", "snapshots", "entries"}
+    assert set(body) == {"week", "snapshots", "entries", "writer_text"}  # T84.r
+    assert body["writer_text"] is None
     assert (body["week"], body["snapshots"]) == (_WEEK, 2)
     assert [(e["kind"], e["pl_name"]) for e in body["entries"]] == [
         ("changed", "A b"),

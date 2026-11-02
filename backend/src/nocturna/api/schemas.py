@@ -37,6 +37,8 @@ from pydantic import BaseModel, ConfigDict
 from nocturna.domain.archive import ArchiveParameterValue, ArchiveSolution, limit_of, parameter_unit
 from nocturna.domain.archive_digest import (
     DigestEntry,
+    DigestText,
+    DigestTextStatus,
     ParameterChange,
     TransitionKind,
     WeeklyDigest,
@@ -492,19 +494,44 @@ class DigestEntryOut(BaseModel):
         )
 
 
+class DigestTextOut(BaseModel):
+    """Texto del redactor de una semana (T84.r): lista blanca de dos campos, nunca
+    `prompt_version`, `run_id`, `input_sha256` ni el estado."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str
+    summary: str
+
+
 class WeeklyDigestOut(BaseModel):
-    """`GET /archive/weeks/{week}`: cambios de referencia de una semana ISO."""
+    """`GET /archive/weeks/{week}`: cambios de referencia de una semana ISO.
+
+    `writer_text` (T84.r) es `null` si la semana no tiene texto o su fila es `failed`."""
 
     model_config = ConfigDict(frozen=True)
 
     week: str
     snapshots: int
     entries: list[DigestEntryOut]
+    writer_text: DigestTextOut | None = None
 
     @classmethod
     def from_domain(
-        cls, digest: WeeklyDigest, *, planet_url: Callable[[str], str]
+        cls,
+        digest: WeeklyDigest,
+        *,
+        planet_url: Callable[[str], str],
+        text: DigestText | None = None,
     ) -> "WeeklyDigestOut":
+        writer_text = None
+        if (
+            text is not None
+            and text.status is DigestTextStatus.WRITTEN
+            and text.title is not None
+            and text.summary is not None
+        ):
+            writer_text = DigestTextOut(title=text.title, summary=text.summary)
         return cls(
             week=digest.week,
             snapshots=digest.snapshots,
@@ -512,6 +539,7 @@ class WeeklyDigestOut(BaseModel):
                 DigestEntryOut.from_domain(e, planet_url=planet_url(e.pl_name))
                 for e in digest.entries
             ],
+            writer_text=writer_text,
         )
 
 

@@ -221,6 +221,11 @@ from nocturna.application.use_cases.generate_measurement_findings import (
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.application.use_cases.popularize_reading import PopularizeOutcome, PopularizeReading
 from nocturna.application.use_cases.read_item import ReadItem, ReadOutcome
+from nocturna.application.use_cases.write_archive_digest import (
+    DigestCandidate,
+    SelectDigestWeeks,
+    WriteDigestText,
+)
 from nocturna.application.use_cases.write_solution_tensions import (
     SelectSolutionTensions,
     WriteSolutionTensions,
@@ -228,7 +233,6 @@ from nocturna.application.use_cases.write_solution_tensions import (
 from nocturna.application.use_cases.write_tensions import (
     SelectTensions,
     WriteOutcome,
-    WriteTensionResult,
     WriteTensions,
 )
 from nocturna.domain.clock import Clock
@@ -271,6 +275,17 @@ class RunNightResult:
 class _HasItem(Protocol):
     @property
     def item(self) -> Item: ...
+
+
+class _WriteResult(Protocol):
+    """Lo que el bucle del redactor lee del resultado de cada candidato."""
+
+    @property
+    def outcome(self) -> WriteOutcome: ...
+    @property
+    def attempts(self) -> int: ...
+    @property
+    def tokens_spent(self) -> int: ...
 
 
 @dataclass(slots=True)
@@ -326,6 +341,8 @@ class RunNight:
         write_tensions: WriteTensions,
         select_solution_tensions: SelectSolutionTensions | None = None,
         write_solution_tensions: WriteSolutionTensions | None = None,
+        select_digest_weeks: SelectDigestWeeks | None = None,
+        write_digest_text: WriteDigestText | None = None,
         run_id: UUID,
         max_items: int,
         max_unread_age_days: int,
@@ -348,6 +365,10 @@ class RunNight:
             )
         self._select_solution_tensions = select_solution_tensions
         self._write_solution_tensions = write_solution_tensions
+        if (select_digest_weeks is None) != (write_digest_text is None):
+            raise ValueError("select_digest_weeks y write_digest_text van los dos o ninguno")
+        self._select_digest_weeks = select_digest_weeks
+        self._write_digest_text = write_digest_text
         self._run_id = run_id
         self._max_items = max_items
         self._max_unread_age_days = max_unread_age_days
@@ -933,15 +954,27 @@ class RunNight:
         `writer_error` sin ninguna llamada del archivo y no afecta a arXiv ni
         al Editor. La pasada del archivo solo existe si se inyectaron
         `select_solution_tensions` y `write_solution_tensions`.
+
+        T84.r: la tercera pasada (`writer_digest`) redacta el resumen semanal
+        del archivo con el mismo bucle y los mismos desenlaces; cualquier
+        parada de las dos anteriores la corta, y solo existe si se inyectaron
+        `select_digest_weeks` y `write_digest_text`. Comparte con ellas el tope
+        `max_writer_calls_per_night` y la reserva del redactor (se cuentan en
+        base de datos por rol y `run_id`). El resumen no es un candidato del
+        Editor.
         """
         stopped = await self._writer_pass_arxiv()
         if stopped or self._skip_editor:
             return
-        if self._select_solution_tensions is None or self._write_solution_tensions is None:
+        if self._select_solution_tensions is not None and self._write_solution_tensions is not None:
+            stopped = await self._writer_pass_archive(
+                self._select_solution_tensions, self._write_solution_tensions
+            )
+            if stopped or self._skip_editor:
+                return
+        if self._select_digest_weeks is None or self._write_digest_text is None:
             return
-        await self._writer_pass_archive(
-            self._select_solution_tensions, self._write_solution_tensions
-        )
+        await self._writer_pass_digest(self._select_digest_weeks, self._write_digest_text)
 
     def _log_writer_error(self, phase: str, exc: Exception) -> None:
         self._degrade(RunStatus.PARTIAL, "writer_error")
@@ -972,15 +1005,29 @@ class RunNight:
 
     async def _writer_pass_archive(
         self, select: SelectSolutionTensions, write: WriteSolutionTensions
-    ) -> None:
-        """Pasada del archivo (T85.e, D14): solo se llega aquí si la de arXiv no paró."""
+    ) -> bool:
+        """Pasada del archivo (T85.e, D14): solo se llega aquí si la de arXiv no paró.
+        Devuelve `True` si algo la detuvo."""
         try:
             pending = select.pending()
         except Exception as exc:
             self._log_writer_error("writer_archive", exc)
-            return
+            return True
         stats = await self._write_loop(pending.candidates, write, phase="writer_archive")
         self._log_writer_end("writer_archive", stats, skipped=len(pending.skipped))
+        return stats.stopped
+
+    async def _writer_pass_digest(self, select: SelectDigestWeeks, write: WriteDigestText) -> None:
+        """Pasada del resumen semanal (T84.r): solo se llega aquí si ninguna de las
+        anteriores paró. Un fallo al seleccionar es `PARTIAL` `writer_error` sin
+        llamadas y no afecta a las pasadas anteriores ni al Editor."""
+        try:
+            pending = select.pending()
+        except Exception as exc:
+            self._log_writer_error("writer_digest", exc)
+            return
+        stats = await self._write_loop(pending.candidates, write, phase="writer_digest")
+        self._log_writer_end("writer_digest", stats, skipped=len(pending.skipped))
 
     def _log_writer_end(self, phase: str, stats: "_WriteLoopStats", *, skipped: int) -> None:
         _logger.info(
@@ -997,16 +1044,18 @@ class RunNight:
             },
         )
 
-    async def _write_loop[C: _HasItem](
+    async def _write_loop[C: (_HasItem, DigestCandidate), R: _WriteResult](
         self,
         candidates: Sequence[C],
-        write: Callable[[C], Awaitable[WriteTensionResult]],
+        write: Callable[[C], Awaitable[R]],
         *,
         phase: str,
     ) -> "_WriteLoopStats":
-        """Bucle único de las dos pasadas del redactor: llama a `write` por
-        candidato y traduce los desenlaces (ver `_phase_writer`). `stopped` es
-        cierto si algo cortó el bucle (cualquier `break`)."""
+        """Bucle único de las tres pasadas del redactor: llama a `write` por
+        candidato y traduce los desenlaces (ver `_phase_writer`). El candidato es
+        un ítem (tensiones) o una semana (resumen, T84.r); `_candidate_log_fields`
+        compone sus campos de log. `stopped` es cierto si algo cortó el bucle
+        (cualquier `break`)."""
         stats = _WriteLoopStats()
         for candidate in candidates:
             stats.processed += 1
@@ -1028,8 +1077,8 @@ class RunNight:
             except Exception:
                 _logger.exception(
                     "night.item",
-                    extra=self._item_log_fields(
-                        item=candidate.item,
+                    extra=self._candidate_log_fields(
+                        candidate,
                         phase=phase,
                         outcome="exception",
                         attempts=0,
@@ -1047,16 +1096,17 @@ class RunNight:
                 self._degrade(RunStatus.PARTIAL, "writer_error")
                 break
 
-            log_fields = self._item_log_fields(
-                item=candidate.item,
+            log_fields = self._candidate_log_fields(
+                candidate,
                 phase=phase,
                 outcome=result.outcome.value,
                 attempts=result.attempts,
                 tokens_spent=result.tokens_spent,
                 duration_ms=_duration_ms(start),
             )
-            if result.finding is not None:
-                log_fields["finding_id"] = str(result.finding.id)
+            finding = getattr(result, "finding", None)
+            if finding is not None:
+                log_fields["finding_id"] = str(finding.id)
             _logger.info("night.item", extra=log_fields)
 
             if result.outcome is WriteOutcome.WRITTEN:
@@ -1161,6 +1211,38 @@ class RunNight:
             "tokens_spent": tokens_spent,
             "duration_ms": duration_ms,
         }
+
+    def _candidate_log_fields(
+        self,
+        candidate: "_HasItem | DigestCandidate",
+        *,
+        phase: str,
+        outcome: str,
+        attempts: int,
+        tokens_spent: int,
+        duration_ms: int,
+    ) -> dict[str, object]:
+        """Campos de `night.item` del bucle del redactor: los de ítem para las
+        tensiones y `week` para el resumen semanal (T84.r)."""
+        if isinstance(candidate, DigestCandidate):
+            return {
+                "event": "night.item",
+                "run_id": str(self._run_id),
+                "week": candidate.digest.week,
+                "phase": phase,
+                "outcome": outcome,
+                "attempts": attempts,
+                "tokens_spent": tokens_spent,
+                "duration_ms": duration_ms,
+            }
+        return self._item_log_fields(
+            item=candidate.item,
+            phase=phase,
+            outcome=outcome,
+            attempts=attempts,
+            tokens_spent=tokens_spent,
+            duration_ms=duration_ms,
+        )
 
     def _build_notes(self, tokens_used: int) -> str:
         """`notes` estable y apta para grep (ver docstring del módulo /

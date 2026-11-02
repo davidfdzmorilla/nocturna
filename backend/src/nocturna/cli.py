@@ -212,6 +212,7 @@ from nocturna.application.agents.prompt_loader import (
     READER_PROMPT_VERSION,
     READER_V3_PROMPT_VERSION,
     WRITER_ARCHIVE_PROMPT_VERSION,
+    WRITER_DIGEST_PROMPT_VERSION,
     WRITER_PROMPT_VERSION,
     load_prompt,
 )
@@ -277,6 +278,15 @@ from nocturna.application.use_cases.take_archive_snapshot import (
     SnapshotAborted,
     TakeArchiveSnapshot,
 )
+from nocturna.application.use_cases.write_archive_digest import (
+    DigestWriterWork,
+    DigestWriterWorkFactory,
+    PendingDigestWeeks,
+    SelectDigestWeeks,
+    WriteDigestText,
+    block_sha256,
+    build_digest_block,
+)
 from nocturna.application.use_cases.write_solution_tensions import (
     PendingSolutionTensions,
     SelectSolutionTensions,
@@ -292,7 +302,13 @@ from nocturna.application.use_cases.write_tensions import (
     WriteTensions,
 )
 from nocturna.domain.archive import ArchiveSolution
-from nocturna.domain.archive_digest import TransitionKind, WeeklyDigest, week_bounds
+from nocturna.domain.archive_digest import (
+    DigestText,
+    DigestTextStatus,
+    TransitionKind,
+    WeeklyDigest,
+    week_bounds,
+)
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import ITEM_SOURCE_ARXIV, Item, Reading, Run, RunStatus
 from nocturna.domain.errors import InvalidTransition, InvariantViolation
@@ -317,6 +333,7 @@ from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeli
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
     SqlAlchemyArchiveDigestReader,
+    SqlAlchemyArchiveDigestTextRepository,
     SqlAlchemyArchiveRepository,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
@@ -1136,6 +1153,19 @@ def _format_archive_digest(digest: WeeklyDigest, tz: ZoneInfo) -> str:
     return "\n".join(lines)
 
 
+def _format_digest_writer_text(text: DigestText, digest: WeeklyDigest) -> str:
+    """Texto del redactor de la semana (T84.r), marcado «desactualizado» si el hash del
+    bloque con el que se redactó ya no coincide con el del bloque actual."""
+    outdated = text.input_sha256 != block_sha256(build_digest_block(digest))
+    lines = ["", "Texto del redactor (T84.r):"]
+    if outdated:
+        lines.append("  [desactualizado: los datos de la semana han cambiado desde que se redactó]")
+    lines.append(f"  {text.title}")
+    lines.append("")
+    lines.append(text.summary or "")
+    return "\n".join(lines)
+
+
 def _archive_digest(args: argparse.Namespace) -> int:
     """`archive-digest`: `0` ok; `1` no hay snapshots o la semana no tiene
     ninguno. Formato de `--week` inválido: `2` (en `main`). Solo lectura."""
@@ -1153,10 +1183,13 @@ def _archive_digest(args: argparse.Namespace) -> int:
                 return 1
             week = weeks[0].week
         digest = GetWeeklyDigest(reader, tz)(week)
+        text = SqlAlchemyArchiveDigestTextRepository(session).get(week)
     if digest is None:
         print(f"archive-digest: la semana {week} no tiene ningún snapshot", file=sys.stderr)
         return 1
     print(_format_archive_digest(digest, tz))
+    if text is not None and text.status is DigestTextStatus.WRITTEN:
+        print(_format_digest_writer_text(text, digest))
     return 0
 
 
@@ -1822,6 +1855,107 @@ def write_solution_tensions_from_config(
     )
 
 
+def _digest_writer_work_factory(
+    session_factory: sessionmaker[Session],
+) -> DigestWriterWorkFactory:
+    """Unidad de trabajo de solo lectura de `SelectDigestWeeks.pending()` (T84.r).
+    Sin `BudgetGuard`: seleccionar no gasta tokens."""
+
+    @contextmanager
+    def _open() -> Generator[DigestWriterWork, None, None]:
+        with unit_of_work(session_factory) as session:
+            yield DigestWriterWork(
+                reader=SqlAlchemyArchiveDigestReader(session),
+                digest_texts=SqlAlchemyArchiveDigestTextRepository(session),
+            )
+
+    return _open
+
+
+def select_digest_weeks_from_config(
+    config: PipelineConfig, *, work: DigestWriterWorkFactory, clock: Clock
+) -> SelectDigestWeeks:
+    """`SelectDigestWeeks` (solo lectura) con la zona horaria y `since_week` de la
+    configuración (T84.r)."""
+    return SelectDigestWeeks(
+        work=work,
+        tz=ZoneInfo(config.window.timezone),
+        since_week=config.archive_digest.since_week,
+        clock=clock,
+    )
+
+
+def write_digest_text_from_config(
+    config: PipelineConfig,
+    *,
+    work: AgentWorkFactory,
+    provider: LLMProvider,
+    system_prompt: str,
+    clock: Clock,
+) -> WriteDigestText:
+    """`WriteDigestText` con modelo del rol `writer`, turnos, intentos y la estimación
+    `writer_estimated_tokens` de la configuración (T84.r)."""
+    return WriteDigestText(
+        work=work,
+        provider=provider,
+        system_prompt=system_prompt,
+        prompt_version=WRITER_DIGEST_PROMPT_VERSION,
+        model=config.models.writer,
+        max_turns=config.limits.max_turns_per_agent,
+        max_attempts=config.limits.max_calls_per_item,
+        estimated_tokens=config.budget.writer_estimated_tokens,
+        clock=clock,
+    )
+
+
+def _format_digest_section(
+    pending: PendingDigestWeeks, *, enabled: bool, estimated_tokens: int
+) -> str:
+    """Subsección del `--dry-run` con los resúmenes semanales que redactaría el
+    redactor (T84.r): pura y determinista, cero tokens. Se lista aunque el
+    interruptor esté apagado, con la marca. Una línea por semana elegible (con el
+    tamaño del bloque) y por semana excluida (con el motivo)."""
+    lines = [
+        "",
+        "Resumen semanal pendiente del redactor (T84.r, cero tokens en el ensayo):",
+    ]
+    if not enabled:
+        lines.append("  redactor del resumen semanal desactivado (writer_enabled = false)")
+    lines.append(
+        f"  elegibles={len(pending.candidates)} excluidas={len(pending.skipped)} "
+        f"estimación por llamada={estimated_tokens} tokens"
+    )
+    for candidate in pending.candidates:
+        lines.append(
+            f"  elegible · {candidate.digest.week} · {len(candidate.digest.entries)} "
+            f"transiciones · bloque de {len(candidate.block)} caracteres"
+        )
+    for week, reason in pending.skipped:
+        lines.append(f"  excluida · {week} · {reason}")
+    return "\n".join(lines)
+
+
+def _print_digest_section(session: Session, config: PipelineConfig, clock: Clock) -> None:
+    """Imprime los resúmenes semanales que redactaría la noche: solo
+    `SelectDigestWeeks.pending()` (lectura), nunca el runner ni el SDK."""
+
+    @contextmanager
+    def _same_session() -> Generator[DigestWriterWork, None, None]:
+        yield DigestWriterWork(
+            reader=SqlAlchemyArchiveDigestReader(session),
+            digest_texts=SqlAlchemyArchiveDigestTextRepository(session),
+        )
+
+    pending = select_digest_weeks_from_config(config, work=_same_session, clock=clock).pending()
+    print(
+        _format_digest_section(
+            pending,
+            enabled=config.archive_digest.writer_enabled,
+            estimated_tokens=config.budget.writer_estimated_tokens,
+        )
+    )
+
+
 # Motivos de exclusión que solo se cuentan en el `--dry-run`: son la mayoría
 # de las evaluaciones y no dicen nada del redactor.
 _WRITER_SKIP_REASONS_COUNTED = frozenset({"not_evaluated", "below_threshold"})
@@ -2057,6 +2191,8 @@ def _build_run_night(
     deadline_reason: str = "hard_stop",
     select_solution_tensions: SelectSolutionTensions | None = None,
     write_solution_tensions: WriteSolutionTensions | None = None,
+    select_digest_weeks: SelectDigestWeeks | None = None,
+    write_digest_text: WriteDigestText | None = None,
 ) -> RunNight:
     """Construye `RunNight`, comprobando explícitamente que `run_id` -- el
     que `RunNight` reenviará a `EditNight.__call__` -- coincide con
@@ -2102,6 +2238,8 @@ def _build_run_night(
         write_tensions=write_tensions,
         select_solution_tensions=select_solution_tensions,
         write_solution_tensions=write_solution_tensions,
+        select_digest_weeks=select_digest_weeks,
+        write_digest_text=write_digest_text,
         run_id=run_id,
         max_items=max_items,
         max_unread_age_days=max_unread_age_days,
@@ -2201,6 +2339,7 @@ def _run_night_dry_run(args: argparse.Namespace) -> int:
             _print_measurement_findings_section(session, config, clock)
             _print_writer_section(session, config)
             _print_solution_writer_section(session, config)
+            _print_digest_section(session, config, clock)
             _print_solution_tensions_section(session, config, clock)
             pairs, runs_with_reader_v3 = _load_tension_inputs(session)
             try:
@@ -2268,6 +2407,11 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         if config.solution_tensions.writer_enabled
         else None
     )
+    # Interruptor (T84.r): apagado, ni se carga el prompt del resumen semanal ni se
+    # construye el redactor (cero `authorize`).
+    digest_writer_prompt = (
+        load_prompt(WRITER_DIGEST_PROMPT_VERSION) if config.archive_digest.writer_enabled else None
+    )
     deadline_s, deadline_reason = _deadline_for_run_night(policy, clock.now())
 
     run_id = _current_or_new_run_night(session_factory, policy, clock)
@@ -2327,6 +2471,25 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         else None
     )
 
+    select_digest_weeks = (
+        select_digest_weeks_from_config(
+            config, work=_digest_writer_work_factory(session_factory), clock=clock
+        )
+        if digest_writer_prompt is not None
+        else None
+    )
+    write_digest_text = (
+        write_digest_text_from_config(
+            config,
+            work=work,
+            provider=provider,
+            system_prompt=digest_writer_prompt,
+            clock=clock,
+        )
+        if digest_writer_prompt is not None
+        else None
+    )
+
     async def _ingest() -> IngestResult:
         return await _run_ingest(
             since=since, categories=categories, config=config, settings=settings
@@ -2345,6 +2508,8 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         write_tensions=write_tensions,
         select_solution_tensions=select_solution_tensions,
         write_solution_tensions=write_solution_tensions,
+        select_digest_weeks=select_digest_weeks,
+        write_digest_text=write_digest_text,
         run_id=run_id,
         max_items=config.limits.max_items_per_night,
         max_unread_age_days=config.limits.max_unread_age_days,
@@ -2448,6 +2613,7 @@ def _agent_work_factory(
                 readings=SqlAlchemyReadingRepository(session),
                 findings=SqlAlchemyFindingRepository(session),
                 agent_calls=agent_calls,
+                digest_texts=SqlAlchemyArchiveDigestTextRepository(session),
             )
 
     return _open

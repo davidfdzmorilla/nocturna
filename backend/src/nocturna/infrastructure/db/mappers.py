@@ -32,6 +32,7 @@ from nocturna.domain.archive import (
     ArchiveSolution,
     DefaultChange,
 )
+from nocturna.domain.archive_digest import DigestText, DigestTextStatus
 from nocturna.domain.entities import (
     AgentCall,
     CatalogSolution,
@@ -67,6 +68,7 @@ from nocturna.domain.tension import (
 from nocturna.infrastructure.db.models import (
     AgentCallRow,
     ArchiveDefaultChangeRow,
+    ArchiveDigestTextRow,
     ArchiveSnapshotRow,
     ArchiveSolutionRow,
     FindingRow,
@@ -844,4 +846,30 @@ def tension_evaluation_from_row(row: TensionEvaluationRow) -> TensionEvaluation:
         limit=_limit_from_dict(detail["limit"]),
         period_check=_period_check_from_dict(detail["period_check"]),
         own_solution_key=row.own_solution_key,
+    )
+
+
+def digest_text_to_row(text: DigestText) -> ArchiveDigestTextRow:
+    return ArchiveDigestTextRow(
+        week=text.week,
+        status=text.status.value,
+        title=text.title,
+        summary=text.summary,
+        input_sha256=text.input_sha256,
+        prompt_version=text.prompt_version,
+        run_id=text.run_id,
+        created_at=text.created_at,
+    )
+
+
+def digest_text_from_row(row: ArchiveDigestTextRow) -> DigestText:
+    return DigestText(
+        week=row.week,
+        status=DigestTextStatus(row.status),
+        title=row.title,
+        summary=row.summary,
+        input_sha256=row.input_sha256,
+        prompt_version=row.prompt_version,
+        run_id=row.run_id,
+        created_at=row.created_at,
     )

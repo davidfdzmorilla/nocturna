@@ -444,5 +444,17 @@ writer_enabled = true
 # cambio de valor; p. ej. HD 114082 b, σ 289). Debe ser > [tension] threshold_sigma.
 extreme_sigma = 50
 
+[archive_digest]
+# Redactor del resumen semanal del archivo (T84.r, ADR 0038). Tras las tensiones
+# de arXiv y del archivo, redacta un titular y un resumen por semana ISO cerrada
+# con transiciones de solución por defecto. Comparte con ellas el tope
+# limits.max_writer_calls_per_night y la reserva budget.writer_reserve_tokens.
+# writer_enabled: interruptor. false: cero llamadas ni authorize, no se carga el
+# prompt. Se activa a mano; el texto no se publica hasta T84.r.w (web).
+writer_enabled = false
+# since_week: primera semana ISO que se redacta (las anteriores se excluyen con
+# el motivo before_since; no se redactan retroactivamente). Formato YYYY-Www.
+since_week = "2026-W40"
+
 [llm]
 provider = "agent_sdk"

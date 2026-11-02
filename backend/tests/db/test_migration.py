@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "archive_snapshot",
     "archive_solution",
     "archive_default_change",
+    "archive_digest_text",
     "tension_evaluation",
     "solution_tension",
 }

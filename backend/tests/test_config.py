@@ -120,6 +120,10 @@ max_pubdate_age_months = 24
 writer_enabled = false
 extreme_sigma = 50
 
+[archive_digest]
+writer_enabled = false
+since_week = "2026-W40"
+
 [llm]
 provider = "agent_sdk"
 """

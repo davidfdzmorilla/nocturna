@@ -59,3 +59,52 @@ def parse_writer_output(text: str) -> WriterOutput:
         return WriterOutput.model_validate(payload)
     except ValidationError as exc:
         raise InvalidAgentOutput(f"salida del redactor con forma inválida: {exc}") from exc
+
+
+#: Máximo de caracteres del titular del resumen semanal (T84.r); el prompt
+#: `writer-digest-v1.md` pide lo mismo.
+DIGEST_TITLE_MAX_CHARS = 90
+
+
+class DigestWriterOutput(BaseModel):
+    """Forma validada del JSON del redactor del resumen semanal (T84.r):
+    un titular (hasta 90 caracteres) y un resumen. Misma normalización del `\\n`
+    literal que `WriterOutput` (T96); los campos extra se ignoran."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    title: str
+    summary: str
+
+    @field_validator("title", "summary", mode="before")
+    @classmethod
+    def _unescape_literal_newlines(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.replace("\\n", "\n")
+        return value
+
+    @field_validator("title", "summary")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("no puede estar vacío ni en blanco")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def _title_length(cls, value: str) -> str:
+        if len(value) > DIGEST_TITLE_MAX_CHARS:
+            raise ValueError(f"el titular supera {DIGEST_TITLE_MAX_CHARS} caracteres")
+        return value
+
+
+def parse_digest_writer_output(text: str) -> DigestWriterOutput:
+    """Extrae y valida la salida cruda del redactor del resumen; todo fallo es
+    `InvalidAgentOutput`."""
+    payload = extract_json_object(text)
+    try:
+        return DigestWriterOutput.model_validate(payload)
+    except ValidationError as exc:
+        raise InvalidAgentOutput(
+            f"salida del redactor del resumen con forma inválida: {exc}"
+        ) from exc
