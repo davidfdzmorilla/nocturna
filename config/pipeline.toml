@@ -450,8 +450,8 @@ extreme_sigma = 50
 # con transiciones de solución por defecto. Comparte con ellas el tope
 # limits.max_writer_calls_per_night y la reserva budget.writer_reserve_tokens.
 # writer_enabled: interruptor. false: cero llamadas ni authorize, no se carga el
-# prompt. Se activa a mano; el texto no se publica hasta T84.r.w (web).
-writer_enabled = false
+# prompt. Activado el 2026-11-02, tras T84.r.w (web).
+writer_enabled = true
 # since_week: primera semana ISO que se redacta (las anteriores se excluyen con
 # el motivo before_since; no se redactan retroactivamente). Formato YYYY-Www.
 since_week = "2026-W40"
