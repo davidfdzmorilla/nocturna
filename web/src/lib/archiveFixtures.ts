@@ -21,7 +21,13 @@ export const value = (
   minus: number | null,
   unit: ArchiveValue["unit"],
   bound: ArchiveValue["bound"] = "none",
-): ArchiveValue => ({ value: v, err_plus: plus, err_minus: minus, bound, unit });
+): ArchiveValue => ({
+  value: v,
+  err_plus: plus,
+  err_minus: minus,
+  bound,
+  unit,
+});
 
 export const GIACALONE: DigestReference = {
   reference: "Giacalone et al. 2022",
@@ -102,6 +108,7 @@ export const week40: WeeklyDigest = {
     entry("new_planet", "HD 148797 c", null, ALMENARA),
     entry("new_planet", "TOI-2427 c", null, SCHMERLING),
   ],
+  writer_text: null,
 };
 
 export const collierNames = Array.from(
@@ -115,6 +122,34 @@ export const week41: WeeklyDigest = {
   entries: collierNames.map((n) =>
     entry("new_planet", n, null, COLLIER, [], "2026-10-09T03:00:00Z"),
   ),
+  writer_text: null,
+};
+
+const INVENTED_REF: DigestReference = {
+  reference: "Pérez et al. 2026",
+  pl_pubdate: "2026-05",
+  releasedate: "2026-10-15",
+};
+
+/** Semana con texto del redactor; contenido inventado, sin casos reales. */
+export const week42WithText: WeeklyDigest = {
+  week: "2026-W42",
+  snapshots: 1,
+  entries: [
+    entry(
+      "new_planet",
+      "Inventado-1 b",
+      null,
+      INVENTED_REF,
+      [],
+      "2026-10-16T03:00:00Z",
+    ),
+  ],
+  writer_text: {
+    title: "Una semana tranquila en el archivo",
+    summary:
+      "Esta semana el archivo incorpora un planeta nuevo.\n\nNo hay cambios de referencia en los demás.",
+  },
 };
 
 export { entry as makeEntry };

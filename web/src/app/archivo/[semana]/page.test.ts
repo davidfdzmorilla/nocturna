@@ -13,7 +13,7 @@ const notFound = vi.hoisted(() =>
 vi.mock("next/navigation", () => ({ notFound }));
 
 import { fetchArchiveWeek } from "@/lib/api/client";
-import { week40 } from "@/lib/archiveFixtures";
+import { week40, week42WithText } from "@/lib/archiveFixtures";
 import ArchiveWeekPage, { generateMetadata } from "./page";
 
 const params = (semana: string) => ({ params: Promise.resolve({ semana }) });
@@ -53,6 +53,46 @@ describe("página /archivo/[semana]", () => {
       expect(html).toContain(h);
     }
     expect(fetchArchiveWeek).toHaveBeenCalledWith("2026-W40");
+  });
+
+  it("sin writer_text: ni etiqueta de IA ni leyenda, y nota AI_FREE_NOTE", async () => {
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: true, data: week40 });
+    const html = renderToStaticMarkup(await ArchiveWeekPage(params("2026-W40")));
+    expect(html).not.toContain("Resumen redactado por IA");
+    expect(html).not.toContain('id="resumen-ia"');
+    expect(html).not.toContain("Ninguna persona lo ha revisado");
+    expect(html).toContain(
+      "Datos del NASA Exoplanet Archive presentados con plantillas fijas; esta sección no contiene texto generado por IA.",
+    );
+  });
+
+  it("con writer_text: bloque tras el H1 y antes de nota, intro y secciones", async () => {
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: true, data: week42WithText });
+    const html = renderToStaticMarkup(await ArchiveWeekPage(params("2026-W42")));
+    const at = (s: string) => html.indexOf(s);
+    const h1 = at("<h1");
+    const block = at("Resumen redactado por IA");
+    const note = at("las tablas no contienen texto generado por IA.");
+    const intro = at("es la solución por defecto del archivo");
+    const firstSection = at("Planetas nuevos");
+    expect(block).toBeGreaterThan(h1);
+    expect(h1).toBeGreaterThan(-1);
+    expect(note).toBeGreaterThan(block);
+    expect(intro).toBeGreaterThan(block);
+    expect(firstSection).toBeGreaterThan(block);
+    expect(html).toContain("Una semana tranquila en el archivo");
+    expect(html).toContain("Ninguna persona lo ha revisado");
+    expect(html).not.toContain("no contiene texto generado por IA");
+  });
+
+  it("con writer_text y sin entradas: el bloque se muestra igualmente", async () => {
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({
+      ok: true,
+      data: { ...week42WithText, entries: [] },
+    });
+    const html = renderToStaticMarkup(await ArchiveWeekPage(params("2026-W42")));
+    expect(html).toContain("Resumen redactado por IA");
+    expect(html).toContain("Una semana tranquila en el archivo");
   });
 
   it("generateMetadata no llama a la API", async () => {

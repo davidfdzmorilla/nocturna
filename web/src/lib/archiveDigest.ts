@@ -3,10 +3,34 @@
  * semana de la URL, etiquetas y agrupaciones. Sin IO.
  */
 
-import type { DigestEntry, TransitionKind } from "./api/types";
+import type { DigestEntry, DigestText, TransitionKind } from "./api/types";
 
 export const AI_FREE_NOTE =
   "Datos del NASA Exoplanet Archive presentados con plantillas fijas; esta sección no contiene texto generado por IA.";
+
+export const AI_TEXT_LABEL = "Resumen redactado por IA";
+
+export const AI_TEXT_LEGEND =
+  "Texto generado automáticamente por IA a partir de los datos de esta semana. Ninguna persona lo ha revisado; los datos de referencia son las tablas de abajo.";
+
+export const AI_TEXT_TABLES_NOTE =
+  "Datos del NASA Exoplanet Archive presentados con plantillas fijas; las tablas no contienen texto generado por IA.";
+
+export const AI_LISTING_NOTE =
+  "Datos del NASA Exoplanet Archive presentados con plantillas fijas. Algunas semanas incluyen un resumen redactado por IA, señalado como tal.";
+
+/** Nota bajo el título según haya o no texto redactado por IA. */
+export function digestNote(text: DigestText | null): string {
+  return text === null ? AI_FREE_NOTE : AI_TEXT_TABLES_NOTE;
+}
+
+/** Párrafos del resumen: separados por líneas en blanco; sin vacíos. */
+export function summaryParagraphs(summary: string): string[] {
+  return summary
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+}
 
 const WEEK_RE = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
 

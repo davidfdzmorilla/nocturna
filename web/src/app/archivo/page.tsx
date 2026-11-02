@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { fetchArchiveWeeks } from "@/lib/api/client";
 import { archiveIndexState } from "@/lib/archiveRoute";
-import { AI_FREE_NOTE, parseWeekParam, weekLabel } from "@/lib/archiveDigest";
+import { AI_LISTING_NOTE, parseWeekParam, weekLabel } from "@/lib/archiveDigest";
 import { Notice } from "@/components/Notice";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,7 @@ export default async function ArchivePage() {
       <h1 className="text-2xl font-semibold text-text">
         Resumen semanal del NASA Exoplanet Archive
       </h1>
-      <p className="mt-2 text-sm text-text-muted">{AI_FREE_NOTE}</p>
+      <p className="mt-2 text-sm text-text-muted">{AI_LISTING_NOTE}</p>
       {state.kind === "empty" ? (
         <div className="mt-6">
           <Notice title="Todavía no hay resúmenes semanales.">

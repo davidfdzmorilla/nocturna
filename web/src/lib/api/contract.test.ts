@@ -6,6 +6,7 @@ import type {
   CatalogTension,
   ConfirmationReference,
   DigestEntry,
+  DigestText,
   DigestReference,
   DigestWeek,
   DigestWeeksResponse,
@@ -238,7 +239,9 @@ describe("contrato del resumen semanal (claves exactas)", () => {
     week: "2026-W41",
     snapshots: 2,
     entries: [digestEntry],
+    writer_text: { title: "Título", summary: "Resumen" },
   };
+  const digestText: DigestText = digest.writer_text as DigestText;
   const week: DigestWeek = {
     week: "2026-W41",
     snapshots: 2,
@@ -257,7 +260,8 @@ describe("contrato del resumen semanal (claves exactas)", () => {
   });
 
   it("WeeklyDigest y DigestEntry", () => {
-    expect(keys(digest)).toEqual(expected("week", "snapshots", "entries"));
+    expect(keys(digest)).toEqual(expected("week", "snapshots", "entries", "writer_text"));
+    expect(keys(digestText)).toEqual(expected("title", "summary"));
     expect(keys(digestEntry)).toEqual(
       expected(
         "kind", "pl_name", "planet_url", "detected_at", "old", "new",

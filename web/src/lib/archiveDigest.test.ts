@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_FREE_NOTE,
+  AI_LISTING_NOTE,
+  AI_TEXT_LABEL,
+  AI_TEXT_LEGEND,
+  AI_TEXT_TABLES_NOTE,
   SECTION_ORDER,
+  digestNote,
   entriesByKind,
   groupByReference,
   isoWeekRange,
   parseWeekParam,
+  summaryParagraphs,
   weekLabel,
 } from "./archiveDigest";
 import { ALMENARA, COLLIER, SCHMERLING, makeEntry, week40 } from "./archiveFixtures";
@@ -111,5 +118,51 @@ describe("groupByReference", () => {
       { reference: "(sin referencia)", entries: [lost] },
     ]);
     expect(groupByReference([])).toEqual([]);
+  });
+});
+
+describe("summaryParagraphs", () => {
+  it("dos párrafos separados por línea en blanco", () => {
+    expect(summaryParagraphs("Uno.\n\nDos.")).toEqual(["Uno.", "Dos."]);
+  });
+  it("tres saltos y espacios entre párrafos cuentan como separador", () => {
+    expect(summaryParagraphs("Uno.\n \n\t\n\nDos.")).toEqual(["Uno.", "Dos."]);
+  });
+  it("un solo párrafo", () => {
+    expect(summaryParagraphs("Solo uno.")).toEqual(["Solo uno."]);
+  });
+  it("descarta vacíos iniciales y finales y recorta", () => {
+    expect(summaryParagraphs("\n\n  Uno.  \n\nDos.\n\n")).toEqual(["Uno.", "Dos."]);
+  });
+  it("un salto simple se queda dentro del párrafo", () => {
+    expect(summaryParagraphs("Uno\ncontinúa.\n\nDos.")).toEqual(["Uno\ncontinúa.", "Dos."]);
+  });
+  it("texto vacío o en blanco: sin párrafos", () => {
+    expect(summaryParagraphs("")).toEqual([]);
+    expect(summaryParagraphs(" \n\n ")).toEqual([]);
+  });
+});
+
+describe("textos de la nota del resumen con IA", () => {
+  it("textos exactos aprobados", () => {
+    expect(AI_TEXT_LABEL).toBe("Resumen redactado por IA");
+    expect(AI_TEXT_LEGEND).toBe(
+      "Texto generado automáticamente por IA a partir de los datos de esta semana. Ninguna persona lo ha revisado; los datos de referencia son las tablas de abajo.",
+    );
+    expect(AI_TEXT_TABLES_NOTE).toBe(
+      "Datos del NASA Exoplanet Archive presentados con plantillas fijas; las tablas no contienen texto generado por IA.",
+    );
+    expect(AI_LISTING_NOTE).toBe(
+      "Datos del NASA Exoplanet Archive presentados con plantillas fijas. Algunas semanas incluyen un resumen redactado por IA, señalado como tal.",
+    );
+  });
+  it("AI_FREE_NOTE no cambia", () => {
+    expect(AI_FREE_NOTE).toBe(
+      "Datos del NASA Exoplanet Archive presentados con plantillas fijas; esta sección no contiene texto generado por IA.",
+    );
+  });
+  it("digestNote: sin texto -> AI_FREE_NOTE; con texto -> AI_TEXT_TABLES_NOTE", () => {
+    expect(digestNote(null)).toBe(AI_FREE_NOTE);
+    expect(digestNote({ title: "T", summary: "S" })).toBe(AI_TEXT_TABLES_NOTE);
   });
 });
