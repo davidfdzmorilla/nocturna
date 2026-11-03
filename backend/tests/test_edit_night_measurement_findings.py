@@ -291,6 +291,7 @@ async def test_el_prompt_lleva_type_y_data_y_no_lleva_evidence():
         measurements=(measurement,),
         status=EvaluationStatus.AWAITING_REFERENCE,
         evaluated_at=WITHIN_WINDOW,
+        archive_planet_name="TOI-6981 b",
     )
     first = _measurement_finding(item, env.run.id, evaluation)
     paper = _paper_finding(item, env.run.id)
@@ -308,7 +309,7 @@ async def test_el_prompt_lleva_type_y_data_y_no_lleva_evidence():
     assert "type: paper_explained" in prompt
     assert (
         "data: planet=TOI-6981 b; parameter=radius; value=2.4 (+0.1/-0.1) R_earth; "
-        "reference=none (absent); sigma=none"
+        "reference=none (no_comparable_solution); sigma=none"
     ) in prompt
     assert prompt.count("data:") == 1, "el paper_explained no lleva línea data"
     assert evidence not in prompt and "EVIDENCIA" not in prompt

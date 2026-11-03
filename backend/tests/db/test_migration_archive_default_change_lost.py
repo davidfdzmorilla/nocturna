@@ -16,7 +16,7 @@ from nocturna.infrastructure.db.models import Base
 
 _REVISION = "d8b1e4f7a203"
 _REVISION_BEFORE = "a3f6d9c1b852"
-_HEAD = "a4d9e1b7c352"
+_HEAD = "b7e3a1c9d482"
 _CHECK = "ck_archive_default_change_old_or_new"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _KEY_A = "a" * 64

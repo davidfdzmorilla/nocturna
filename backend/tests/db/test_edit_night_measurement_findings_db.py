@@ -72,7 +72,8 @@ def _seed(factory):
         paper = make_item(external_id="2609.00001", status=ItemStatus.READ)
         SqlAlchemyItemRepository(session).add_many([toi, paper])
         session.flush()
-        evaluation = toi_6981_b(toi.id)
+        # T100: presente en el archivo sin solución comparable (un ausente ya no es elegible).
+        evaluation = dataclasses.replace(toi_6981_b(toi.id), archive_planet_name="TOI-6981 b")
         reading = make_reading(toi.id, measurements=evaluation.measurements)
         SqlAlchemyReadingRepository(session).add(reading)
         session.flush()

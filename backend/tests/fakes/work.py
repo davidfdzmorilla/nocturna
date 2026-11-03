@@ -233,6 +233,14 @@ class InMemoryFindingRepository:
             raise LookupError(f"no existe Finding con id={finding.id}")
         self._findings[finding.id] = finding
 
+    def get(self, finding_id: UUID) -> Finding | None:
+        return self._findings.get(finding_id)
+
+    def save_retraction(self, finding: Finding) -> None:
+        if finding.id not in self._findings:
+            raise LookupError(f"no existe Finding con id={finding.id}")
+        self._findings[finding.id] = finding
+
     def evaluation_ids_with_finding(self, type: FindingType) -> frozenset[UUID]:
         return frozenset(
             f.tension_evaluation_id

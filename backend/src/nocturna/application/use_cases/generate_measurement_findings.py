@@ -41,10 +41,12 @@ from nocturna.domain.entities import (
 )
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.measurement_findings import (
-    confirmation_eligible,
+    ConfirmationTeamCheck,
+    confirmation_team_check,
     first_measurement_eligible,
     first_measurement_from,
     independent_confirmation_from,
+    minimum_mass_in,
 )
 from nocturna.domain.own_solution import OwnSolutionRule
 from nocturna.domain.repositories import (
@@ -86,13 +88,23 @@ class BlockedConfirmation:
 class MeasurementFindingsReport:
     """`created` son los `Finding` generados (en `dry_run`, los que se
     generarían: no persistidos). `deferred` son elegibles que no caben en
-    `max_candidates` esta noche (se generan en las siguientes)."""
+    `max_candidates` esta noche (se generan en las siguientes).
+    `skipped_minimum_mass` son evaluaciones con una masa mínima (`m sin i`)
+    que no generan hallazgo (T100); cuenta solo las que eran elegibles salvo
+    por la masa mínima (primera medida: elegible; confirmación: ya con
+    equipo distinto). `skipped_same_team` y `skipped_unknown_team`
+    son confirmaciones que cumplían el resto de condiciones pero la regla de
+    equipo las bloquea: el primer autor de la referencia figura entre los del
+    paper, o faltan autores / la referencia no es reconocible (T100, D1)."""
 
     created: tuple[Finding, ...]
     blocked_confirmations: tuple[BlockedConfirmation, ...]
     already_generated: int
     deferred: int
     dry_run: bool
+    skipped_minimum_mass: int = 0
+    skipped_same_team: int = 0
+    skipped_unknown_team: int = 0
 
     @property
     def primera_medida(self) -> int:
@@ -164,6 +176,9 @@ class GenerateMeasurementFindings:
                 FindingType.CONFIRMACION_INDEPENDIENTE
             )
             already_generated = 0
+            skipped_minimum_mass = 0
+            skipped_same_team = 0
+            skipped_unknown_team = 0
             blocked: list[BlockedConfirmation] = []
             candidates: list[_Candidate] = []
             for evaluation in w.evaluations.all():
@@ -179,13 +194,16 @@ class GenerateMeasurementFindings:
                         already_generated += 1
                         continue
                     item = self._item(w, evaluation)
+                    if minimum_mass_in(evaluation, item.abstract):
+                        skipped_minimum_mass += 1
+                        continue
                     candidates.append(_Candidate(_FIRST_RANK, evaluation, item))
                     continue
                 if evaluation.id in done_confirmation:
                     already_generated += 1
                     continue
                 item = self._item(w, evaluation)
-                if not confirmation_eligible(
+                team = confirmation_team_check(
                     evaluation,
                     item_published_at=item.published_at,
                     now=now,
@@ -193,7 +211,18 @@ class GenerateMeasurementFindings:
                     window_days=self._window_days,
                     item_external_id=item.external_id,
                     own_rule=self._own_rule,
-                ):
+                    item_authors=item.authors,
+                )
+                if team is ConfirmationTeamCheck.SAME_TEAM:
+                    skipped_same_team += 1
+                    continue
+                if team is ConfirmationTeamCheck.UNKNOWN_TEAM:
+                    skipped_unknown_team += 1
+                    continue
+                if team is not ConfirmationTeamCheck.DIFFERENT_TEAM:
+                    continue
+                if minimum_mass_in(evaluation, item.abstract):
+                    skipped_minimum_mass += 1
                     continue
                 if not self._confirmation_enabled:
                     blocked.append(
@@ -234,6 +263,9 @@ class GenerateMeasurementFindings:
                 "blocked_confirmations": len(blocked),
                 "already_generated": already_generated,
                 "deferred": deferred,
+                "skipped_minimum_mass": skipped_minimum_mass,
+                "skipped_same_team": skipped_same_team,
+                "skipped_unknown_team": skipped_unknown_team,
             },
         )
         return MeasurementFindingsReport(
@@ -242,6 +274,9 @@ class GenerateMeasurementFindings:
             already_generated=already_generated,
             deferred=deferred,
             dry_run=dry_run,
+            skipped_minimum_mass=skipped_minimum_mass,
+            skipped_same_team=skipped_same_team,
+            skipped_unknown_team=skipped_unknown_team,
         )
 
     @staticmethod
@@ -285,6 +320,7 @@ class GenerateMeasurementFindings:
             archive_url=self._planet_overview_url(evaluation.archive_planet_name),
             item_external_id=item.external_id,
             own_rule=self._own_rule,
+            item_authors=item.authors,
         )
         texts = render_confirmacion_independiente(confirmation, arxiv_id=item.external_id)
         return Finding(

@@ -56,6 +56,9 @@ class ArxivEntry:
     categories: tuple[str, ...]
     published_at: datetime
     updated_at: datetime
+    #: Autores tal como los da arXiv, separados por ", "; `None` si el feed
+    #: no los trae (T100: se usa solo para comprobar el primer autor).
+    authors: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +165,15 @@ def _parse_datetime(text: str) -> datetime:
         raise _IncompleteEntry(f"fecha ilegible: {text!r}") from exc
 
 
+def _parse_authors(element: ET.Element) -> str | None:
+    names = [
+        _normalize_whitespace(name)
+        for author in element.findall(f"{_ATOM}author")
+        if (name := _text(author.find(f"{_ATOM}name"))) is not None
+    ]
+    return ", ".join(names) if names else None
+
+
 def _parse_entry(element: ET.Element) -> ArxivEntry:
     arxiv_id, version = _parse_id(element)
     title = _normalize_whitespace(_require_text(element, f"{_ATOM}title"))
@@ -177,4 +189,5 @@ def _parse_entry(element: ET.Element) -> ArxivEntry:
         categories=categories,
         published_at=published_at,
         updated_at=updated_at,
+        authors=_parse_authors(element),
     )

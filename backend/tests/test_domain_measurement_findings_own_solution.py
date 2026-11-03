@@ -52,6 +52,7 @@ def _kwargs(external_id=HIP_PAPER):
         "window_days": 30,
         "item_external_id": external_id,
         "own_rule": RULE,
+        "item_authors": "A. Otro, B. Distinto",
     }
 
 
@@ -249,6 +250,7 @@ def test_t92_periodo_evaluated_contra_la_fila_r_con_sigma_cero_no_es_tension_ni_
         item_external_id=HIP_PAPER,
         item_published_at=PUBLISHED,
         own_rule=RULE,
+        item_abstract="",
     )
 
     assert ev.result.reference_sigma() == 0.0

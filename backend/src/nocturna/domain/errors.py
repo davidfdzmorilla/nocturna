@@ -32,6 +32,14 @@ class InvalidTimestamp(InvariantViolation):
     """Un `datetime` de dominio es naive o incoherente con otro timestamp."""
 
 
+class FindingNotFound(DomainError):
+    """No existe un `Finding` con ese id (T100: retirada de hallazgos)."""
+
+    def __init__(self, finding_id: object) -> None:
+        super().__init__(f"no existe ningún Finding con id={finding_id}")
+        self.finding_id = finding_id
+
+
 class InvalidTransition(DomainError):
     """Una entidad intenta pasar de un estado a otro no permitido.
 

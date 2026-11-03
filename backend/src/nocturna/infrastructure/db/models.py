@@ -121,6 +121,8 @@ class ItemRow(Base):
     exoplanet_match: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.false()
     )
+    # T100: autores tal cual de arXiv; NULL = desconocido (anteriores a T100).
+    authors: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
     __table_args__ = (
         sa.UniqueConstraint("source", "external_id", name="uq_items_source_external_id"),
@@ -206,8 +208,23 @@ class FindingRow(Base):
     solution_tension_id: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True), sa.ForeignKey("solution_tension.id"), nullable=True
     )
+    # T100: retirada editorial; `published_at` se conserva.
+    retracted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    retraction_note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
     __table_args__ = (
+        sa.CheckConstraint(
+            "(retracted_at IS NULL) = (retraction_note IS NULL)",
+            name="retraction_together",
+        ),
+        sa.CheckConstraint(
+            "retracted_at IS NULL OR published_at IS NOT NULL",
+            name="retraction_only_published",
+        ),
+        sa.CheckConstraint(
+            "retraction_note IS NULL OR length(btrim(retraction_note)) > 0",
+            name="retraction_note_not_blank",
+        ),
         sa.CheckConstraint(
             "(type = 'solution_tension') = (solution_tension IS NOT NULL)",
             name="solution_tension_iff_type",

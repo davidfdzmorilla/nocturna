@@ -227,3 +227,28 @@ def test_get_published_finding_devuelve_none_si_el_item_no_existe() -> None:
     use_case = GetPublishedFinding(repo, items)
 
     assert use_case(finding.id) is None
+
+
+def test_list_published_findings_descarta_retirados_aunque_el_repo_no_filtre() -> None:
+    """Segunda barrera: un repositorio que «olvide» el filtro SQL de retirados."""
+    item = _make_item()
+    kept = _make_finding(item_id=item.id)
+    retracted = _make_finding(item_id=item.id)
+    retracted.retract(at=_PUBLISHED_AT, note="Medida mal extraida.")
+    repo = _FakeFindingRepository(page=[retracted, kept], total=2)
+
+    result = ListPublishedFindings(repo)(limit=10, offset=0)
+
+    assert result.findings == [kept]
+
+
+def test_get_published_finding_sigue_sirviendo_un_retirado_con_su_nota() -> None:
+    """El detalle de un retirado es público (con la nota); solo el feed lo oculta."""
+    item = _make_item()
+    finding = _make_finding(item_id=item.id)
+    finding.retract(at=_PUBLISHED_AT, note="Medida mal extraida.")
+    repo = _FakeFindingRepository(by_id={finding.id: finding})
+
+    result = GetPublishedFinding(repo, _FakeItemRepository(item))(finding.id)
+
+    assert result is not None and result.finding.is_retracted

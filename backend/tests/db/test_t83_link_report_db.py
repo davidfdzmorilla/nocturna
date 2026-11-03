@@ -136,6 +136,7 @@ def _row(pl_name, ref_key, mass, *, arxiv_id, pubdate, released):
         arxiv_id=arxiv_id,
         pl_pubdate=pubdate,
         releasedate=released,
+        ref_text="Smith et al. 2026",
     )
 
 
@@ -208,7 +209,9 @@ ALL_ROWS = [R1, R3, R4, R5, R7, R2, R8, R6]
 
 def _paper(session, external_id, planet, published_at):
     items = SqlAlchemyItemRepository(session)
-    item = make_item(external_id=external_id, published_at=published_at)
+    item = make_item(
+        external_id=external_id, published_at=published_at, authors="A. Otro, B. Distinto"
+    )
     items.add_many([item])
     session.flush()
     measurement = make_measurement(14.0, 1.0, 1.0, planet_name=planet, unit=M_E)

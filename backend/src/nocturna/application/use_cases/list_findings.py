@@ -10,8 +10,12 @@ de aquí (`CLAUDE.md`: "sin paginación reinventada").
 
 `FindingRepository.published_page`/`get_published` ya filtran
 `published_at IS NOT NULL` dentro de la sentencia SQL (T50 paso 1). Estos
-dos casos de uso vuelven a comprobar `finding.is_published` sobre la
-entidad ya en memoria, **antes** de devolverla. Si un repositorio futuro
+dos casos de uso vuelven a comprobar `finding.is_published` sobre la entidad
+ya en memoria, **antes** de devolverla. Solo `ListPublishedFindings` excluye
+además los retirados (`not finding.is_retracted`, T100), igual que
+`published_page` en SQL; `GetPublishedFinding` los devuelve a propósito, con
+`retracted_at` y `retraction_note`, para que la ficha muestre el aviso de
+retirada. Si un repositorio futuro
 cambiara esa consulta y se le escapara el filtro -- un `WHERE` mal
 reescrito, un `JOIN` que lo pierde, una implementación alternativa de
 `FindingRepository` que lo olvide --, la única cosa que se publica sin que
@@ -82,7 +86,9 @@ class ListPublishedFindings:
         """
         page = self._findings.published_page(limit, offset, finding_type=finding_type)
         total = self._findings.count_published(finding_type=finding_type)
-        published = [finding for finding in page if finding.is_published]
+        published = [
+            finding for finding in page if finding.is_published and not finding.is_retracted
+        ]
         return FindingsPage(findings=published, total=total)
 
 

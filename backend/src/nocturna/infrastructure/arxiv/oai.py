@@ -131,6 +131,13 @@ def _text(element: ET.Element | None) -> str | None:
     return stripped or None
 
 
+def _parse_raw_authors(raw: ET.Element) -> str | None:
+    """`<authors>` de arXivRaw (cadena libre, a veces con TeX); `None` si
+    falta o está vacío (T100)."""
+    text = _normalize_whitespace(raw.findtext(f"{_RAW}authors") or "")
+    return text or None
+
+
 def _normalize_whitespace(text: str) -> str:
     # arXiv rellena title/abstract a 80 columnas: colapsa saltos de línea y
     # espacios de relleno a un único espacio, igual que `atom.py`.
@@ -239,4 +246,5 @@ def _parse_record(record: ET.Element) -> ArxivEntry:
         categories=_parse_categories(raw),
         published_at=published_at,
         updated_at=updated_at,
+        authors=_parse_raw_authors(raw),
     )

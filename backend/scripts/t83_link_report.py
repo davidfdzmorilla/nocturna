@@ -339,6 +339,7 @@ def build_report(
                             window_days=window_days,
                             item_external_id=item_row.external_id,
                             own_rule=rule,
+                            item_authors=item_row.authors,
                         ),
                     )
                 )

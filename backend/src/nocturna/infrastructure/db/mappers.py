@@ -355,6 +355,7 @@ def item_to_row(item: Item) -> ItemRow:
         fetched_at=item.fetched_at,
         status=item.status,
         exoplanet_match=item.exoplanet_match,
+        authors=item.authors,
     )
 
 
@@ -372,6 +373,7 @@ def item_from_row(row: ItemRow) -> Item:
         fetched_at=row.fetched_at,
         status=row.status,
         exoplanet_match=row.exoplanet_match,
+        authors=row.authors,
     )
 
 
@@ -434,6 +436,8 @@ def finding_to_row(finding: Finding) -> FindingRow:
         tension_evaluation_id=finding.tension_evaluation_id,
         solution_tension=_solution_tension_data_to_json(finding.solution_tension),
         solution_tension_id=finding.solution_tension_id,
+        retracted_at=finding.retracted_at,
+        retraction_note=finding.retraction_note,
     )
 
 
@@ -463,6 +467,8 @@ def finding_from_row(row: FindingRow) -> Finding:
         tension_evaluation_id=row.tension_evaluation_id,
         solution_tension=_solution_tension_data_from_json(row.solution_tension),
         solution_tension_id=row.solution_tension_id,
+        retracted_at=row.retracted_at,
+        retraction_note=row.retraction_note,
     )
 
 
