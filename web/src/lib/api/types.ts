@@ -126,6 +126,9 @@ export type FindingDetail = FindingSummary & {
   first_measurement: FirstMeasurement | null;
   independent_confirmation: IndependentConfirmation | null;
   solution_tension: SolutionTension | null;
+  /** Retirada (T100, ADR 0040): ambos `null` salvo si el hallazgo se retiró. */
+  retracted_at: string | null;
+  retraction_note: string | null;
 };
 
 export type FindingsPage = {

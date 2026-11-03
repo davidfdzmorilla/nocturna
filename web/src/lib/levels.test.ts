@@ -38,6 +38,12 @@ describe("levelText", () => {
     level_amateur: "TEXTO_AFICIONADO",
     level_technical: "TEXTO_TECNICO",
     source_url: null,
+    catalog_tension: null,
+    first_measurement: null,
+    independent_confirmation: null,
+    solution_tension: null,
+    retracted_at: null,
+    retraction_note: null,
   };
 
   it('"curioso" devuelve level_curious', () => {
