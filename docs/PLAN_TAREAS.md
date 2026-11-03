@@ -316,6 +316,7 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Alcance**: noches automáticas con el cruce activo. Registro por noche: ítems EP leídos, medidas extraídas, utilizables y emparejadas, tensiones calculadas, tokens de más del Reader v3, llamadas y tokens del redactor, candidatos y publicados. Revisión de la atribución por muestreo (validación continua con abstracts no vistos). Al final, el autor valora cuántos candidatos son genuinamente interesantes y decide si sigue esta vía o cambia de enfoque.
 - **Pregunta abierta en la tarea (bloquea el arranque de T78, no las anteriores)**: criterio de cierre. ADR 0012 §9 pedía al menos 10 candidatos en dos semanas; ADR 0013 §3 lo dejó en revisión (una tensión real en cinco noches en T71). Propuesta hecha en conversación, **no aprobada**: ≥ 3 candidatos en 4 semanas. El informe de T74 dará el ritmo real. Decide el autor.
 - **Hecho cuando**: el autor ha fijado el criterio, este se cumple, y la decisión final queda en un ADR.
+- **Resuelta (2026-11-03) por ADR 0021**: criterio fijado (a), (b) y (c) según T86; los tres se cumplen con datos de 2026-11-03. Queda la valoración del autor sobre los candidatos y la decisión final de la fase, que irá en un ADR nuevo (próximo número libre, 0039). Estado de T78 sin cambios (pending).
 
 ### T79 · Filtro de exoplanetas en la ingesta y prioridad en la cola de lectura
 - **Estado**: done
@@ -427,12 +428,13 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Cierre (2026-10-14; solo web, sin migración)**: plan aprobado por el autor con las recomendaciones D1–D13 (ADR 0031: "Candidato" también en `solution_tension`, ampliando ADR 0024 §5). Tipo "Tensión entre soluciones" (`?tipo=tension-soluciones`), `SolutionTensionData`, `lib/solutionTension.ts`, nota de origen en el detalle, contrato de claves alineado con `SolutionTensionOut` (la web estaba desalineada desde T85.e); títulos de tabla con mayúscula inicial en los cuatro bloques de datos y cabecera "Trabajo y valor", aprobados por el autor al verlos. Mutantes muertos en `is_default`, `arxivAbsUrl`, `knownLabels`, slug, nota de origen e `isCandidate`. Lighthouse de accesibilidad 100 en escritorio y móvil con una API simulada desechable. Suite web: 234 tests. Tras el merge, el autor activa `[solution_tensions] writer_enabled` en un commit `chore(config)` aparte, fuera de 00:00–04:45.
 
 ### T86 · ADR 0021: criterio de cierre de fase 2 (supersede a ADR 0012)
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T83, T84, T85 y datos de las dos vías
 - **Toca agentes y gasto**: no.
 - **Origen**: Decisiones del autor del 2026-10-01 tras el estudio de viabilidad de la opción 3(b); ADR 0012 queda obsoleto en su criterio de cierre (no se edita).
 - **Alcance**: ADR 0021 (renumerado desde 0019 al aprobar T81 y desde 0020 el 2026-10-02, que lo toman T81 y la regla de referencia de T88/T89) con tres criterios: (a) la cadena funciona de extremo a extremo con un caso real por vía (V1298 Tau b por arXiv, HD 202206 c por el archivo); (b) N = 2 candidatos publicables según el Editor en 4 semanas, sumando las dos vías; (c) snapshot semanal con al menos 4 semanas de histórico y filas en `archive_default_change`. Si (b) falla con (a) y (c) cumplidos, la fase cierra igualmente con el resumen semanal como producto principal. Se redacta al final, con datos de las dos vías.
 - **Hecho cuando**: ADR 0021 escrito con los datos medidos.
+- **Cierre (2026-11-03; solo documentación, sin migración)**: [ADR 0021](adr/0021-criterio-de-cierre-de-fase-2.md) fija tres criterios: (a) un caso real por vía que llegue al Editor con decisión válida; (b) ≥ 2 resultados distintos publicados según el Editor en W41–W44 (2026-10-05 a 2026-11-01), sumando las dos vías; (c) ≥ 28 días de histórico del archivo con filas en `archive_default_change`. Medido el 2026-11-03: (a) V1298 Tau b (arXiv, descartada por el Editor) y HD 202206 c (archivo, publicada 0,70); (b) 6 resultados distintos, 7 publicados; (c) 28 d 21 h, 5 semanas ISO, 84 filas. Se cumplen los tres. D8 (qué pasa si fallan (a) o (c)) queda abierta en `OPEN_DECISIONS.md`.
 
 ### T87 · `--dry-run` no escribe en la base
 - **Estado**: done
