@@ -51,6 +51,8 @@ const sampleFinding: FindingDetail = {
   first_measurement: null,
   independent_confirmation: null,
   solution_tension: null,
+  retracted_at: null,
+  retraction_note: null,
 };
 
 describe("fetchFinding", () => {

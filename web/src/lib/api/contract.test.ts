@@ -126,6 +126,8 @@ const detail: FindingDetail = {
   first_measurement: first,
   independent_confirmation: confirmation,
   solution_tension: solutionTension,
+  retracted_at: "2026-11-03T10:15:00Z",
+  retraction_note: "nota",
 };
 const page: FindingsPage = { items: [summary], page: 1, size: 20, total: 1 };
 
@@ -143,7 +145,7 @@ describe("contrato de la API (claves exactas)", () => {
         "id", "title", "published_at", "type", "level_curious",
         "level_amateur", "level_technical", "source_url",
         "catalog_tension", "first_measurement", "independent_confirmation",
-        "solution_tension",
+        "solution_tension", "retracted_at", "retraction_note",
       ),
     );
   });
@@ -302,6 +304,16 @@ describe("contrato con el backend (lectura de api/schemas.py)", () => {
       .filter((n) => n !== "model_config")
       .sort();
   }
+
+  it("FindingSummary y FindingDetail: mismas claves que los tipos", () => {
+    expect(fieldsOf("FindingDetail")).toEqual(keys(detail));
+    expect(fieldsOf("FindingSummary")).toEqual(keys(summary));
+  });
+
+  it("retracted_at es datetime | None y retraction_note str | None", () => {
+    expect(schemas).toMatch(/retracted_at: datetime \| None/);
+    expect(schemas).toMatch(/retraction_note: str \| None/);
+  });
 
   it("SolutionTensionOut y anidados: mismas claves que los tipos", () => {
     expect(fieldsOf("SolutionTensionOut")).toEqual(keys(solutionTension));

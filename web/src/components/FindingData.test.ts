@@ -7,7 +7,8 @@ import { FindingData } from "./FindingData";
 import { TypeBadge } from "./TypeBadge";
 import { TypeFilter } from "./TypeFilter";
 
-const FICHA = "https://exoplanetarchive.ipac.caltech.edu/overview/HIP%2067522%20b";
+const FICHA =
+  "https://exoplanetarchive.ipac.caltech.edu/overview/HIP%2067522%20b";
 
 const base: FindingDetail = {
   id: "1a2b3c4d-1111-2222-3333-444455556666",
@@ -22,6 +23,8 @@ const base: FindingDetail = {
   first_measurement: null,
   independent_confirmation: null,
   solution_tension: null,
+  retracted_at: null,
+  retraction_note: null,
 };
 
 const render = (el: Parameters<typeof renderToStaticMarkup>[0]) =>
@@ -205,16 +208,18 @@ describe("FindingData", () => {
 
 describe("TypeBadge y TypeFilter", () => {
   it("Candidato solo en catalog_tension", () => {
-    expect(render(createElement(TypeBadge, { type: "catalog_tension" }))).toContain(
-      "Candidato",
-    );
-    expect(render(createElement(TypeBadge, { type: "primera_medida" }))).not.toContain(
-      "Candidato",
-    );
+    expect(
+      render(createElement(TypeBadge, { type: "catalog_tension" })),
+    ).toContain("Candidato");
+    expect(
+      render(createElement(TypeBadge, { type: "primera_medida" })),
+    ).not.toContain("Candidato");
   });
 
   it("el filtro marca aria-current en el activo y enlaza los seis", () => {
-    const html = render(createElement(TypeFilter, { activeType: "primera_medida" }));
+    const html = render(
+      createElement(TypeFilter, { activeType: "primera_medida" }),
+    );
     expect(html).toContain('aria-label="Filtrar por tipo"');
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(html).toMatch(

@@ -133,5 +133,28 @@ export function detailWith(solution: SolutionTension): FindingDetail {
     first_measurement: null,
     independent_confirmation: null,
     solution_tension: solution,
+    retracted_at: null,
+    retraction_note: null,
+  };
+}
+
+/** Hallazgo `primera_medida` retirado (T100, ADR 0040). */
+export function retractedDetail(note: string): FindingDetail {
+  return {
+    ...detailWith(HD_202206_C_MASS),
+    type: "primera_medida",
+    solution_tension: null,
+    first_measurement: {
+      paper_planet_name: "HIP 67522 c",
+      archive_planet_name: "HIP 67522 c",
+      parameter: "mass",
+      archive_status: "no_comparable_solution",
+      archive_url: `${FICHA}HIP%2067522%20c`,
+      measurements: [
+        { value: 13.8, err_plus: 1, err_minus: 1, unit: "M_earth" },
+      ],
+    },
+    retracted_at: "2026-11-03T23:30:00Z",
+    retraction_note: note,
   };
 }

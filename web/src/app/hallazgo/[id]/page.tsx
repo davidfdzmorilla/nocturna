@@ -9,6 +9,7 @@ import { TypeBadge } from "@/components/TypeBadge";
 import { safeArxivSourceUrl } from "@/lib/externalLinks";
 import { LevelNav } from "@/components/LevelNav";
 import { Notice } from "@/components/Notice";
+import { RetractionNotice } from "@/components/RetractionNotice";
 
 /**
  * Igual que el feed: SSR dinámico, no ISR. Ver `app/page.tsx`.
@@ -97,6 +98,12 @@ export default async function FindingPage({
   return (
     <>
       <h1 className="text-2xl font-semibold text-text">{finding.title}</h1>
+      {finding.retracted_at !== null ? (
+        <RetractionNotice
+          retractedAt={finding.retracted_at}
+          note={finding.retraction_note}
+        />
+      ) : null}
       <TypeBadge type={finding.type} />
       <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
         {label}
