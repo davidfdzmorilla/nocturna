@@ -109,6 +109,9 @@ class Item:
     # T79: marca de la ingesta (`ExoplanetFilter`); decide la variante del
     # Reader (v3 solo si True y categoría de medidas). Default False = v2.
     exoplanet_match: bool = False
+    # T100: autores del paper tal cual de arXiv; None = desconocido (ítems
+    # anteriores a T100, sin relleno).
+    authors: str | None = None
 
     _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"status"})
 
@@ -873,8 +876,14 @@ class Finding:
     # T85: tensión entre soluciones del archivo y su fila de origen.
     solution_tension: SolutionTensionData | None = None
     solution_tension_id: UUID | None = None
+    # T100: retirada editorial. Solo un hallazgo publicado se retira; no toca
+    # `published_at` ni `Item.status`.
+    retracted_at: datetime | None = None
+    retraction_note: str | None = None
 
-    _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset({"confidence", "published_at"})
+    _GUARDED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"confidence", "published_at", "retracted_at", "retraction_note"}
+    )
 
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._GUARDED_FIELDS and hasattr(self, name):
@@ -927,6 +936,16 @@ class Finding:
             _require_aware(self.published_at, "published_at")
         if self.confidence is not None:
             self._validate_confidence(self.confidence)
+        if (self.retracted_at is None) != (self.retraction_note is None):
+            raise InvariantViolation(
+                "'retracted_at' y 'retraction_note' deben estar ambos informados o ambos vacíos"
+            )
+        if self.retracted_at is not None:
+            if self.published_at is None:
+                raise InvariantViolation("solo un Finding publicado puede estar retirado")
+            _require_aware(self.retracted_at, "retracted_at")
+        if self.retraction_note is not None:
+            _require_non_empty(self.retraction_note, "retraction_note")
 
     @staticmethod
     def _validate_confidence(confidence: float) -> None:
@@ -947,6 +966,21 @@ class Finding:
         _require_aware(at, "published_at")
         object.__setattr__(self, "confidence", confidence)
         object.__setattr__(self, "published_at", at)
+
+    @property
+    def is_retracted(self) -> bool:
+        return self.retracted_at is not None
+
+    def retract(self, at: datetime, note: str) -> None:
+        """Retira un hallazgo publicado (T100). No toca `published_at`."""
+        if not self.is_published:
+            raise InvalidTransition("unpublished", "retracted", entity="Finding")
+        if self.is_retracted:
+            raise InvalidTransition("retracted", "retracted", entity="Finding")
+        _require_non_empty(note, "retraction_note")
+        _require_aware(at, "retracted_at")
+        object.__setattr__(self, "retracted_at", at)
+        object.__setattr__(self, "retraction_note", note)
 
 
 class RunStatus(StrEnum):

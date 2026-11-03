@@ -100,7 +100,7 @@ def test_un_finding_por_evaluacion_elegible_con_su_payload_y_sin_publicar():
     assert toi_finding.run_id == env.run_id
     assert not toi_finding.is_published and toi_finding.confidence is None
     assert toi_finding.first_measurement is not None
-    assert toi_finding.first_measurement.archive_url is None, "ausente: sin enlace (D14)"
+    assert toi_finding.first_measurement.archive_url == "https://archive.test/TOI-6981_b"
     assert toi_finding.title.startswith("Primera medida del radio de TOI-6981 b")
     assert "arXiv:2609.37597" in toi_finding.level_amateur
     foo_finding = by_item[foo.id]

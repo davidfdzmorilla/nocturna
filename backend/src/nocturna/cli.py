@@ -272,6 +272,7 @@ from nocturna.application.use_cases.record_tension_evaluations import (
     EvaluationRunReport,
     RecordTensionEvaluations,
 )
+from nocturna.application.use_cases.retract_finding import RetractFinding
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.application.use_cases.take_archive_snapshot import (
     ArchiveSnapshotReport,
@@ -311,7 +312,7 @@ from nocturna.domain.archive_digest import (
 )
 from nocturna.domain.clock import Clock
 from nocturna.domain.entities import ITEM_SOURCE_ARXIV, Item, Reading, Run, RunStatus
-from nocturna.domain.errors import InvalidTransition, InvariantViolation
+from nocturna.domain.errors import FindingNotFound, InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.domain.own_solution import OwnSolutionRule
@@ -712,6 +713,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Calcula e informa, pero no escribe nada en la base de datos.",
+    )
+
+    retract_finding = subparsers.add_parser(
+        "retract-finding",
+        help="Retira un hallazgo publicado con una nota (sin LLM, sin red).",
+        description=(
+            "Marca un hallazgo publicado como retirado: sale de la lista pública y su "
+            "detalle muestra la nota. No cambia published_at ni borra nada. No usa Claude "
+            "ni gasta tokens. Códigos: 0 ok, 1 no existe / no publicado / ya retirado."
+        ),
+    )
+    retract_finding.add_argument("finding_id", metavar="ID", type=UUID, help="Id del hallazgo.")
+    retract_finding.add_argument(
+        "--note", required=True, help="Motivo de la retirada, visible en el detalle."
+    )
+    retract_finding.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Valida e informa, pero no escribe nada en la base de datos.",
     )
 
     return parser
@@ -1416,6 +1436,32 @@ def _solution_tensions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _retract_finding(args: argparse.Namespace) -> int:
+    """`retract-finding`: `0` ok; `1` el hallazgo no existe, no está publicado o ya
+    está retirado, o error de base (no se persiste nada); `2` argumentos
+    (argparse). Sin LLM: no importa `claude_agent_sdk` ni usa `BudgetGuard`."""
+    if not args.dry_run:
+        configure_json_logging()
+    settings = Settings()
+    config = load_pipeline_config()
+    clock = system_clock_from_config(config)
+    engine = create_db_engine(settings)
+    session_factory = create_session_factory(engine)
+    try:
+        with unit_of_work(session_factory, commit=not args.dry_run) as session:
+            finding = RetractFinding(findings=SqlAlchemyFindingRepository(session), clock=clock)(
+                args.finding_id, note=args.note, dry_run=args.dry_run
+            )
+    except (FindingNotFound, InvalidTransition, InvariantViolation, SQLAlchemyError) as exc:
+        print(f"retract-finding falló: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        engine.dispose()
+    prefix = "[dry-run] se retiraría" if args.dry_run else "retirado"
+    print(f"{prefix}: {finding.id} · {finding.title} · {finding.retraction_note}")
+    return 0
+
+
 def _archive_snapshot(args: argparse.Namespace) -> int:
     """`archive-snapshot`: `0` ok; `1` el snapshot falló (nada confirmado);
     `3` el snapshot está guardado pero falló la evaluación de tensiones (T88)
@@ -1694,7 +1740,10 @@ def _format_measurement_findings_section(
         f"  primera_medida={report.primera_medida} "
         f"confirmacion_independiente={report.confirmacion_independiente} "
         f"bloqueadas={len(report.blocked_confirmations)} "
-        f"ya generadas={report.already_generated} aplazadas por el tope={report.deferred}",
+        f"ya generadas={report.already_generated} aplazadas por el tope={report.deferred} "
+        f"omitidas por masa mínima={report.skipped_minimum_mass} "
+        f"omitidas por mismo equipo={report.skipped_same_team} "
+        f"omitidas por equipo desconocido={report.skipped_unknown_team}",
     ]
     for finding in report.created:
         lines.append(
@@ -3315,6 +3364,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _evaluate_tensions(args)
     if args.command == "solution-tensions":
         return _solution_tensions(args)
+    if args.command == "retract-finding":
+        return _retract_finding(args)
     return _run_night(args)
 
 

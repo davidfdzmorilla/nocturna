@@ -80,12 +80,19 @@ def awaiting(
     )
 
 
-def toi_6981_b(item_id: UUID) -> TensionEvaluation:
-    """Radio de TOI-6981 b, planeta ausente del archivo."""
+def absent_toi_6981_b(item_id: UUID) -> TensionEvaluation:
+    """Radio de TOI-6981 b, planeta ausente del archivo (`absent`): desde T100 no
+    es elegible como `primera_medida`."""
     return awaiting(
         item_id,
         [make_measurement(2.4, 0.1, 0.1, planet_name="TOI-6981 b", parameter=RADIUS, unit=R_EARTH)],
     )
+
+
+def toi_6981_b(item_id: UUID) -> TensionEvaluation:
+    """Radio de TOI-6981 b, planeta presente en el archivo sin solución comparable
+    (`no_comparable_solution`): elegible como `primera_medida` (T100)."""
+    return replace(absent_toi_6981_b(item_id), archive_planet_name="TOI-6981 b")
 
 
 def toi_210_b_mass(item_id: UUID) -> TensionEvaluation:
@@ -93,6 +100,7 @@ def toi_210_b_mass(item_id: UUID) -> TensionEvaluation:
         item_id,
         [make_measurement(6.75, 1.25, 1.25, planet_name="TOI-210 b", unit=M_EARTH)],
         parameter=MASS,
+        archive_planet_name="TOI-210 b",
     )
 
 
@@ -155,6 +163,8 @@ def make_arxiv_item(external_id: str, **overrides) -> Item:
         "published_at": datetime(2026, 10, 2, 8, 0, tzinfo=UTC),
         "fetched_at": datetime(2026, 10, 2, 9, 0, tzinfo=UTC),
         "exoplanet_match": True,
+        # T100: la confirmación exige autores conocidos y distintos de la referencia.
+        "authors": "A. Otro, B. Distinto",
     }
     defaults.update(overrides)
     return Item(**defaults)

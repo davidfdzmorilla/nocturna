@@ -34,4 +34,5 @@ def entry_to_item(entry: ArxivEntry, *, fetched_at: datetime) -> Item:
         categories=list(entry.categories),
         published_at=entry.published_at,
         fetched_at=fetched_at,
+        authors=entry.authors,
     )

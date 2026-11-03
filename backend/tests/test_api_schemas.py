@@ -94,6 +94,8 @@ def test_finding_detail_has_exactly_expected_keys() -> None:
         first_measurement=None,
         independent_confirmation=None,
         solution_tension=None,
+        retracted_at=None,
+        retraction_note=None,
     )
     dumped = detail.model_dump(mode="json")
     assert set(dumped.keys()) == {
@@ -109,6 +111,8 @@ def test_finding_detail_has_exactly_expected_keys() -> None:
         "first_measurement",
         "independent_confirmation",
         "solution_tension",
+        "retracted_at",
+        "retraction_note",
     }
     assert _FORBIDDEN_KEYS.isdisjoint(dumped.keys())
     assert dumped["type"] == "paper_explained"

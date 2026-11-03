@@ -385,6 +385,10 @@ class FindingDetail(BaseModel):
     first_measurement: FirstMeasurementOut | None
     independent_confirmation: IndependentConfirmationOut | None
     solution_tension: SolutionTensionOut | None
+    #: Retirada (T100): ambos `null` salvo si el hallazgo se retiró; la lista
+    #: pública no incluye retirados, el detalle sigue respondiendo.
+    retracted_at: datetime | None
+    retraction_note: str | None
 
 
 class FindingsPageResponse(BaseModel):

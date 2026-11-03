@@ -123,7 +123,7 @@ def _snapshot(factory) -> dict[str, object]:
 
 
 def _seed(factory) -> None:
-    """TOI-6981 b (ausente del archivo, evaluación pendiente) y HIP 67522 b
+    """TOI-6981 b (en el archivo sin solución comparable, evaluación pendiente) y HIP 67522 b
     (evaluada frente a Chakraborty et al. 2026), con su snapshot del archivo."""
     rows = [
         {**row, "soltype": row.get("soltype") or "Published Confirmed"}
@@ -137,10 +137,12 @@ def _seed(factory) -> None:
             external_id="2609.35979",
             status=ItemStatus.READ,
             published_at=datetime(2026, 10, 2, 8, 0, tzinfo=UTC),
+            authors="A. Otro, B. Distinto",
         )
         items.add_many([toi, hip])
         session.flush()
-        toi_eval = toi_6981_b(toi.id)
+        # T100: presente en el archivo sin solución comparable (un ausente ya no es elegible).
+        toi_eval = dataclasses.replace(toi_6981_b(toi.id), archive_planet_name="TOI-6981 b")
         hip_eval = hip67522_b(hip.id)
         readings = SqlAlchemyReadingRepository(session)
         toi_reading = make_reading(toi.id, measurements=toi_eval.measurements)

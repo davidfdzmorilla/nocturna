@@ -76,9 +76,11 @@ def test_columnas_y_nulabilidad_de_items(scratch_database_url):
         "status",
         "exoplanet_match",
     }
-    assert set(columns) == expected_not_null
+    # T100: `authors` admite NULL (desconocido).
+    assert set(columns) == expected_not_null | {"authors"}
     for name in expected_not_null:
         assert columns[name]["nullable"] is False, f"'{name}' debería ser NOT NULL"
+    assert columns["authors"]["nullable"] is True
 
 
 def test_columnas_y_nulabilidad_de_readings(scratch_database_url):
@@ -137,6 +139,8 @@ def test_columnas_y_nulabilidad_de_findings(scratch_database_url):
         "tension_evaluation_id",
         "solution_tension",
         "solution_tension_id",
+        "retracted_at",
+        "retraction_note",
     }
     assert set(columns) == expected_not_null | expected_nullable
     for name in expected_not_null:

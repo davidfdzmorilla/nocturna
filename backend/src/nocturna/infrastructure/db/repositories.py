@@ -135,6 +135,7 @@ class SqlAlchemyItemRepository:
                 "fetched_at": item.fetched_at,
                 "status": item.status,
                 "exoplanet_match": item.exoplanet_match,
+                "authors": item.authors,
             }
             for item in deduplicated.values()
         ]
@@ -302,12 +303,27 @@ class SqlAlchemyFindingRepository:
         row.confidence = finding.confidence
         row.published_at = finding.published_at
 
+    def get(self, finding_id: UUID) -> Finding | None:
+        """Hallazgo por id sin filtrar por publicación (T100); no la usa la API."""
+        row = self._session.get(FindingRow, finding_id)
+        return finding_from_row(row) if row is not None else None
+
+    def save_retraction(self, finding: Finding) -> None:
+        """Persiste solo `retracted_at` y `retraction_note` de un hallazgo existente (T100)."""
+        row = self._session.get(FindingRow, finding.id)
+        if row is None:
+            raise LookupError(f"no existe Finding con id={finding.id}")
+        row.retracted_at = finding.retracted_at
+        row.retraction_note = finding.retraction_note
+
     def published_page(
         self, limit: int, offset: int, *, finding_type: FindingType | None = None
     ) -> list[Finding]:
         """Página de hallazgos publicados para la web de solo lectura.
 
-        `published_at IS NOT NULL` es el único filtro de publicación (T50):
+        El feed es «publicado y no retirado» (`published_at IS NOT NULL AND
+        retracted_at IS NULL`, T50/T100). La publicación se decide por
+        `published_at` (T50):
         `published_at` y `confidence` solo se escriben juntos en
         `Finding.publish()`, respaldado por el `CHECK
         confidence_published_at_together` de `models.py`. No se cruza con
@@ -325,7 +341,9 @@ class SqlAlchemyFindingRepository:
         `finding_type` (T77) añade `type = :t` a la misma sentencia, sin
         sustituir el filtro de publicación. Sin índice: el volumen es mínimo.
         """
-        stmt = select(FindingRow).where(FindingRow.published_at.is_not(None))
+        stmt = select(FindingRow).where(
+            FindingRow.published_at.is_not(None), FindingRow.retracted_at.is_(None)
+        )
         if finding_type is not None:
             stmt = stmt.where(FindingRow.type == finding_type)
         stmt = (
@@ -337,8 +355,10 @@ class SqlAlchemyFindingRepository:
         return [finding_from_row(row) for row in rows]
 
     def count_published(self, *, finding_type: FindingType | None = None) -> int:
-        """Total de hallazgos publicados, mismo filtro que `published_page`."""
-        stmt = select(func.count()).where(FindingRow.published_at.is_not(None))
+        """Total de hallazgos publicados y no retirados, mismo filtro que `published_page`."""
+        stmt = select(func.count()).where(
+            FindingRow.published_at.is_not(None), FindingRow.retracted_at.is_(None)
+        )
         if finding_type is not None:
             stmt = stmt.where(FindingRow.type == finding_type)
         return self._session.execute(stmt).scalar_one()

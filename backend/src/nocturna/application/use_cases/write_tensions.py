@@ -147,6 +147,7 @@ class SelectTensions:
                     item_external_id=item.external_id,
                     item_published_at=item.published_at,
                     own_rule=self._own_rule,
+                    item_abstract=item.abstract,
                 )
                 if reason is None and evaluation.id in written:
                     reason = "already_written"

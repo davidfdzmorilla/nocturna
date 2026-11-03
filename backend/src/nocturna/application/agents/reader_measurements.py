@@ -1,7 +1,7 @@
 """Filtrado en Python de las medidas crudas del Reader v3 (T71.c).
 
 Puro: sin IO, sin acceso a base de datos ni a `LLMProvider`. Cada elemento
-crudo de `ReaderV3Output.measurements` pasa, en este orden, por cinco
+crudo de `ReaderV3Output.measurements` pasa, en este orden, por seis
 comprobaciones: (1) forma (`parse_measurement`), (2) invariantes de dominio
 (`Measurement(...)`), (3) `evidence` como cita literal del abstract, (4) la
 anfitriona del nombre completado reconocible, con límite de palabra y tras
@@ -35,6 +35,7 @@ from nocturna.domain.entities import (
     MeasurementUnit,
 )
 from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.minimum_mass import states_minimum_mass
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -232,6 +233,11 @@ class DiscardReason(StrEnum):
     #: ninguna forma reconocible (T71.c, corrección tras la pasada 1 de
     #: revisión).
     VALUE_NOT_IN_EVIDENCE = "value_not_in_evidence"
+    #: La medida de masa es una masa mínima (`M sin i`, `minimum mass`,
+    #: `projected mass`) según su `evidence` y el contexto izquierdo en el
+    #: abstract (T100, D2): no es la masa del planeta. Descarta solo esa
+    #: medida y no reintenta el ítem.
+    MINIMUM_MASS = "minimum_mass"
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +307,8 @@ def filter_measurements(raw: list[object], *, abstract: str, title: str) -> Meas
     (invariantes de dominio) -> `evidence_in_abstract` (cita literal) ->
     anfitriona del nombre completado, con límite de palabra y tras
     descartar anfitrionas genéricas, en el `abstract` o en el `title` del
-    ítem -> `value_in_evidence` (la cita contiene el número de `value`).
+    ítem -> `value_in_evidence` (la cita contiene el número de `value`) ->
+    `states_minimum_mass` (T100: una masa mínima `m sin i` no es una masa).
     Nunca lanza por una medida individual: cualquier fallo la descarta y
     sigue con la siguiente.
 
@@ -400,6 +407,16 @@ def filter_measurements(raw: list[object], *, abstract: str, title: str) -> Meas
                         f"'evidence' no cita el número de 'value' ({measurement.value!r}) "
                         "en ninguna forma reconocible"
                     ),
+                )
+            )
+            continue
+
+        if states_minimum_mass(measurement, abstract):
+            discarded.append(
+                _discard_from_measurement(
+                    measurement,
+                    reason=DiscardReason.MINIMUM_MASS,
+                    detail="la masa se presenta como masa mínima (m sin i), no como masa",
                 )
             )
             continue

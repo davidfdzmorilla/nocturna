@@ -129,10 +129,19 @@ class FindingRepository(Protocol):
         """Persiste un hallazgo tras la decisión del Editor. Usado por T43."""
         ...
 
+    def get(self, finding_id: UUID) -> Finding | None:
+        """Recupera un hallazgo por id, publicado o no, retirado o no. Solo para
+        casos de uso internos (T100: retirar); la API usa `get_published`."""
+        ...
+
+    def save_retraction(self, finding: Finding) -> None:
+        """Persiste solo `retracted_at` y `retraction_note` de un hallazgo existente (T100)."""
+        ...
+
     def published_page(
         self, limit: int, offset: int, *, finding_type: FindingType | None = None
     ) -> list[Finding]:
-        """Página de hallazgos publicados, más recientes primero. Usado por T50.
+        """Página de publicados no retirados (T100), más recientes primero. Usado por T50.
 
         `finding_type` restringe a un tipo (T77); `None` los devuelve todos.
         """

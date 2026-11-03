@@ -55,6 +55,7 @@ MAX_SIGMA = 2.0
 WINDOW = 30
 EXTERNAL_ID = "2609.35979"
 OWN_RULE = make_own_solution_rule()
+AUTHORS = "A. Otro, B. Distinto"
 URL = "https://exoplanetarchive.ipac.caltech.edu/overview/HIP%2067522%20b"
 
 
@@ -122,31 +123,32 @@ def _hip67522b():
 # --- primera_medida -----------------------------------------------------------
 
 
-def test_toi_6981_b_radio_ausente_es_primera_medida():
+def test_toi_6981_b_radio_ausente_ya_no_es_primera_medida():
+    """T100: un planeta ausente del archivo (`absent`) no es elegible y la factoría lanza."""
     ev = _awaiting(
         [make_measurement(2.4, 0.1, 0.1, planet_name="TOI-6981 b", parameter=RADIUS, unit=R_EARTH)]
     )
-    assert first_measurement_eligible(ev)
-    fm = first_measurement_from(ev, archive_url=None)
-    assert fm.archive_status == ArchiveStatus.ABSENT
-    assert fm.archive_planet_name is None and fm.archive_url is None
-    assert fm.measurements == (PaperMeasurement(2.4, 0.1, 0.1, R_EARTH),)
+    assert not first_measurement_eligible(ev)
+    with pytest.raises(InvariantViolation):
+        first_measurement_from(ev, archive_url=None)
 
 
-def test_toi_210_b_masa_y_radio_son_primeras_medidas():
+def test_toi_210_b_masa_y_radio_presentes_sin_solucion_son_primeras_medidas():
     mass = _awaiting(
         [make_measurement(6.75, 1.25, 1.25, planet_name="TOI-210 b", unit=M_EARTH)],
         parameter=MASS,
+        archive_planet_name="TOI-210 b",
     )
     radius = _awaiting(
         [
             make_measurement(
                 2.234, 0.074, 0.074, planet_name="TOI-210 b", parameter=RADIUS, unit=R_EARTH
             )
-        ]
+        ],
+        archive_planet_name="TOI-210 b",
     )
     assert first_measurement_eligible(mass) and first_measurement_eligible(radius)
-    assert first_measurement_from(mass, archive_url=None).parameter == MASS
+    assert first_measurement_from(mass, archive_url="https://a/x").parameter == MASS
 
 
 def test_planeta_presente_sin_solucion_comparable_es_primera_medida_con_subtipo():
@@ -201,6 +203,7 @@ def test_hip_67522_c_consistent_with_limit_no_es_elegible():
         window_days=WINDOW,
         item_external_id=EXTERNAL_ID,
         own_rule=OWN_RULE,
+        item_authors=AUTHORS,
     )
 
 
@@ -226,6 +229,7 @@ def _eligible(ev, *, published=OLD_PAPER, now=NOW, max_sigma=MAX_SIGMA, window=W
         window_days=window,
         item_external_id=EXTERNAL_ID,
         own_rule=OWN_RULE,
+        item_authors=AUTHORS,
     )
 
 
@@ -245,6 +249,7 @@ def test_hip_67522_b_frente_a_chakraborty_es_confirmacion():
         archive_url=URL,
         item_external_id=EXTERNAL_ID,
         own_rule=OWN_RULE,
+        item_authors=AUTHORS,
     )
     assert ic.sigmas == pytest.approx((1.4242, 0.7476), abs=5e-5)
     assert ic.reference.refname == "Chakraborty et al. 2026"
@@ -372,6 +377,7 @@ def test_periodo_evaluado_no_es_confirmacion():
             archive_url=URL,
             item_external_id=EXTERNAL_ID,
             own_rule=OWN_RULE,
+            item_authors=AUTHORS,
         )
 
 
@@ -387,6 +393,7 @@ def test_confirmacion_no_elegible_lanza_en_la_factoria():
             archive_url=URL,
             item_external_id=EXTERNAL_ID,
             own_rule=OWN_RULE,
+            item_authors=AUTHORS,
         )
 
 
@@ -415,6 +422,7 @@ def _confirmation():
         archive_url=URL,
         item_external_id=EXTERNAL_ID,
         own_rule=OWN_RULE,
+        item_authors=AUTHORS,
     )
 
 

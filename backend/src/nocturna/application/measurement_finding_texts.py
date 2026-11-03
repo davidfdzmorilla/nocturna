@@ -24,6 +24,7 @@ from nocturna.domain.entities import (
     MeasurementUnit,
     PaperMeasurement,
 )
+from nocturna.domain.team import reference_first_author
 from nocturna.domain.tension import to_canonical
 
 _MINUS = "−"
@@ -186,6 +187,7 @@ def render_confirmacion_independiente(
     )
 
     arxiv_suffix = f", arXiv:{reference.arxiv_id}" if reference.arxiv_id else ""
+    first_author = reference_first_author(reference.refname) or reference.refname
     level_technical = (
         f"Comparación de {planet} ({_PARAM_NAME[parameter]}) entre arXiv:{arxiv_id} y la solución "
         f"del NASA Exoplanet Archive {reference.refname} (entrada en el archivo: "
@@ -194,8 +196,9 @@ def render_confirmacion_independiente(
         "σ = |x_p − x_r| / √(e_p² + e_r²) usando el error del lado que mira al otro valor. "
         f"Criterio: todas las medidas a ≤ {format_number(confirmation.max_sigma)} σ y la más "
         f"reciente de las dos entradas en los últimos {confirmation.window_days} días. "
-        "Independencia comprobada solo como artículos distintos; no se comprueba si los métodos "
-        f"o los equipos son distintos. Ficha: {confirmation.archive_url}."
+        "Independencia comprobada solo como artículos distintos; el primer autor de la "
+        f"referencia ({first_author}) no figura entre los autores del artículo; no se comprueba "
+        f"el resto del equipo ni el método. Ficha: {confirmation.archive_url}."
     )
     return FindingTexts(
         title=title,

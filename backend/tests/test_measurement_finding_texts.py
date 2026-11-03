@@ -8,7 +8,6 @@ from helpers.exoplanet import make_own_solution_rule
 from helpers.measurement_findings import (
     hip67522_b,
     present_without_reference,
-    toi_6981_b,
 )
 
 from nocturna.application.measurement_finding_texts import (
@@ -49,6 +48,7 @@ def _confirmation():
         archive_url=URL,
         item_external_id="2609.35979",
         own_rule=make_own_solution_rule(),
+        item_authors="A. Otro, B. Distinto",
     )
 
 
@@ -66,7 +66,16 @@ def test_sigma_con_dos_decimales():
 
 
 def test_primera_medida_planeta_ausente_toi_6981_b():
-    fm = first_measurement_from(toi_6981_b(uuid4()), archive_url=None)
+    # Desde T100 no se generan hallazgos de planetas ausentes, pero los ya guardados
+    # (`archive_status = absent`) se siguen mostrando: la plantilla los cubre.
+    fm = FirstMeasurement(
+        paper_planet_name="TOI-6981 b",
+        archive_planet_name=None,
+        parameter=MeasuredParameter.RADIUS,
+        archive_status=ArchiveStatus.ABSENT,
+        measurements=(PaperMeasurement(2.4, 0.1, 0.1, MeasurementUnit.R_EARTH),),
+        archive_url=None,
+    )
 
     texts = render_primera_medida(fm, arxiv_id="2609.37597")
 
@@ -173,8 +182,9 @@ def test_confirmacion_independiente_hip_67522_b():
         "usando el error del lado que mira al otro valor. "
         "Criterio: todas las medidas a ≤ 2,0 σ y la más reciente de las dos entradas en los "
         "últimos 30 días. "
-        "Independencia comprobada solo como artículos distintos; no se comprueba si los métodos "
-        f"o los equipos son distintos. Ficha: {URL}."
+        "Independencia comprobada solo como artículos distintos; el primer autor de la "
+        "referencia (Chakraborty) no figura entre los autores del artículo; no se comprueba el "
+        f"resto del equipo ni el método. Ficha: {URL}."
     )
 
 
@@ -182,7 +192,10 @@ def test_los_textos_no_afirman_metodo_ni_equipo_distintos():
     texts = render_confirmacion_independiente(_confirmation(), arxiv_id="2609.35979")
     joined = " ".join([texts.title, texts.level_curious, texts.level_amateur])
     assert "método" not in joined and "equipo" not in joined
-    assert "no se comprueba si los métodos o los equipos son distintos" in texts.level_technical
+    assert "no se comprueba el resto del equipo ni el método" in texts.level_technical
+    assert "no se comprueba si los métodos o los equipos son distintos" not in (
+        texts.level_technical
+    )
 
 
 def test_es_determinista():

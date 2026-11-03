@@ -104,7 +104,7 @@ def get_finding(
     findings: _FindingsDep,
     items: _ItemsDep,
 ) -> FindingDetail:
-    """Detalle de un hallazgo publicado.
+    """Detalle de un hallazgo publicado (T100: también si está retirado, con su nota).
 
     `404` con el mismo cuerpo exacto (`{"detail": "finding not found"}`)
     tanto si el id no existe como si existe pero no está publicado: no hay
@@ -153,4 +153,6 @@ def get_finding(
             if finding.solution_tension is None
             else SolutionTensionOut.from_domain(finding.solution_tension)
         ),
+        retracted_at=finding.retracted_at,
+        retraction_note=finding.retraction_note,
     )

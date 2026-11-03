@@ -35,6 +35,7 @@ def _reason(ev: TensionEvaluation, *, threshold: float = 3.0, external_id: str =
         item_external_id=external_id,
         item_published_at=PUBLISHED,
         own_rule=RULE,
+        item_abstract="",
     )
 
 

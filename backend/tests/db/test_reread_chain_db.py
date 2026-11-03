@@ -88,7 +88,8 @@ async def test_tras_releer_se_evalua_y_se_genera_una_vez_solo_con_la_lectura_nue
             items=SqlAlchemyItemRepository(session),
             evaluations=SqlAlchemyTensionEvaluationRepository(session),
             compute=ComputeTensions(
-                FakeExoplanetCatalog(),
+                # T100: presente en el archivo sin soluciones (un ausente ya no genera hallazgo).
+                FakeExoplanetCatalog(aliases={"TOI-6981 b": "TOI-6981 b"}),
                 threshold_sigma=3.0,
                 period_rule=make_period_rule(),
                 own_solution_rule=make_own_solution_rule(),

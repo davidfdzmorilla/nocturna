@@ -16,7 +16,7 @@ from nocturna.infrastructure.db.models import Base
 
 _REVISION = "e3a7c5b9d214"
 _REVISION_BEFORE = "b6d2f8a4c917"
-_HEAD = "a4d9e1b7c352"
+_HEAD = "b7e3a1c9d482"
 _CHECK = "ck_items_item_status"
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
