@@ -53,10 +53,16 @@ def _toml(tmp_path: Path, *, drop: str | None = None, **values: str) -> Path:
     return path
 
 
-def test_el_toml_real_trae_el_resumen_apagado_y_desde_la_w40() -> None:
+def test_el_toml_real_trae_el_resumen_encendido_y_desde_la_w40() -> None:
+    # Activado el 2026-11-02 tras el merge de T84.r.w (commit `chore(config)`).
     section = load_pipeline_config(REAL_PIPELINE_TOML).archive_digest
-    assert section.writer_enabled is False
+    assert section.writer_enabled is True
     assert section.since_week == "2026-W40"
+
+
+def test_apagado_carga(tmp_path: Path) -> None:
+    config = load_pipeline_config(_toml(tmp_path, writer_enabled="false"))
+    assert config.archive_digest.writer_enabled is False
 
 
 def test_encendido_carga(tmp_path: Path) -> None:
