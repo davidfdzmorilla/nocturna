@@ -1,7 +1,5 @@
-import type {
-  SolutionTension,
-  SolutionTensionSolution,
-} from "@/lib/api/types";
+import { useId } from "react";
+import type { SolutionTension, SolutionTensionSolution } from "@/lib/api/types";
 import { candidateLegend } from "@/lib/findingTypes";
 import { arxivAbsUrl, safeArchiveUrl } from "@/lib/externalLinks";
 import {
@@ -11,6 +9,15 @@ import {
   formatSigma,
   formatWithErrors,
 } from "@/lib/measurementFormat";
+import {
+  CAPTION,
+  TABLE,
+  TD,
+  TD_VALUE,
+  TH,
+  TH_ROW,
+  TableScroll,
+} from "./TableScroll";
 import {
   NO_OTHERS_TEXT,
   SIGMA_NOTE,
@@ -24,15 +31,14 @@ type Props = {
   data: SolutionTension;
 };
 
-const TH = "border-b border-border p-2";
-const TD = "border-b border-border p-2";
-
 function SolutionCell({ solution }: { solution: SolutionTensionSolution }) {
   const arxiv = arxivAbsUrl(solution.arxiv_id);
   return (
     <>
       <span className="block">{solution.reference}</span>
-      <span className="block">{formatWithErrors(solution)}</span>
+      <span className="block whitespace-nowrap">
+        {formatWithErrors(solution)}
+      </span>
       {solution.is_default ? (
         <span className="block text-text-muted">
           Solución por defecto del archivo
@@ -52,6 +58,8 @@ function SolutionCell({ solution }: { solution: SolutionTensionSolution }) {
 }
 
 export function SolutionTensionData({ data }: Props) {
+  const captionId = useId();
+  const othersCaptionId = useId();
   const archiveUrl = safeArchiveUrl(data.archive_url);
   const parameter = PARAMETER_LABELS[data.parameter];
   const labels = knownLabels(data.labels);
@@ -59,7 +67,9 @@ export function SolutionTensionData({ data }: Props) {
 
   return (
     <>
-      <p className="mt-2 text-sm text-text">{candidateLegend("solution_tension")}</p>
+      <p className="mt-2 text-sm text-text">
+        {candidateLegend("solution_tension")}
+      </p>
 
       {labels.length > 0 ? (
         <ul className="mt-3 space-y-2 text-sm">
@@ -74,46 +84,48 @@ export function SolutionTensionData({ data }: Props) {
         </ul>
       ) : null}
 
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <caption className="pb-2 text-left text-text-muted">
-            {`${parameterTitle(data.parameter)} de ${data.planet_name}: dos soluciones del NASA Exoplanet Archive`}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col" className={TH}>
-                Solución
-              </th>
-              <th scope="col" className={TH}>
-                Trabajo y valor
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="align-top">
-              <th scope="row" className={`${TD} font-normal`}>
-                Solución nueva
-              </th>
-              <td className={TD}>
-                <SolutionCell solution={data.new} />
-                {release ? (
-                  <span className="block text-text-muted">{release}</span>
-                ) : null}
-              </td>
-            </tr>
-            <tr className="align-top">
-              <th scope="row" className={`${TD} font-normal`}>
-                Referencia
-              </th>
-              <td className={TD}>
-                <SolutionCell solution={data.reference} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div className="mt-3">
+        <TableScroll labelledBy={captionId}>
+          <table className={`${TABLE} min-w-[28rem]`}>
+            <caption id={captionId} className={CAPTION}>
+              {`${parameterTitle(data.parameter)} de ${data.planet_name}: dos soluciones del NASA Exoplanet Archive`}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" className={TH}>
+                  Solución
+                </th>
+                <th scope="col" className={TH}>
+                  Trabajo y valor
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="align-top">
+                <th scope="row" className={TH_ROW}>
+                  Solución nueva
+                </th>
+                <td className={TD}>
+                  <SolutionCell solution={data.new} />
+                  {release ? (
+                    <span className="block text-text-muted">{release}</span>
+                  ) : null}
+                </td>
+              </tr>
+              <tr className="align-top">
+                <th scope="row" className={TH_ROW}>
+                  Referencia
+                </th>
+                <td className={TD}>
+                  <SolutionCell solution={data.reference} />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </TableScroll>
       </div>
 
-      <p className="mt-2 text-sm text-text-muted">
+      <p className="mt-3 text-sm text-text-muted">
         {referenceRoleText(data.reference_role)}
       </p>
       <p className="mt-2 text-sm text-text">
@@ -122,38 +134,40 @@ export function SolutionTensionData({ data }: Props) {
       </p>
       <p className="mt-1 text-sm text-text-muted">{SIGMA_NOTE}</p>
 
-      <h3 className="mt-6 text-base font-semibold text-text">
+      <h3 className="mt-6 font-semibold text-text">
         Otras soluciones del archivo
       </h3>
       {data.others.length === 0 ? (
         <p className="mt-2 text-sm text-text-muted">{NO_OTHERS_TEXT}</p>
       ) : (
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <caption className="sr-only">
-              {`Otras soluciones de ${parameter} de ${data.planet_name} en el archivo`}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" className={TH}>
-                  Solución
-                </th>
-                <th scope="col" className={TH}>
-                  Diferencia con la nueva
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.others.map((o, index) => (
-                <tr key={index} className="align-top">
-                  <th scope="row" className={`${TD} font-normal`}>
-                    <SolutionCell solution={o.solution} />
+        <div className="mt-2">
+          <TableScroll labelledBy={othersCaptionId}>
+            <table className={`${TABLE} min-w-[28rem]`}>
+              <caption id={othersCaptionId} className="sr-only">
+                {`Otras soluciones de ${parameter} de ${data.planet_name} en el archivo`}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col" className={TH}>
+                    Solución
                   </th>
-                  <td className={TD}>{formatSigma(o.sigma)} σ</td>
+                  <th scope="col" className={TH}>
+                    Diferencia con la nueva
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.others.map((o, index) => (
+                  <tr key={index} className="align-top">
+                    <th scope="row" className={TH_ROW}>
+                      <SolutionCell solution={o.solution} />
+                    </th>
+                    <td className={TD_VALUE}>{formatSigma(o.sigma)} σ</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         </div>
       )}
 

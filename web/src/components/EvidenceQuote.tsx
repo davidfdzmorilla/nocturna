@@ -16,7 +16,7 @@ export function EvidenceQuote({ evidence, sourceUrl }: EvidenceQuoteProps) {
     <figure className="mt-1">
       <blockquote
         lang="en"
-        className="border-l-2 border-border pl-3 text-sm text-text"
+        className="border-l-2 border-border-strong pl-3 text-sm text-text break-words"
       >
         {evidence}
       </blockquote>

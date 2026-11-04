@@ -257,15 +257,24 @@ describe("portada: resumen semanal y hallazgos", () => {
   });
 
   it.each([
-    ["sin texto", async () => {
-      vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: true, data: week40 });
-    }],
-    ["archivo caído", async () => {
-      vi.mocked(fetchArchiveWeeks).mockResolvedValue({
-        ok: false,
-        reason: "unavailable",
-      });
-    }],
+    [
+      "sin texto",
+      async () => {
+        vi.mocked(fetchArchiveWeek).mockResolvedValue({
+          ok: true,
+          data: week40,
+        });
+      },
+    ],
+    [
+      "archivo caído",
+      async () => {
+        vi.mocked(fetchArchiveWeeks).mockResolvedValue({
+          ok: false,
+          reason: "unavailable",
+        });
+      },
+    ],
   ])("%s: un solo h1 (sr-only) y encabezados en orden", async (_n, setup) => {
     await setup();
     const html = await render({});
@@ -278,5 +287,73 @@ describe("portada: resumen semanal y hallazgos", () => {
     for (let i = 1; i < levels.length; i++) {
       expect(levels[i] - levels[i - 1]).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("feed agrupado por noche (T102)", () => {
+  const mk = (id: string, published_at: string) => ({
+    id,
+    type: "paper_explained" as const,
+    title: `Titulo ${id}`,
+    published_at,
+    level_curious: "Texto.",
+  });
+
+  beforeEach(() => {
+    vi.mocked(fetchFindingsPage).mockResolvedValue({
+      ok: true,
+      data: {
+        items: [
+          mk("a", "2026-11-04T03:10:00Z"),
+          mk("b", "2026-11-03T23:30:00Z"),
+          mk("c", "2026-11-03T03:00:00Z"),
+        ],
+        page: 1,
+        size: 20,
+        total: 3,
+      },
+    });
+  });
+
+  it("un separador con <time> por noche y ninguno dentro de la tarjeta", async () => {
+    const html = await render({});
+    const times = [
+      ...html.matchAll(/<time dateTime="([^"]+)">([^<]+)<\/time>/g),
+    ];
+    // La portada con texto no pinta más <time>: solo las dos noches.
+    expect(times.map((m) => m[1])).toEqual(["2026-11-04", "2026-11-03"]);
+    expect(times[0][2]).toBe("Publicados el 4 de noviembre de 2026");
+    for (const article of html.matchAll(/<article[\s\S]*?<\/article>/g)) {
+      expect(article[0]).not.toContain("<time");
+    }
+  });
+
+  it("un solo enlace por tarjeta", async () => {
+    const html = await render({});
+    const articles = [...html.matchAll(/<article[\s\S]*?<\/article>/g)];
+    expect(articles).toHaveLength(3);
+    for (const article of articles) {
+      expect(article[0].match(/<a[\s>]/g)).toHaveLength(1);
+    }
+  });
+
+  it("los títulos de tarjeta son h3 y los separadores no son encabezados", async () => {
+    const html = await render({});
+    expect(html.match(/<h3[\s>]/g)).toHaveLength(3);
+    expect(html).not.toMatch(/<h[1-6][^>]*><time/);
+  });
+
+  it("los cuatro recuentos <dl> de la portada: etiquetas en orden y cifras", async () => {
+    const html = await render({});
+    const dl = html.slice(html.indexOf("<dl"), html.indexOf("</dl>"));
+    const pairs = [
+      ...dl.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>(\d+)<\/dd>/g),
+    ].map((m) => `${m[1]}: ${m[2]}`);
+    expect(pairs).toEqual([
+      "Referencia cambiada: 0",
+      "Planetas nuevos: 1",
+      "Recuperados: 0",
+      "Pierden la referencia: 0",
+    ]);
   });
 });

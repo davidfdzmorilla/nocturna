@@ -8,6 +8,8 @@ type PaginationProps = {
   type?: FindingType | null;
 };
 
+const DISABLED = "px-4 py-2 text-sm text-text-muted opacity-60";
+
 /**
  * Paginación del feed. Enlaces reales (`<Link>` con `href`), funciona
  * sin JavaScript. Los bordes (no hay página anterior/siguiente) se
@@ -24,24 +26,28 @@ export function Pagination({ page, totalPages, type = null }: PaginationProps) {
   return (
     <nav
       aria-label="Paginación de hallazgos"
-      className="mt-8 flex items-center justify-between gap-4"
+      className="mt-8 flex flex-wrap items-center justify-between gap-4"
     >
       {hasPrevious ? (
-        <Link href={pageHref(page - 1, type)}>← Anterior</Link>
+        <Link href={pageHref(page - 1, type)} className="btn-outline">
+          ← Anterior
+        </Link>
       ) : (
-        <span aria-disabled="true" className="text-text-muted">
+        <span aria-disabled="true" className={DISABLED}>
           ← Anterior
         </span>
       )}
 
-      <p className="text-sm text-text-muted">
+      <p className="text-sm tabular-nums text-text-muted">
         Página {page} de {totalPages}
       </p>
 
       {hasNext ? (
-        <Link href={pageHref(page + 1, type)}>Siguiente →</Link>
+        <Link href={pageHref(page + 1, type)} className="btn-outline">
+          Siguiente →
+        </Link>
       ) : (
-        <span aria-disabled="true" className="text-text-muted">
+        <span aria-disabled="true" className={DISABLED}>
           Siguiente →
         </span>
       )}

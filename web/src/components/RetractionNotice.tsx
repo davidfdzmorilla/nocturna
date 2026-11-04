@@ -18,7 +18,7 @@ export function RetractionNotice({ retractedAt, note }: RetractionNoticeProps) {
   return (
     <section
       aria-labelledby="retirada"
-      className="mt-4 rounded-md border border-notice-border bg-notice-bg px-4 py-3 text-notice-text"
+      className="mt-5 rounded-lg border border-notice-border bg-notice-bg px-4 py-3 text-notice-text"
     >
       <h2 id="retirada" className="font-semibold">
         {RETRACTION_PREFIX}{" "}

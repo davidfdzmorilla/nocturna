@@ -22,6 +22,16 @@ export function weekCountsLine(w: DigestWeek): string {
     : `Referencia cambiada: ${w.changed} · Planetas nuevos: ${w.new_planet} · Recuperados: ${w.regained} · Pierden la referencia: ${w.lost}`;
 }
 
+/** Recuentos de una semana, mismas etiquetas y orden que `weekCountsLine`. */
+export function weekCounts(w: DigestWeek): { label: string; value: number }[] {
+  return [
+    { label: "Referencia cambiada", value: w.changed },
+    { label: "Planetas nuevos", value: w.new_planet },
+    { label: "Recuperados", value: w.regained },
+    { label: "Pierden la referencia", value: w.lost },
+  ];
+}
+
 export const AI_FREE_NOTE =
   "Datos del NASA Exoplanet Archive presentados con plantillas fijas; esta sección no contiene texto generado por IA.";
 

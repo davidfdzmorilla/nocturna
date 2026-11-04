@@ -116,3 +116,59 @@ export function parameterTitle(parameter: Parameter): string {
   const label = PARAMETER_LABELS[parameter];
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
+
+/** Posicional con `d` decimales y coma; sin exponente ni separador de miles. */
+function fixed(v: number, d: number): string {
+  const text = Math.abs(v) >= 1e21 ? toPositional(v.toExponential()) : v.toFixed(d);
+  // Un cero con signo (-0, o -0,0004 redondeado) se muestra sin él.
+  const unsigned = /^-0(\.0*)?$/.test(text) ? text.slice(1) : text;
+  return unsigned.replace(".", ",");
+}
+
+/** Decimales para dos cifras en el error: `max(0, 1 - floor(log10(e)))`. */
+function errorDecimals(smallestError: number): number {
+  return Math.max(0, 1 - Math.floor(Math.log10(smallestError)));
+}
+
+/** `max(0, 3 − floor(log10|v|))` decimales, sin ceros finales. */
+function fourSignificant(v: number): string {
+  if (v === 0) {
+    return "0";
+  }
+  const d = Math.max(0, 3 - Math.floor(Math.log10(Math.abs(v))));
+  const text = fixed(v, d);
+  return text.includes(",") ? text.replace(/0+$/, "").replace(/,$/, "") : text;
+}
+
+/**
+ * Versión redondeada para lectura de `formatArchiveValue` (T102, ADR 0041):
+ * con los dos errores > 0, el menor lleva dos cifras significativas y el
+ * valor y los errores comparten esos decimales; si los errores redondeados
+ * coinciden se usa `±`. Sin errores, con un error nulo o 0 o con cota,
+ * `max(0, 3 − floor(log10|v|))` decimales del valor sin ceros finales. Nunca notación
+ * exponencial ni separador de miles. El valor exacto sigue disponible con
+ * `formatArchiveValue`.
+ */
+export function formatArchiveValueRounded(p: ArchiveValue | null): string {
+  if (p === null || p.value === null) {
+    return MISSING_VALUE;
+  }
+  const unit = UNIT_LABELS[p.unit];
+  if (p.bound === "upper") {
+    return `< ${fourSignificant(p.value)} ${unit}`;
+  }
+  if (p.bound === "lower") {
+    return `> ${fourSignificant(p.value)} ${unit}`;
+  }
+  const { err_plus: plus, err_minus: minus } = p;
+  if (plus === null || minus === null || plus <= 0 || minus <= 0) {
+    return `${fourSignificant(p.value)} ${unit}`;
+  }
+  const d = errorDecimals(Math.min(plus, minus));
+  const number = fixed(p.value, d);
+  const a = fixed(plus, d);
+  const b = fixed(minus, d);
+  return a === b
+    ? `${number} ± ${a} ${unit}`
+    : `${number} +${a} / ${MINUS}${b} ${unit}`;
+}

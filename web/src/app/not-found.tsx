@@ -8,8 +8,8 @@ import Link from "next/link";
  */
 export default function NotFound() {
   return (
-    <div className="mx-auto max-w-3xl py-16 text-center">
-      <h1 className="text-2xl font-semibold text-text">
+    <div className="mx-auto max-w-3xl py-12 sm:py-16 text-center">
+      <h1 className="font-display text-3xl leading-tight text-balance text-text sm:text-4xl">
         Este hallazgo no existe o no está publicado
       </h1>
       <p className="mt-4">

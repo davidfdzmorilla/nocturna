@@ -14,19 +14,29 @@ export function DigestWriterText({
   legend?: string;
 }) {
   return (
-    <section aria-labelledby="resumen-ia" className="mt-6">
-      <p className="text-sm text-text-muted">{AI_TEXT_LABEL}</p>
-      <h2 id="resumen-ia" className="mt-1 text-xl font-semibold text-text">
+    <section
+      aria-labelledby="resumen-ia"
+      className="mt-6 border-l-2 border-ai pl-4 sm:pl-5"
+    >
+      <p>
+        <span className="inline-block rounded border border-ai px-2 py-0.5 text-xs font-medium text-ai">
+          {AI_TEXT_LABEL}
+        </span>
+      </p>
+      <h2
+        id="resumen-ia"
+        className="mt-2 font-display text-xl break-words text-text sm:text-2xl"
+      >
         {text.title}
       </h2>
-      <div className="mt-2 flex flex-col gap-3 text-text">
+      <div className="prose-block mt-2 flex flex-col gap-3 text-text">
         {summaryParagraphs(text.summary).map((p, i) => (
           <p key={i} className="whitespace-pre-line">
             {p}
           </p>
         ))}
       </div>
-      <p className="mt-3 text-sm text-text-muted">{legend}</p>
+      <p className="prose-block mt-3 text-sm text-text-muted">{legend}</p>
     </section>
   );
 }

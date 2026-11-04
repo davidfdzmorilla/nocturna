@@ -127,8 +127,8 @@ describe("SolutionTensionData", () => {
   it("tabla de otras: primera celda th scope=row y aria-label del enlace", () => {
     const out = html(SYNTHETIC_WITH_LABELS);
     const others = out.slice(out.indexOf("Diferencia con la nueva"));
-    expect(others).toContain('<th scope="row" class="border-b border-border p-2 font-normal">');
-    expect(others).not.toContain("<td class=\"border-b border-border p-2\"><span");
+    expect(others).toMatch(/<th scope="row" class="[^"]*font-normal">/);
+    expect(others).not.toMatch(/<td class="[^"]*"><span/);
     expect(out).toContain('aria-label="Ver Nueva et al. 2026 en arXiv"');
     expect(out).toContain('aria-label="Ver Defecto et al. 2024 en arXiv"');
     expect(out).toContain(">Ver en arXiv<");

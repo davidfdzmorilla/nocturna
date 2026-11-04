@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { FindingSummary } from "@/lib/api/types";
-import { formatPublishedAt } from "@/lib/dates";
 import { TypeBadge } from "./TypeBadge";
 
 type FindingCardProps = {
@@ -13,23 +12,29 @@ type FindingCardProps = {
  * pedirlos aparte por tarjeta reintroduciría el N+1 que T50 evitó a
  * propósito).
  *
+ * Una sola `<a>` por tarjeta: el enlace del título se extiende a toda la
+ * tarjeta con un `::after` absoluto (stretched link). La fecha no va en la
+ * tarjeta: el feed agrupa por noche (`feedGroups`).
+ *
  * El extracto de `level_curious` se recorta visualmente con
- * `line-clamp-4` (CSS): el texto completo sigue en el DOM, no se corta
+ * `line-clamp-3` (CSS): el texto completo sigue en el DOM, no se corta
  * la cadena en JS ni a mitad de palabra.
  */
 export function FindingCard({ finding }: FindingCardProps) {
-  const { iso, label } = formatPublishedAt(finding.published_at);
-
   return (
-    <article className="rounded-md border border-border bg-surface p-4">
-      <h3 className="text-lg font-semibold">
-        <Link href={`/hallazgo/${finding.id}`}>{finding.title}</Link>
-      </h3>
+    <article className="relative min-w-0 rounded-lg border border-border bg-surface p-5 hover:border-border-strong has-[a:focus-visible]:border-accent">
       <TypeBadge type={finding.type} />
-      <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
-        {label}
-      </time>
-      <p className="mt-3 line-clamp-4 text-text">{finding.level_curious}</p>
+      <h3 className="mt-2 text-lg font-semibold leading-snug break-words">
+        <Link
+          href={`/hallazgo/${finding.id}`}
+          className="link-quiet after:absolute after:inset-0"
+        >
+          {finding.title}
+        </Link>
+      </h3>
+      <p className="mt-3 line-clamp-3 break-words text-text-muted">
+        {finding.level_curious}
+      </p>
     </article>
   );
 }

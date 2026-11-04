@@ -1,39 +1,70 @@
 @import "tailwindcss";
 
 /*
- * Paleta oscura sobria, tokens semánticos (no nombres de color literales)
- * para poder cambiarla sin tocar componentes. Todas las combinaciones
- * texto/fondo usadas en la web cumplen contraste >= 4.5:1 (comprobado
- * manualmente con la fórmula de WCAG 2.1; ver informe de la tarea).
+ * Paleta nocturna (solo oscuro), tokens semánticos. Contraste WCAG 2.1
+ * calculado (fondo bg / surface / surface-raised):
+ *   text        #e6e8ee  15,97 / 14,89 / 13,89
+ *   text-muted  #a9b1c0   9,07 /  8,46 /  7,89
+ *   accent      #e3b766  10,46 /  9,76 /  9,10
+ *   link        #8fb8ff   9,75 /  9,10 /  8,48
+ *   link-hover  #b9d2ff  12,78 / 11,93 / 11,12
+ *   ai          #c9b8ff  10,98 / 10,24 /  9,54
+ *   focus       #ffb454  11,09 / 10,35 /  9,65
+ *   notice-text #ffd28a sobre notice-bg #2a1c05: 11,71
+ * Todos >= 4,5:1. Los bordes (border 1,37, border-strong 1,78 sobre bg) son
+ * decorativos: ninguna información depende solo de ellos.
  */
 @theme {
-  --color-bg: #0b0e14;
-  --color-surface: #131722;
-  --color-border: #2b3040;
-  --color-text: #e8eaf0;
-  --color-text-muted: #b8c0cc;
-  --color-link: #7fb2ff;
-  --color-link-hover: #a8cbff;
+  --color-bg: #090c13;
+  --color-surface: #11151f;
+  --color-surface-raised: #171c29;
+  --color-border: #242a3a;
+  --color-border-strong: #343c52;
+  --color-text: #e6e8ee;
+  --color-text-muted: #a9b1c0;
+  --color-accent: #e3b766;
+  --color-link: #8fb8ff;
+  --color-link-hover: #b9d2ff;
+  --color-ai: #c9b8ff;
   --color-focus: #ffb454;
   --color-notice-bg: #2a1c05;
   --color-notice-text: #ffd28a;
   --color-notice-border: #4a3410;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display:
+    "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 }
 
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
   body {
     background-color: var(--color-bg);
     color: var(--color-text);
+    overflow-wrap: break-word;
   }
 
   a {
     color: var(--color-link);
     text-decoration-line: underline;
-    text-underline-offset: 0.15em;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
   }
 
   a:hover {
     color: var(--color-link-hover);
+    text-decoration-color: currentColor;
+  }
+
+  table,
+  dl,
+  time {
+    font-variant-numeric: tabular-nums;
   }
 
   /*
@@ -45,5 +76,40 @@
     outline: 2px solid var(--color-focus);
     outline-offset: 2px;
     border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* Enlace de aspecto de texto: títulos de tarjeta, logotipo, miga. */
+  .link-quiet {
+    color: var(--color-text);
+    text-decoration-line: none;
+  }
+
+  .link-quiet:hover,
+  .link-quiet:focus-visible {
+    color: var(--color-text);
+    text-decoration-line: underline;
+    text-decoration-color: currentColor;
+  }
+
+  /* Botón de contorno para enlaces de acción. */
+  .btn-outline {
+    display: inline-block;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.875rem;
+    text-decoration-line: none;
+  }
+
+  .btn-outline:hover {
+    border-color: var(--color-accent);
+  }
+
+  .prose-block {
+    max-width: 68ch;
+    line-height: 1.625;
+    overflow-wrap: break-word;
   }
 }
