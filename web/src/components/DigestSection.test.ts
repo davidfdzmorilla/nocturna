@@ -213,6 +213,8 @@ describe("textos de D6, D4, D7 y D9", () => {
     const html = renderToStaticMarkup(createElement(SiteHeader));
     expect(html).toContain('href="/archivo"');
     expect(html).toContain(">Resumen del archivo</a>");
+    expect(html).toContain('href="/#hallazgos"');
+    expect(html).toContain(">Hallazgos</a>");
     expect(html).not.toContain("aria-current");
     expect(html).toContain('href="/"');
     expect(html).toContain('role="note"');
@@ -223,7 +225,7 @@ describe("textos de D6, D4, D7 y D9", () => {
 
   it("layout: pie y meta-descripción de D7", () => {
     const text =
-      "Nocturna. Hallazgos generados automáticamente a partir de arXiv astro-ph; datos de exoplanetas del NASA Exoplanet Archive.";
+      "Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos generados automáticamente a partir de arXiv astro-ph.";
     expect(metadata.description).toBe(text);
     const html = renderToStaticMarkup(createElement(RootLayout, null, "contenido"));
     expect(html).toContain("<footer");

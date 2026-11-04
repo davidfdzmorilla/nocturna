@@ -6,10 +6,19 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { fetchArchiveWeeks } from "@/lib/api/client";
-import { archiveIndexState, archiveWeekState } from "./archiveRoute";
-import { week40 } from "./archiveFixtures";
+import {
+  archiveIndexState,
+  archiveWeekState,
+  homeDigestState,
+  latestWeekWithChanges,
+} from "./archiveRoute";
+import { week40, week42WithText } from "./archiveFixtures";
 import type { ApiResult } from "./api/client";
-import type { DigestWeeksResponse, WeeklyDigest } from "./api/types";
+import type {
+  DigestWeek,
+  DigestWeeksResponse,
+  WeeklyDigest,
+} from "./api/types";
 
 beforeEach(() => {
   vi.mocked(fetchArchiveWeeks).mockReset();
@@ -68,4 +77,90 @@ describe("archiveWeekState (la página de la semana lo cubre con el cliente simu
       data: week40,
     });
   });
+});
+
+const wk = (week: string, n: number): DigestWeek => ({
+  week,
+  snapshots: 1,
+  changed: 0,
+  new_planet: n,
+  regained: 0,
+  lost: 0,
+});
+
+describe("latestWeekWithChanges", () => {
+  it("lista vacía", () => {
+    expect(latestWeekWithChanges([])).toBeNull();
+  });
+
+  it("todas a cero", () => {
+    expect(
+      latestWeekWithChanges([wk("2026-W44", 0), wk("2026-W43", 0)]),
+    ).toBeNull();
+  });
+
+  it("salta las semanas vacías recientes", () => {
+    const weeks = [
+      wk("2026-W44", 0),
+      wk("2026-W43", 0),
+      wk("2026-W42", 3),
+      wk("2026-W41", 70),
+    ];
+    expect(latestWeekWithChanges(weeks)).toEqual(wk("2026-W42", 3));
+  });
+
+  it("ignora una semana con formato inválido", () => {
+    const weeks = [wk("../x", 5), wk("2026-W41", 2)];
+    expect(latestWeekWithChanges(weeks)).toEqual(wk("2026-W41", 2));
+    expect(latestWeekWithChanges([wk("2026-W99", 5)])).toBeNull();
+  });
+});
+
+describe("homeDigestState", () => {
+  const weeks: ApiResult<DigestWeeksResponse> = {
+    ok: true,
+    data: { weeks: [wk("2026-W43", 0), wk("2026-W42", 1)] },
+  };
+
+  it("listado con error: unavailable", () => {
+    expect(homeDigestState({ ok: false, reason: "unavailable" }, null)).toEqual(
+      {
+        kind: "unavailable",
+      },
+    );
+  });
+
+  it("sin semanas con cambios: none", () => {
+    expect(
+      homeDigestState({ ok: true, data: { weeks: [wk("2026-W43", 0)] } }, null),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("detalle con texto", () => {
+    expect(homeDigestState(weeks, { ok: true, data: week42WithText })).toEqual({
+      kind: "week",
+      week: "2026-W42",
+      summary: wk("2026-W42", 1),
+      text: week42WithText.writer_text,
+    });
+  });
+
+  it("detalle con writer_text null", () => {
+    expect(homeDigestState(weeks, { ok: true, data: week40 })).toMatchObject({
+      kind: "week",
+      week: "2026-W42",
+      text: null,
+    });
+  });
+
+  it.each(["unavailable", "not_found"] as const)(
+    "detalle %s: semana sin texto",
+    (reason) => {
+      expect(homeDigestState(weeks, { ok: false, reason })).toMatchObject({
+        kind: "week",
+        week: "2026-W42",
+        text: null,
+      });
+    },
+  );
 });

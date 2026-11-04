@@ -3,7 +3,24 @@
  * semana de la URL, etiquetas y agrupaciones. Sin IO.
  */
 
-import type { DigestEntry, DigestText, TransitionKind } from "./api/types";
+import type {
+  DigestEntry,
+  DigestText,
+  DigestWeek,
+  TransitionKind,
+} from "./api/types";
+
+/** Total de cambios de una semana del listado. */
+export function weekTotal(w: DigestWeek): number {
+  return w.changed + w.new_planet + w.regained + w.lost;
+}
+
+/** Línea de recuentos de una semana del listado. */
+export function weekCountsLine(w: DigestWeek): string {
+  return weekTotal(w) === 0
+    ? "Sin cambios"
+    : `Referencia cambiada: ${w.changed} · Planetas nuevos: ${w.new_planet} · Recuperados: ${w.regained} · Pierden la referencia: ${w.lost}`;
+}
 
 export const AI_FREE_NOTE =
   "Datos del NASA Exoplanet Archive presentados con plantillas fijas; esta sección no contiene texto generado por IA.";
@@ -15,6 +32,14 @@ export const AI_TEXT_LEGEND =
 
 export const AI_TEXT_TABLES_NOTE =
   "Datos del NASA Exoplanet Archive presentados con plantillas fijas; las tablas no contienen texto generado por IA.";
+
+/** Nota de la portada con texto del redactor (no hay tablas en portada). */
+export const HOME_AI_TEXT_NOTE =
+  "Los recuentos salen del NASA Exoplanet Archive con plantillas fijas, sin texto generado por IA.";
+
+/** Leyenda del bloque de IA en portada (los datos están en la semana completa). */
+export const HOME_AI_TEXT_LEGEND =
+  "Texto generado automáticamente a partir de los cambios de la semana. Ninguna persona lo ha revisado; los datos de referencia están en la semana completa.";
 
 export const AI_LISTING_NOTE =
   "Datos del NASA Exoplanet Archive presentados con plantillas fijas. Algunas semanas incluyen un resumen redactado por IA, señalado como tal.";

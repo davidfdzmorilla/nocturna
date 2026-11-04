@@ -12,7 +12,9 @@ import {
   isoWeekRange,
   parseWeekParam,
   summaryParagraphs,
+  weekCountsLine,
   weekLabel,
+  weekTotal,
 } from "./archiveDigest";
 import { ALMENARA, COLLIER, SCHMERLING, makeEntry, week40 } from "./archiveFixtures";
 
@@ -164,5 +166,36 @@ describe("textos de la nota del resumen con IA", () => {
   it("digestNote: sin texto -> AI_FREE_NOTE; con texto -> AI_TEXT_TABLES_NOTE", () => {
     expect(digestNote(null)).toBe(AI_FREE_NOTE);
     expect(digestNote({ title: "T", summary: "S" })).toBe(AI_TEXT_TABLES_NOTE);
+  });
+});
+
+describe("weekTotal y weekCountsLine", () => {
+  const w = (
+    changed: number,
+    new_planet: number,
+    regained: number,
+    lost: number,
+  ) => ({
+    week: "2026-W41",
+    snapshots: 1,
+    changed,
+    new_planet,
+    regained,
+    lost,
+  });
+
+  it("weekTotal suma los cuatro recuentos", () => {
+    expect(weekTotal(w(1, 2, 3, 4))).toBe(10);
+    expect(weekTotal(w(0, 0, 0, 0))).toBe(0);
+  });
+
+  it("sin cambios", () => {
+    expect(weekCountsLine(w(0, 0, 0, 0))).toBe("Sin cambios");
+  });
+
+  it("con cambios: texto exacto", () => {
+    expect(weekCountsLine(w(1, 70, 2, 3))).toBe(
+      "Referencia cambiada: 1 · Planetas nuevos: 70 · Recuperados: 2 · Pierden la referencia: 3",
+    );
   });
 });

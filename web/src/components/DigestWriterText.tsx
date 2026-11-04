@@ -6,7 +6,13 @@ import {
 } from "@/lib/archiveDigest";
 
 /** Resumen semanal redactado por IA (T84.r.w). Siempre texto escapado. */
-export function DigestWriterText({ text }: { text: DigestText }) {
+export function DigestWriterText({
+  text,
+  legend = AI_TEXT_LEGEND,
+}: {
+  text: DigestText;
+  legend?: string;
+}) {
   return (
     <section aria-labelledby="resumen-ia" className="mt-6">
       <p className="text-sm text-text-muted">{AI_TEXT_LABEL}</p>
@@ -20,7 +26,7 @@ export function DigestWriterText({ text }: { text: DigestText }) {
           </p>
         ))}
       </div>
-      <p className="mt-3 text-sm text-text-muted">{AI_TEXT_LEGEND}</p>
+      <p className="mt-3 text-sm text-text-muted">{legend}</p>
     </section>
   );
 }

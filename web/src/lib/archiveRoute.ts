@@ -5,10 +5,52 @@
 
 import type { ApiResult } from "./api/client";
 import type {
+  DigestText,
+  DigestWeek,
   DigestWeeksResponse,
   WeeklyDigest,
 } from "./api/types";
-import { parseWeekParam } from "./archiveDigest";
+import { parseWeekParam, weekTotal } from "./archiveDigest";
+
+/** Primera semana del listado (más reciente primero) con cambios y semana válida. */
+export function latestWeekWithChanges(
+  weeks: readonly DigestWeek[],
+): DigestWeek | null {
+  return (
+    weeks.find((w) => weekTotal(w) > 0 && parseWeekParam(w.week) !== null) ??
+    null
+  );
+}
+
+export type HomeDigestState =
+  | { kind: "unavailable" }
+  | { kind: "none" }
+  | {
+      kind: "week";
+      week: string;
+      summary: DigestWeek;
+      text: DigestText | null;
+    };
+
+/** `detail` es `null` si no había semana con cambios y no se pidió el detalle. */
+export function homeDigestState(
+  weeks: ApiResult<DigestWeeksResponse>,
+  detail: ApiResult<WeeklyDigest> | null,
+): HomeDigestState {
+  if (!weeks.ok) {
+    return { kind: "unavailable" };
+  }
+  const summary = latestWeekWithChanges(weeks.data.weeks);
+  if (summary === null) {
+    return { kind: "none" };
+  }
+  return {
+    kind: "week",
+    week: summary.week,
+    summary,
+    text: detail !== null && detail.ok ? detail.data.writer_text : null,
+  };
+}
 
 export type ArchiveIndexState =
   | { kind: "unavailable" }

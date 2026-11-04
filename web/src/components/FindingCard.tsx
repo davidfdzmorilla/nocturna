@@ -22,9 +22,9 @@ export function FindingCard({ finding }: FindingCardProps) {
 
   return (
     <article className="rounded-md border border-border bg-surface p-4">
-      <h2 className="text-lg font-semibold">
+      <h3 className="text-lg font-semibold">
         <Link href={`/hallazgo/${finding.id}`}>{finding.title}</Link>
-      </h2>
+      </h3>
       <TypeBadge type={finding.type} />
       <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
         {label}
