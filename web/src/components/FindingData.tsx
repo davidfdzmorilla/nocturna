@@ -46,7 +46,10 @@ export function FindingData({ finding }: FindingDataProps) {
     return null;
   }
   return (
-    <section aria-labelledby="datos-contraste" className="mt-8">
+    <section
+      aria-labelledby="datos-contraste"
+      className="mt-8 rounded-lg border border-border bg-surface p-4 sm:p-5"
+    >
       <h2 id="datos-contraste" className="text-lg font-semibold text-text">
         Datos del contraste
       </h2>

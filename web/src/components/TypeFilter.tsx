@@ -11,6 +11,8 @@ type TypeFilterProps = {
   activeType: FindingType | null;
 };
 
+const PILL = "link-quiet inline-block rounded-full border px-3 py-1 text-sm";
+
 /**
  * Filtro por tipo del feed. Enlaces reales a `?tipo=`, sin JavaScript,
  * como `LevelNav`. Lista estática con los cuatro tipos; cada enlace va a
@@ -24,7 +26,7 @@ export function TypeFilter({ activeType }: TypeFilterProps) {
 
   return (
     <nav aria-label="Filtrar por tipo" className="mt-4">
-      <ul className="flex flex-wrap gap-x-4 gap-y-2">
+      <ul className="flex flex-wrap gap-2">
         {options.map(({ type, label }) => {
           const isActive = type === activeType;
           return (
@@ -32,7 +34,11 @@ export function TypeFilter({ activeType }: TypeFilterProps) {
               <Link
                 href={feedHref(1, type)}
                 aria-current={isActive ? "page" : undefined}
-                className={isActive ? "font-semibold text-text" : undefined}
+                className={
+                  isActive
+                    ? `${PILL} border-accent bg-surface-raised font-semibold`
+                    : `${PILL} border-border text-text-muted hover:border-border-strong`
+                }
               >
                 {label}
               </Link>

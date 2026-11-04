@@ -97,28 +97,33 @@ export default async function FindingPage({
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-text">{finding.title}</h1>
+      <h1 className="font-display text-3xl leading-tight text-balance break-words text-text sm:text-4xl">
+        {finding.title}
+      </h1>
       {finding.retracted_at !== null ? (
         <RetractionNotice
           retractedAt={finding.retracted_at}
           note={finding.retraction_note}
         />
       ) : null}
-      <TypeBadge type={finding.type} />
-      <time dateTime={iso} className="mt-2 block text-sm text-text-muted">
-        {label}
-      </time>
+      <div className="mt-3">
+        <TypeBadge type={finding.type}>
+          <time dateTime={iso} className="text-sm text-text-muted">
+            {label}
+          </time>
+        </TypeBadge>
+      </div>
 
       <LevelNav id={finding.id} activeLevel={level} />
 
-      <article className="mt-6 whitespace-pre-line text-text">
+      <article className="prose-block mt-6 whitespace-pre-line break-words text-text">
         {levelText(finding, level)}
       </article>
 
       <FindingData finding={finding} />
 
       {finding.type === "solution_tension" ? (
-        <p className="mt-6 text-sm text-text-muted">
+        <p className="prose-block mt-6 text-sm text-text-muted">
           Este hallazgo no procede de un artículo de arXiv: compara dos
           soluciones publicadas en el NASA Exoplanet Archive.
         </p>
@@ -126,14 +131,16 @@ export default async function FindingPage({
 
       {arxivUrl ? (
         <p className="mt-6">
-          <a href={arxivUrl} rel="noopener noreferrer">
+          <a href={arxivUrl} rel="noopener noreferrer" className="btn-outline">
             Ver el artículo original en arXiv
           </a>
         </p>
       ) : null}
 
       <p className="mt-8">
-        <Link href="/">← Volver al feed</Link>
+        <Link href="/" className="link-quiet">
+          ← Volver al feed
+        </Link>
       </p>
     </>
   );

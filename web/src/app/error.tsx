@@ -15,8 +15,10 @@ export default function GlobalError({
   reset: () => void;
 }) {
   return (
-    <div className="mx-auto max-w-3xl py-16 text-center">
-      <h1 className="text-2xl font-semibold text-text">Algo ha fallado</h1>
+    <div className="mx-auto max-w-3xl py-12 sm:py-16 text-center">
+      <h1 className="font-display text-3xl leading-tight text-balance text-text sm:text-4xl">
+        Algo ha fallado
+      </h1>
       <p className="mt-4 text-text-muted">
         Ha ocurrido un error inesperado al cargar esta página. Puedes reintentar
         o volver al feed.

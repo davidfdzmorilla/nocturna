@@ -20,7 +20,7 @@ export function Notice({ title, tone = "info", children }: NoticeProps) {
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
-      className="rounded-md border border-border bg-surface px-4 py-6 text-center"
+      className="rounded-lg border border-border bg-surface px-4 py-6 text-center"
     >
       <p className="font-medium text-text">{title}</p>
       {children ? (

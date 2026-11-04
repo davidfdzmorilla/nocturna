@@ -28,12 +28,12 @@ export default function RootLayout({
         <SiteHeader />
         <main
           id="contenido"
-          className="mx-auto w-full max-w-3xl flex-1 px-4 py-8"
+          className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10"
         >
           {children}
         </main>
-        <footer className="border-t border-border bg-surface px-4 py-6 text-center text-sm text-text-muted">
-          <p>
+        <footer className="border-t border-border py-8 text-sm text-text-muted">
+          <p className="mx-auto max-w-5xl px-4 sm:px-6">
             Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos
             generados automáticamente a partir de arXiv astro-ph.
           </p>

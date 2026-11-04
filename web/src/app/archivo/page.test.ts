@@ -39,12 +39,26 @@ describe("página /archivo", () => {
     expect(html).not.toContain("esta sección no contiene texto generado por IA.");
     expect(html).toContain('href="/archivo/2026-W41"');
     expect(html).toContain("Semana 41 de 2026 (5–11 de octubre)");
-    expect(html).toContain(
-      "Referencia cambiada: 0 · Planetas nuevos: 70 · Recuperados: 0 · Pierden la referencia: 0",
-    );
-    expect(html).toContain(
-      "Referencia cambiada: 1 · Planetas nuevos: 3 · Recuperados: 0 · Pierden la referencia: 2",
-    );
+    // Recuentos como pares etiqueta/cifra (T102), mismas etiquetas y orden que weekCountsLine.
+    const pairs = (week: string) => {
+      const row = html.slice(html.indexOf(`href="/archivo/${week}"`));
+      const dl = row.slice(row.indexOf("<dl"), row.indexOf("</dl>"));
+      return [...dl.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>(\d+)<\/dd>/g)].map(
+        (m) => `${m[1]}: ${m[2]}`,
+      );
+    };
+    expect(pairs("2026-W41")).toEqual([
+      "Referencia cambiada: 0",
+      "Planetas nuevos: 70",
+      "Recuperados: 0",
+      "Pierden la referencia: 0",
+    ]);
+    expect(pairs("2026-W40")).toEqual([
+      "Referencia cambiada: 1",
+      "Planetas nuevos: 3",
+      "Recuperados: 0",
+      "Pierden la referencia: 2",
+    ]);
     expect(html).toContain("Sin cambios");
     expect(html).not.toContain("snapshot");
   });

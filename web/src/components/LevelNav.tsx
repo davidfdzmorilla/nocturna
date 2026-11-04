@@ -19,7 +19,10 @@ type LevelNavProps = {
  */
 export function LevelNav({ id, activeLevel }: LevelNavProps) {
   return (
-    <nav aria-label="Nivel de detalle" className="mt-4 flex gap-4">
+    <nav
+      aria-label="Nivel de detalle"
+      className="mt-5 inline-flex max-w-full flex-wrap gap-1 rounded-lg border border-border bg-surface p-1"
+    >
       {LEVELS.map((level) => {
         const isActive = level === activeLevel;
         return (
@@ -27,7 +30,11 @@ export function LevelNav({ id, activeLevel }: LevelNavProps) {
             key={level}
             href={levelHref(id, level)}
             aria-current={isActive ? "page" : undefined}
-            className={isActive ? "font-semibold text-text" : undefined}
+            className={`link-quiet rounded-md px-3 py-1.5 text-sm ${
+              isActive
+                ? "bg-surface-raised font-semibold"
+                : "text-text-muted hover:bg-surface-raised"
+            }`}
           >
             {LEVEL_LABELS[level]}
           </Link>

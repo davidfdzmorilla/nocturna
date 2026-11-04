@@ -12,16 +12,26 @@ import {
   isoWeekRange,
   parseWeekParam,
   summaryParagraphs,
+  weekCounts,
   weekCountsLine,
   weekLabel,
   weekTotal,
 } from "./archiveDigest";
-import { ALMENARA, COLLIER, SCHMERLING, makeEntry, week40 } from "./archiveFixtures";
+import {
+  ALMENARA,
+  COLLIER,
+  SCHMERLING,
+  makeEntry,
+  week40,
+} from "./archiveFixtures";
 
 describe("parseWeekParam", () => {
-  it.each(["2026-W41", "2026-W01", "2026-W53", "2020-W53"])("acepta %s", (w) => {
-    expect(parseWeekParam(w)).toBe(w);
-  });
+  it.each(["2026-W41", "2026-W01", "2026-W53", "2020-W53"])(
+    "acepta %s",
+    (w) => {
+      expect(parseWeekParam(w)).toBe(w);
+    },
+  );
 
   it.each([
     "2026-W00",
@@ -48,15 +58,18 @@ describe("parseWeekParam", () => {
 
 describe("secciones", () => {
   it("el orden es cambiada, nuevos, recuperados, pierden", () => {
-    expect(SECTION_ORDER).toEqual(["changed", "new_planet", "regained", "lost"]);
+    expect(SECTION_ORDER).toEqual([
+      "changed",
+      "new_planet",
+      "regained",
+      "lost",
+    ]);
   });
 
   it("entriesByKind filtra y conserva el orden de la API", () => {
-    expect(entriesByKind(week40.entries, "new_planet").map((e) => e.pl_name)).toEqual([
-      "HD 148797 b",
-      "HD 148797 c",
-      "TOI-2427 c",
-    ]);
+    expect(
+      entriesByKind(week40.entries, "new_planet").map((e) => e.pl_name),
+    ).toEqual(["HD 148797 b", "HD 148797 c", "TOI-2427 c"]);
     expect(entriesByKind(week40.entries, "changed")).toHaveLength(1);
     expect(entriesByKind(week40.entries, "lost")).toEqual([]);
   });
@@ -64,23 +77,38 @@ describe("secciones", () => {
 
 describe("isoWeekRange", () => {
   it("2026-W41 -> 5 a 11 de octubre", () => {
-    expect(isoWeekRange("2026-W41")).toEqual({ start: "2026-10-05", end: "2026-10-11" });
+    expect(isoWeekRange("2026-W41")).toEqual({
+      start: "2026-10-05",
+      end: "2026-10-11",
+    });
   });
 
   it("2026-W01 empieza el 29 de diciembre de 2025 (cruza año)", () => {
-    expect(isoWeekRange("2026-W01")).toEqual({ start: "2025-12-29", end: "2026-01-04" });
+    expect(isoWeekRange("2026-W01")).toEqual({
+      start: "2025-12-29",
+      end: "2026-01-04",
+    });
   });
 
   it("2020-W53 existe y cruza al año siguiente", () => {
-    expect(isoWeekRange("2020-W53")).toEqual({ start: "2020-12-28", end: "2021-01-03" });
+    expect(isoWeekRange("2020-W53")).toEqual({
+      start: "2020-12-28",
+      end: "2021-01-03",
+    });
   });
 
   it("2026-W53 existe (2026 tiene 53 semanas ISO)", () => {
-    expect(isoWeekRange("2026-W53")).toEqual({ start: "2026-12-28", end: "2027-01-03" });
+    expect(isoWeekRange("2026-W53")).toEqual({
+      start: "2026-12-28",
+      end: "2027-01-03",
+    });
   });
 
   it("una semana que cruza de mes", () => {
-    expect(isoWeekRange("2026-W40")).toEqual({ start: "2026-09-28", end: "2026-10-04" });
+    expect(isoWeekRange("2026-W40")).toEqual({
+      start: "2026-09-28",
+      end: "2026-10-04",
+    });
   });
 });
 
@@ -90,12 +118,18 @@ describe("weekLabel", () => {
   });
 
   it("cruzando mes", () => {
-    expect(weekLabel("2026-W40")).toBe("Semana 40 de 2026 (28 de septiembre – 4 de octubre)");
+    expect(weekLabel("2026-W40")).toBe(
+      "Semana 40 de 2026 (28 de septiembre – 4 de octubre)",
+    );
   });
 
   it("cruzando año", () => {
-    expect(weekLabel("2026-W01")).toBe("Semana 1 de 2026 (29 de diciembre – 4 de enero)");
-    expect(weekLabel("2020-W53")).toBe("Semana 53 de 2020 (28 de diciembre – 3 de enero)");
+    expect(weekLabel("2026-W01")).toBe(
+      "Semana 1 de 2026 (29 de diciembre – 4 de enero)",
+    );
+    expect(weekLabel("2020-W53")).toBe(
+      "Semana 53 de 2020 (28 de diciembre – 3 de enero)",
+    );
   });
 });
 
@@ -134,10 +168,16 @@ describe("summaryParagraphs", () => {
     expect(summaryParagraphs("Solo uno.")).toEqual(["Solo uno."]);
   });
   it("descarta vacíos iniciales y finales y recorta", () => {
-    expect(summaryParagraphs("\n\n  Uno.  \n\nDos.\n\n")).toEqual(["Uno.", "Dos."]);
+    expect(summaryParagraphs("\n\n  Uno.  \n\nDos.\n\n")).toEqual([
+      "Uno.",
+      "Dos.",
+    ]);
   });
   it("un salto simple se queda dentro del párrafo", () => {
-    expect(summaryParagraphs("Uno\ncontinúa.\n\nDos.")).toEqual(["Uno\ncontinúa.", "Dos."]);
+    expect(summaryParagraphs("Uno\ncontinúa.\n\nDos.")).toEqual([
+      "Uno\ncontinúa.",
+      "Dos.",
+    ]);
   });
   it("texto vacío o en blanco: sin párrafos", () => {
     expect(summaryParagraphs("")).toEqual([]);
@@ -191,6 +231,19 @@ describe("weekTotal y weekCountsLine", () => {
 
   it("sin cambios", () => {
     expect(weekCountsLine(w(0, 0, 0, 0))).toBe("Sin cambios");
+  });
+
+  it("weekCounts: mismas etiquetas, orden y cifras que la línea", () => {
+    const counts = weekCounts(w(1, 70, 2, 3));
+    expect(counts).toEqual([
+      { label: "Referencia cambiada", value: 1 },
+      { label: "Planetas nuevos", value: 70 },
+      { label: "Recuperados", value: 2 },
+      { label: "Pierden la referencia", value: 3 },
+    ]);
+    expect(counts.map((c) => `${c.label}: ${c.value}`).join(" · ")).toBe(
+      weekCountsLine(w(1, 70, 2, 3)),
+    );
   });
 
   it("con cambios: texto exacto", () => {

@@ -1,6 +1,15 @@
+import { useId } from "react";
 import type { FirstMeasurement } from "@/lib/api/types";
 import { safeArchiveUrl } from "@/lib/externalLinks";
 import { formatWithErrors, parameterTitle } from "@/lib/measurementFormat";
+import {
+  CAPTION,
+  TABLE,
+  TD_VALUE,
+  TH,
+  TH_ROW,
+  TableScroll,
+} from "./TableScroll";
 
 type Props = {
   data: FirstMeasurement;
@@ -13,42 +22,42 @@ const STATUS_TEXT: Record<FirstMeasurement["archive_status"], string> = {
 };
 
 export function FirstMeasurementData({ data }: Props) {
+  const captionId = useId();
   const archiveUrl = safeArchiveUrl(data.archive_url);
   const caption = `${parameterTitle(data.parameter)} de ${data.paper_planet_name} medida en el artículo`;
 
   return (
     <>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <caption className="pb-2 text-left text-text-muted">{caption}</caption>
-          <thead>
-            <tr>
-              <th scope="col" className="border-b border-border p-2">
-                Planeta
-              </th>
-              <th scope="col" className="border-b border-border p-2">
-                Medida del artículo
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.measurements.map((m, index) => (
-              <tr key={index}>
-                <th
-                  scope="row"
-                  className="border-b border-border p-2 font-normal"
-                >
-                  {data.paper_planet_name}
+      <div className="mt-3">
+        <TableScroll labelledBy={captionId}>
+          <table className={TABLE}>
+            <caption id={captionId} className={CAPTION}>
+              {caption}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" className={TH}>
+                  Planeta
                 </th>
-                <td className="border-b border-border p-2">
-                  {formatWithErrors(m)}
-                </td>
+                <th scope="col" className={TH}>
+                  Medida del artículo
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.measurements.map((m, index) => (
+                <tr key={index}>
+                  <th scope="row" className={TH_ROW}>
+                    {data.paper_planet_name}
+                  </th>
+                  <td className={TD_VALUE}>{formatWithErrors(m)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </div>
-      <p className="mt-2 text-sm text-text-muted">
+      <p className="mt-3 text-sm text-text-muted">
         {STATUS_TEXT[data.archive_status]}
         {data.archive_planet_name
           ? ` Nombre en el archivo: ${data.archive_planet_name}.`

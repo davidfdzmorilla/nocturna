@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type {
   DigestEntry,
   DigestReference,
@@ -7,7 +8,18 @@ import type {
 import { SECTION_LABELS, groupByReference } from "@/lib/archiveDigest";
 import { formatDay } from "@/lib/dates";
 import { safeArchiveUrl } from "@/lib/externalLinks";
-import { PARAMETER_LABELS, formatArchiveValue } from "@/lib/measurementFormat";
+import {
+  PARAMETER_LABELS,
+  formatArchiveValue,
+  formatArchiveValueRounded,
+} from "@/lib/measurementFormat";
+import {
+  CAPTION,
+  TABLE,
+  TH,
+  TH_ROW,
+  TableScroll,
+} from "./TableScroll";
 
 type Props = {
   kind: TransitionKind;
@@ -39,11 +51,11 @@ function ReferenceFields({
   return (
     <>
       <dt className="text-text-muted">{label}</dt>
-      <dd>{reference.reference}</dd>
+      <dd className="break-words">{reference.reference}</dd>
       <dt className="text-text-muted">Publicación</dt>
-      <dd>{reference.pl_pubdate ?? "–"}</dd>
+      <dd className="break-words">{reference.pl_pubdate ?? "–"}</dd>
       <dt className="text-text-muted">Alta en el archivo</dt>
-      <dd>{formatDay(reference.releasedate)}</dd>
+      <dd className="break-words">{formatDay(reference.releasedate)}</dd>
     </>
   );
 }
@@ -59,8 +71,10 @@ function ValueCell({
   const provenance =
     side === "old" ? change.old_mass_provenance : change.new_mass_provenance;
   return (
-    <td className="border-b border-border p-2">
-      <span className="block">{formatArchiveValue(value)}</span>
+    <td className="border-b border-border px-3 py-2" title={formatArchiveValue(value)}>
+      <span className="block whitespace-nowrap">
+        {formatArchiveValueRounded(value)}
+      </span>
       {change.parameter === "mass" ? (
         <span className="block text-text-muted">
           Procedencia de la masa: {provenance ?? NO_PROVENANCE}
@@ -71,38 +85,61 @@ function ValueCell({
 }
 
 function ChangesTable({ entry }: { entry: DigestEntry }) {
+  const captionId = useId();
   return (
-    <div className="mt-3 overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm">
-        <caption className="pb-2 text-left text-text-muted">
-          Parámetros de {entry.pl_name} que difieren entre la referencia
-          anterior y la nueva
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col" className="border-b border-border p-2">
-              Parámetro
-            </th>
-            <th scope="col" className="border-b border-border p-2">
-              Referencia anterior
-            </th>
-            <th scope="col" className="border-b border-border p-2">
-              Referencia nueva
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {entry.parameter_changes.map((change) => (
-            <tr key={change.parameter} className="align-top">
-              <th scope="row" className="border-b border-border p-2 font-normal">
-                {PARAMETER_LABELS[change.parameter]}
+    <div className="mt-4">
+      <TableScroll labelledBy={captionId}>
+        <table className={`${TABLE} min-w-[30rem]`}>
+          <caption id={captionId} className={CAPTION}>
+            Parámetros de {entry.pl_name} que difieren entre la referencia
+            anterior y la nueva (valores redondeados)
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" className={TH}>
+                Parámetro
               </th>
-              <ValueCell change={change} side="old" />
-              <ValueCell change={change} side="new" />
+              <th scope="col" className={TH}>
+                Referencia anterior
+              </th>
+              <th scope="col" className={TH}>
+                Referencia nueva
+              </th>
             </tr>
+          </thead>
+          <tbody>
+            {entry.parameter_changes.map((change) => (
+              <tr key={change.parameter} className="align-top">
+                <th scope="row" className={TH_ROW}>
+                  {PARAMETER_LABELS[change.parameter]}
+                </th>
+                <ValueCell change={change} side="old" />
+                <ValueCell change={change} side="new" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+      <details className="mt-3 text-sm">
+        <summary className="cursor-pointer text-text-muted">
+          Valores exactos del archivo
+        </summary>
+        <ul className="mt-2 space-y-2 tabular-nums">
+          {entry.parameter_changes.map((change) => (
+            <li key={change.parameter}>
+              <span className="text-text-muted">
+                {PARAMETER_LABELS[change.parameter]}
+              </span>
+              <span className="block break-words">
+                Referencia anterior: {formatArchiveValue(change.old)}
+              </span>
+              <span className="block break-words">
+                Referencia nueva: {formatArchiveValue(change.new)}
+              </span>
+            </li>
           ))}
-        </tbody>
-      </table>
+        </ul>
+      </details>
     </div>
   );
 }
@@ -111,11 +148,11 @@ function EntryCard({ entry }: { entry: DigestEntry }) {
   const showBoth = entry.kind === "changed";
   const single = entry.new ?? entry.old;
   return (
-    <article className="rounded-md border border-border bg-surface p-4">
-      <h3 className="text-lg font-semibold">
+    <article className="rounded-lg border border-border bg-surface p-4 sm:p-5">
+      <h3 className="text-lg font-semibold leading-snug break-words">
         <PlanetName entry={entry} />
       </h3>
-      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-0.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)] [&>dt]:mt-2 sm:[&>dt]:mt-0">
         {showBoth ? (
           <>
             {entry.old ? (
@@ -129,7 +166,7 @@ function EntryCard({ entry }: { entry: DigestEntry }) {
           <ReferenceFields label="Referencia" reference={single} />
         ) : null}
         <dt className="text-text-muted">Detectado</dt>
-        <dd>{formatDay(entry.detected_at)}</dd>
+        <dd className="break-words">{formatDay(entry.detected_at)}</dd>
       </dl>
       {entry.parameter_changes.length > 0 ? (
         <ChangesTable entry={entry} />
@@ -146,15 +183,18 @@ function NewPlanetGroups({ entries }: { entries: DigestEntry[] }) {
       {groupByReference(entries).map((group) => (
         <div
           key={group.reference}
-          className="rounded-md border border-border bg-surface p-4"
+          className="rounded-lg border border-border bg-surface p-4 sm:p-5"
         >
-          <h3 className="text-lg font-semibold">
+          <h3 className="text-lg font-semibold leading-snug break-words">
             {group.reference} · {group.entries.length}{" "}
             {group.entries.length === 1 ? "planeta" : "planetas"}
           </h3>
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <ul className="mt-3 flex flex-wrap gap-2 text-sm">
             {group.entries.map((entry) => (
-              <li key={entry.pl_name}>
+              <li
+                key={entry.pl_name}
+                className="max-w-full rounded-full border border-border bg-surface-raised px-3 py-1 [overflow-wrap:anywhere]"
+              >
                 <PlanetName entry={entry} />
               </li>
             ))}
@@ -168,7 +208,7 @@ function NewPlanetGroups({ entries }: { entries: DigestEntry[] }) {
 export function DigestSection({ kind, entries }: Props) {
   return (
     <section className="mt-8">
-      <h2 className="text-xl font-semibold text-text">
+      <h2 className="font-display text-xl break-words text-text sm:text-2xl">
         {SECTION_LABELS[kind]} ({entries.length})
       </h2>
       {entries.length === 0 ? (

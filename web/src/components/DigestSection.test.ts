@@ -133,7 +133,7 @@ describe("cambio sin parámetros, recuperados y perdidos", () => {
     const html = section("regained", [
       makeEntry("regained", "R b", null, { ...ALMENARA, pl_pubdate: null }),
     ]);
-    expect(html).toContain("Publicación</dt><dd>–</dd>");
+    expect(html).toMatch(/Publicación<\/dt><dd[^>]*>–<\/dd>/);
   });
 });
 
@@ -237,5 +237,31 @@ describe("textos de D6, D4, D7 y D9", () => {
     const html = renderToStaticMarkup(createElement(ArchiveNotFound));
     expect(html).toContain("Esta semana no tiene resumen");
     expect(html).toContain('href="/archivo"');
+  });
+});
+
+describe("valores redondeados y exactos (T102)", () => {
+  const html = section("changed", [toi2427b]);
+
+  it("la celda muestra el valor redondeado y guarda el exacto en title", () => {
+    // periodo nuevo: 1,305962 +0,000071 / −0,00007
+    expect(html).toContain("1,305962 +0,000071 / −0,000070 d");
+    expect(html).toContain('title="1,305962 +0,000071 / −0,00007 d"');
+  });
+
+  it("los valores exactos siguen en el HTML dentro de <details>", () => {
+    const details = html.slice(html.indexOf("<details"), html.indexOf("</details>"));
+    expect(details).toContain("<summary");
+    expect(details).toContain("Valores exactos del archivo");
+    expect(details).toContain("1,3060011 ± 0,0000102 d");
+    expect(details).toContain("1,305962 +0,000071 / −0,00007 d");
+  });
+
+  it("la tabla va en una región enfocable nombrada por su caption", () => {
+    const m = html.match(
+      /<div role="region" tabindex="0" aria-labelledby="([^"]+)"/,
+    );
+    expect(m).not.toBeNull();
+    expect(html).toContain(`<caption id="${m![1]}"`);
   });
 });

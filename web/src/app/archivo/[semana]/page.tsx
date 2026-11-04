@@ -25,7 +25,10 @@ const INTRO =
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { semana } = await params;
   const week = parseWeekParam(semana);
-  return { title: week === null ? "Resumen del archivo" : weekLabel(week).split(" (")[0] };
+  return {
+    title:
+      week === null ? "Resumen del archivo" : weekLabel(week).split(" (")[0],
+  };
 }
 
 export default async function ArchiveWeekPage({ params }: Props) {
@@ -55,18 +58,22 @@ export default async function ArchiveWeekPage({ params }: Props) {
   return (
     <>
       <p className="text-sm">
-        <Link href="/archivo">Resumen del archivo</Link>
+        <Link href="/archivo" className="link-quiet text-text-muted">
+          ← Resumen del archivo
+        </Link>
       </p>
-      <h1 className="mt-2 text-2xl font-semibold text-text">
+      <h1 className="mt-3 font-display text-3xl leading-tight text-balance break-words text-text sm:text-4xl">
         {weekLabel(state.week)}
       </h1>
       {state.data.writer_text !== null && (
-        <DigestWriterText text={state.data.writer_text} />
+        <div className="mt-6 rounded-lg border border-border bg-surface-raised p-5 sm:p-6 [&>section]:mt-0">
+          <DigestWriterText text={state.data.writer_text} />
+        </div>
       )}
-      <p className="mt-2 text-sm text-text-muted">
+      <p className="prose-block mt-4 text-sm text-text-muted">
         {digestNote(state.data.writer_text)}
       </p>
-      <p className="mt-2 text-sm text-text">{INTRO}</p>
+      <p className="prose-block mt-2 text-text">{INTRO}</p>
       {SECTION_ORDER.map((kind) => (
         <DigestSection
           key={kind}

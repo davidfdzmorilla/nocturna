@@ -3,6 +3,7 @@ import type { ApiResult } from "@/lib/api/client";
 import type { FindingType, FindingsPage } from "@/lib/api/types";
 import { PAGE_SIZE, totalPages as computeTotalPages } from "@/lib/pagination";
 import { feedHref } from "@/lib/findingTypes";
+import { groupByNight } from "@/lib/feedGroups";
 import { FindingCard } from "./FindingCard";
 import { Notice } from "./Notice";
 import { Pagination } from "./Pagination";
@@ -24,7 +25,7 @@ export function FindingsFeed({ result, page, type }: FindingsFeedProps) {
     >
       <h2
         id="hallazgos-titulo"
-        className="scroll-mt-32 text-xl font-semibold text-text"
+        className="scroll-mt-32 font-display text-xl break-words text-text sm:text-2xl"
       >
         Últimos hallazgos
       </h2>
@@ -85,9 +86,18 @@ function FeedBody({ result, page, type }: FindingsFeedProps) {
   return (
     <>
       <TypeFilter activeType={type} />
-      <div className="mt-6 flex flex-col gap-4">
-        {items.map((finding) => (
-          <FindingCard key={finding.id} finding={finding} />
+      <div className="mt-6 flex flex-col gap-8">
+        {groupByNight(items).map((group) => (
+          <div key={group.key}>
+            <p className="text-sm text-text-muted">
+              <time dateTime={group.isoDay}>Publicados el {group.key}</time>
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {group.items.map((finding) => (
+                <FindingCard key={finding.id} finding={finding} />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
       <Pagination
