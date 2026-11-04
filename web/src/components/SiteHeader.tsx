@@ -22,6 +22,9 @@ export function SiteHeader() {
           <Link href="/archivo" className="py-1 text-sm">
             Resumen del archivo
           </Link>
+          <Link href="/#hallazgos" className="py-1 text-sm">
+            Hallazgos
+          </Link>
         </nav>
         <p
           role="note"

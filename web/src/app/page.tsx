@@ -1,15 +1,13 @@
-import Link from "next/link";
-import { fetchFindingsPage } from "@/lib/api/client";
 import {
-  PAGE_SIZE,
-  parsePageParam,
-  totalPages as computeTotalPages,
-} from "@/lib/pagination";
-import { FindingCard } from "@/components/FindingCard";
-import { Pagination } from "@/components/Pagination";
-import { TypeFilter } from "@/components/TypeFilter";
-import { feedHref, parseTypeParam } from "@/lib/findingTypes";
-import { Notice } from "@/components/Notice";
+  fetchArchiveWeek,
+  fetchArchiveWeeks,
+  fetchFindingsPage,
+} from "@/lib/api/client";
+import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
+import { parseTypeParam } from "@/lib/findingTypes";
+import { homeDigestState, latestWeekWithChanges } from "@/lib/archiveRoute";
+import { FindingsFeed } from "@/components/FindingsFeed";
+import { HomeDigest } from "@/components/HomeDigest";
 
 /**
  * SSR dinámico, no ISR (decisión del plan): los hallazgos se publican
@@ -31,72 +29,18 @@ export default async function Home({ searchParams }: HomeProps) {
   const page = parsePageParam(params.page);
   const type = parseTypeParam(params.tipo);
 
-  const result = await fetchFindingsPage(page, PAGE_SIZE, type);
+  const [weeks, findings] = await Promise.all([
+    fetchArchiveWeeks(),
+    fetchFindingsPage(page, PAGE_SIZE, type),
+  ]);
 
-  if (!result.ok) {
-    return (
-      <>
-        <h1 className="sr-only">Nocturna</h1>
-        <Notice
-          title="No se han podido cargar los hallazgos ahora mismo."
-          tone="error"
-        >
-          Vuelve a intentarlo en unos minutos.
-        </Notice>
-      </>
-    );
-  }
-
-  const { items, total } = result.data;
-
-  if (total === 0 && type !== null) {
-    return (
-      <>
-        <h1 className="text-2xl font-semibold text-text">Últimos hallazgos</h1>
-        <TypeFilter activeType={type} />
-        <div className="mt-6">
-          <Notice title="No hay hallazgos de este tipo">
-            <Link href="/">Ver todos</Link>
-          </Notice>
-        </div>
-      </>
-    );
-  }
-
-  if (total === 0) {
-    return (
-      <>
-        <h1 className="sr-only">Nocturna</h1>
-        <Notice title="Todavía no hay hallazgos publicados.">
-          El análisis corre de madrugada; vuelve mañana.
-        </Notice>
-      </>
-    );
-  }
-
-  if (items.length === 0) {
-    return (
-      <>
-        <h1 className="sr-only">Nocturna</h1>
-        <Notice title="Esta página no tiene hallazgos.">
-          <Link href={feedHref(1, type)}>Ir a la página 1</Link>
-        </Notice>
-      </>
-    );
-  }
-
-  const pages = computeTotalPages(total, PAGE_SIZE);
+  const latest = weeks.ok ? latestWeekWithChanges(weeks.data.weeks) : null;
+  const detail = latest === null ? null : await fetchArchiveWeek(latest.week);
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-text">Últimos hallazgos</h1>
-      <TypeFilter activeType={type} />
-      <div className="mt-6 flex flex-col gap-4">
-        {items.map((finding) => (
-          <FindingCard key={finding.id} finding={finding} />
-        ))}
-      </div>
-      <Pagination page={page} totalPages={pages} type={type} />
+      <HomeDigest state={homeDigestState(weeks, detail)} />
+      <FindingsFeed result={findings} page={page} type={type} />
     </>
   );
 }

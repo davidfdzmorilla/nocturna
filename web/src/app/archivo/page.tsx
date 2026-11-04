@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { fetchArchiveWeeks } from "@/lib/api/client";
 import { archiveIndexState } from "@/lib/archiveRoute";
-import { AI_LISTING_NOTE, parseWeekParam, weekLabel } from "@/lib/archiveDigest";
+import {
+  AI_LISTING_NOTE,
+  parseWeekParam,
+  weekCountsLine,
+  weekLabel,
+} from "@/lib/archiveDigest";
 import { Notice } from "@/components/Notice";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +47,6 @@ export default async function ArchivePage() {
         <ul className="mt-6 flex flex-col gap-3">
           {state.data.weeks.map((w) => {
             const validWeek = parseWeekParam(w.week);
-            const total = w.changed + w.new_planet + w.regained + w.lost;
             return (
               <li
                 key={w.week}
@@ -58,9 +62,7 @@ export default async function ArchivePage() {
                   )}
                 </h2>
                 <p className="mt-1 text-sm text-text-muted">
-                  {total === 0
-                    ? "Sin cambios"
-                    : `Referencia cambiada: ${w.changed} · Planetas nuevos: ${w.new_planet} · Recuperados: ${w.regained} · Pierden la referencia: ${w.lost}`}
+                  {weekCountsLine(w)}
                 </p>
               </li>
             );

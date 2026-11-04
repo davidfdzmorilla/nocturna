@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     template: "%s · Nocturna",
   },
   description:
-    "Nocturna. Hallazgos generados automáticamente a partir de arXiv astro-ph; datos de exoplanetas del NASA Exoplanet Archive.",
+    "Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos generados automáticamente a partir de arXiv astro-ph.",
 };
 
 export default function RootLayout({
@@ -34,8 +34,8 @@ export default function RootLayout({
         </main>
         <footer className="border-t border-border bg-surface px-4 py-6 text-center text-sm text-text-muted">
           <p>
-            Nocturna. Hallazgos generados automáticamente a partir de arXiv
-            astro-ph; datos de exoplanetas del NASA Exoplanet Archive.
+            Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos
+            generados automáticamente a partir de arXiv astro-ph.
           </p>
         </footer>
       </body>
