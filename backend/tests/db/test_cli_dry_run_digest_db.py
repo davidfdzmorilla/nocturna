@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 from factories import aware, make_run
 from helpers.archive_digest import digest_text
-from nocturna.application.use_cases.write_archive_digest import WriteDigestText
 from test_cli_dry_run_no_writes_db import (  # noqa: F401 - fixtures autouse reutilizadas
     ARGS,
     _fast_waits,
@@ -24,6 +23,7 @@ from test_cli_run_night_digest_db import _seed_week_40
 from nocturna import cli
 from nocturna.application.agents.runner import AgentRunner
 from nocturna.application.budget import BudgetGuard
+from nocturna.application.use_cases.write_archive_digest import WriteDigestText
 from nocturna.domain.entities import RunStatus
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyArchiveDigestTextRepository,
