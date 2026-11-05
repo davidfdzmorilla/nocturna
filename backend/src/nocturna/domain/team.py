@@ -4,6 +4,17 @@ Funciones puras. La independencia de una `confirmacion_independiente` se
 comprueba solo como «el apellido del primer autor de la referencia NO figura
 entre los autores del artículo»; con cualquier dato ausente o no reconocible,
 `shares_first_author` devuelve `None` y no hay confirmación.
+
+Tras normalizar (TeX, acentos, letras especiales) se aplica un pliegue por
+palabra, igual en el apellido y en los autores: en palabras de al menos
+`_FOLD_MIN_LETTERS` (5) letras, `ue->u`, `oe->o`, `ae->a`, `aa->a`, `dj->d`
+(Müller = Mueller = Muller; Xue y Xu, de menos de 5 letras, no se pliegan).
+Propiedad: el pliegue es una función de cada palabra aplicada a ambos lados y
+la comparación es por secuencia de palabras, así que solo puede pasar un
+resultado de False a True, nunca de True a False; una palabra de 5 o más
+letras no queda vacía, así que no crea `None` nuevos. Límites: Baer/Bär y
+Loeb/Löb no quedan cubiertos (palabras de menos de 5 letras). Falsos
+aceptados conocidos: Rafael/Rafał, Michael/Michał, Aerts/Arts.
 """
 
 import re
@@ -19,7 +30,7 @@ _REFERENCE_RE = re.compile(
 _TEX_DOTLESS_RE = re.compile(r"\\([ij])(?![A-Za-z])(?:\{\}|\s+)?")
 _TEX_ACCENT_RE = re.compile(r"\\['`^\"~=.]\s*\{?([A-Za-z])\}?")
 _TEX_LETTER_ACCENT_RE = re.compile(r"\\[vcHukrdb](?![A-Za-z])\s*\{?([A-Za-z])\}?")
-_TEX_SPECIAL_RE = re.compile(r"\\(ss|aa|AA|ae|AE|oe|OE|o|O|l|L)(?![A-Za-z])(?:\{\}|\s+)?")
+_TEX_SPECIAL_RE = re.compile(r"\\(ss|aa|AA|ae|AE|oe|OE|dj|DJ|o|O|l|L)(?![A-Za-z])(?:\{\}|\s+)?")
 _TEX_SPECIALS = {
     "ss": "ss",
     "aa": "a",
@@ -28,6 +39,8 @@ _TEX_SPECIALS = {
     "AE": "AE",
     "oe": "oe",
     "OE": "OE",
+    "dj": "d",
+    "DJ": "D",
     "o": "o",
     "O": "O",
     "l": "l",
@@ -41,6 +54,7 @@ _SPECIAL_LETTERS = str.maketrans(
         "ł": "l",
         "Ł": "L",
         "ß": "ss",
+        "ẞ": "SS",
         "æ": "ae",
         "Æ": "AE",
         "œ": "oe",
@@ -54,6 +68,14 @@ _SPECIAL_LETTERS = str.maketrans(
     }
 )
 _NON_WORD_RE = re.compile(r"[^a-z0-9]+")
+_FOLD_MIN_LETTERS = 5
+_FOLDS: tuple[tuple[str, str], ...] = (
+    ("ue", "u"),
+    ("oe", "o"),
+    ("ae", "a"),
+    ("aa", "a"),
+    ("dj", "d"),
+)
 
 
 def reference_first_author(refname: str) -> str | None:
@@ -80,6 +102,18 @@ def _normalize(text: str) -> str:
     return _NON_WORD_RE.sub(" ", text).strip()
 
 
+def _fold(token: str) -> str:
+    if len(token) < _FOLD_MIN_LETTERS:
+        return token
+    for old, new in _FOLDS:
+        token = token.replace(old, new)
+    return token
+
+
+def _canonical(text: str) -> str:
+    return " ".join(_fold(t) for t in _normalize(text).split())
+
+
 def shares_first_author(refname: str, paper_authors: str | None) -> bool | None:
     """¿Figura el apellido del primer autor de `refname` como palabra(s)
     completa(s) entre `paper_authors`? `None` si falta un dato."""
@@ -88,8 +122,8 @@ def shares_first_author(refname: str, paper_authors: str | None) -> bool | None:
     surname = reference_first_author(refname)
     if surname is None:
         return None
-    wanted = _normalize(surname)
-    authors = _normalize(paper_authors)
+    wanted = _canonical(surname)
+    authors = _canonical(paper_authors)
     if not wanted or not authors:
         return None
     return re.search(rf"(?<![a-z0-9]){re.escape(wanted)}(?![a-z0-9])", authors) is not None
