@@ -608,6 +608,69 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 - **Hecho cuando**: lo fija el plan. Como mínimo, tests de dominio para las variantes (ningún test llama a Claude), `ruff check` limpio en backend y suite backend verde; si cambia algún resultado en la base real, consulta de solo lectura que lo cuantifique.
 - **Cierre (2026-11-04; sin migración)**: plan aprobado con D1–D4 recomendadas (ADR 0043). `domain/team.py` con `_fold` y `_canonical` (umbral de 5 letras; `ue`, `oe`, `ae`, `aa`, `dj`), `\dj`/`\DJ` y `ẞ`; firmas públicas sin cambios. I001 corregido moviendo el import de `WriteDigestText` en `tests/db/test_cli_dry_run_digest_db.py`. Tests de dominio ampliados: casan en los dos sentidos, no casan, límites y falsos aceptados documentados, reflexividad, `None` intacto, propiedad «solo False→True» contra la regla anterior, refname con TeX → `None`. 12 de 12 mutantes muertos. `ruff check` limpio. Suite backend 4046 passed (antes de T103, 3958), tras quitar los 2 skips. `pytest -m db`: 611 passed. Revisión aprobada en el ciclo 1; sin revisión de gasto (no toca LLM). Impacto en la base real (solo lectura, 2026-11-04): Q1 0 confirmaciones con autores conocidos; Q2 0 evaluaciones `evaluated` con autores en los últimos 30 días.
 
+### T104 · Definición de la fase 3
+- **Estado**: done
+- **Depende de**: T78, T101, T102, T103
+- **Toca agentes y gasto**: no (tarea de planificación; sin código).
+- **Origen**: petición del autor, 2026-11-05. ADR 0039 cerró la fase 2 (O1 + O4 + T100) sin abrir la siguiente; O6 («tarea de definición de la fase siguiente») quedó sin hacer.
+- **Alcance**: propuesta de fase 3 para que el autor decida: objetivo, opciones con coste en tokens (dentro de `nightly_tokens = 300_000` y la ventana 00:00–04:45), riesgos, criterio de cierre medible (como ADR 0021 para la fase 2) y primeras tareas en orden con dependencias. Partir de los datos de la fase 2 (`docs/CIERRE_FASE_2.md`, ADR 0039: el resumen semanal es el producto principal; 7 resultados de tensión interesantes; medidas corregidas en T100/T103) y del estado actual (sin despliegue; web solo local). Lo no definido va a `OPEN_DECISIONS.md`, no se inventa.
+- **Hecho cuando**: el autor elige una opción; queda un ADR con la decisión de fase 3 y su criterio de cierre, y las primeras tareas dadas de alta en este plan como `pending`.
+- **Cierre (2026-11-05; solo docs)**: el autor eligió A + C mínima con D2–D8 recomendadas (ADR 0044). Qué se hizo: ADR 0044 (contexto con datos, decisión, criterio (a)–(e), alternativas y consecuencias); sección «Fase 3» con T105–T110 en `pending`; OD con D1–D4 y D6–D8 resueltas, D5, D9 y D10 abiertas (D10 remite a la OD T00); nota en `CIERRE_FASE_2.md` sobre O6 (casilla sin marcar); `CLAUDE.md` (Estado actual) y `ARCHITECTURE.md` (despliegue en fase 3). Sin código, sin config, sin tokens.
+
+---
+
+## Fase 3
+
+Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3.md): publicar la web en un VPS con el pipeline en el Mac (A) y robustez operativa mínima (C). Sin cambio de gasto: `nightly_tokens` no sube y la web no llama a Claude. Criterio de cierre (a)–(e) en ADR 0044. Orden: T105, T106, T107, T108, T109, T110; las dependencias están en cada tarea.
+
+### T105 · Informe matinal y aviso de noche fallida o ausente
+- **Estado**: pending
+- **Depende de**: T104
+- **Toca agentes y gasto**: no. Solo lee `runs` y `agent_calls`; sin LLM ni tokens.
+- **Origen**: ADR 0044, C (decisión del autor, 2026-11-05).
+- **Alcance**: tras `run-night` y tras `archive-snapshot`, informe de una pantalla con estado de la noche, causa, tokens, publicados y semana del resumen. Notificación de macOS y fichero en `~/nocturna-logs`, sin secretos. Detecta la noche sin `Run` y clasifica la causa de cada noche `partial`, `killed` o sin `Run`.
+- **Hecho cuando**: lo fija el plan. Como mínimo, tests de la clasificación de causas y de la detección de la noche sin `Run`, sin llamar a Claude; suite backend verde; en una noche real, el informe entregado antes de las 09:00.
+
+### T106 · Ingesta de arXiv fallida: reintento dentro de la ventana y estado de la noche
+- **Estado**: pending
+- **Depende de**: T104
+- **Toca agentes y gasto**: sí. Toca `run_night.py` (orquestador); `budget.py` no cambia y no añade llamadas a agentes. Revisión con `budget-guard-review`.
+- **Origen**: ADR 0044, C.
+- **Alcance**: segundo intento acotado de la ingesta de arXiv dentro de la ventana, con `window.hard_stop` y `limits.run_timeout_s` como límites. Pregunta abierta en la tarea: si una ingesta fallida con cola leída sigue siendo `partial`. Relacionada con OD T60.b, que trata los valores de reintento y no esta pregunta; la pregunta no tiene entrada propia en `OPEN_DECISIONS.md`.
+- **Hecho cuando**: lo fija el plan. Como mínimo, tests sin red y sin Claude del segundo intento y del corte por ventana; revisión `budget-guard-review` aprobada; suite backend verde.
+
+### T107 · Imágenes y compose de producción para web y API (sin pipeline)
+- **Estado**: pending
+- **Depende de**: T104
+- **Toca agentes y gasto**: no.
+- **Origen**: ADR 0044, A. Fija el dominio (D5, abierta).
+- **Alcance**: Dockerfiles de API y web; compose con PostgreSQL, Traefik y TLS. Test que congela que ni imágenes ni compose llevan `claude`, `ANTHROPIC_*` ni credenciales del CLI. El pipeline no se despliega en el VPS.
+- **Hecho cuando**: lo fija el plan. Como mínimo, el test de ausencia de credenciales pasa y falla si se introduce una; imágenes construidas; URL con TLS verificada en el VPS.
+
+### T108 · Sincronización de datos Mac → VPS
+- **Estado**: pending
+- **Depende de**: T107
+- **Toca agentes y gasto**: no.
+- **Origen**: ADR 0044, A (D3).
+- **Alcance**: `pg_dump` completo tras la noche y tras el snapshot semanal; restauración idempotente en el VPS. La web muestra «datos actualizados el …».
+- **Hecho cuando**: lo fija el plan. Como mínimo, dos restauraciones seguidas dejan el mismo estado; la web muestra la fecha; el flujo no contiene credenciales de Claude.
+
+### T109 · Endurecimiento para exposición pública
+- **Estado**: pending
+- **Depende de**: T107
+- **Toca agentes y gasto**: no.
+- **Origen**: ADR 0044, A (D4).
+- **Alcance**: API solo en red interna; rol PostgreSQL de solo lectura para la API; 404/503 honestos en la web. Cierra las OD de T50 y T51 que apliquen (`/docs`, `/redoc` y `/openapi.json`; sesión de solo lectura; ramas de error con HTTP 200).
+- **Hecho cuando**: lo fija el plan. Como mínimo, la API no responde desde fuera de la red interna; el rol de la API no puede escribir; las OD aplicables quedan cerradas en `OPEN_DECISIONS.md`.
+
+### T110 · Puesta en marcha y medición del criterio de cierre de la fase 3
+- **Estado**: pending
+- **Depende de**: T105, T106, T108, T109
+- **Toca agentes y gasto**: no.
+- **Origen**: ADR 0044, criterio (a)–(e) y D7 (ventana de 14 días).
+- **Alcance**: 14 días de comprobaciones; medición en solo lectura de los criterios (a)–(e); informe para el ADR de cierre de fase 3.
+- **Hecho cuando**: lo fija el plan. Como mínimo, 14 días registrados y los criterios medidos; si alguno falla, la tarea de corrección que exige D8.
+
 ---
 
 ## Decisiones abiertas al arrancar

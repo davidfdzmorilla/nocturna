@@ -247,6 +247,8 @@ Comentario del autor:
 
 Decisión del autor (2026-11-03): O1 + O4 + T100 (corrección de los hallazgos de medida). ADR 0039.
 
+Nota (2026-11-05): O6 se abordó después en T104 (ADR 0044, 2026-11-05).
+
 ## Consultas de referencia
 
 Todas corren en una sesión de solo lectura: `docker exec -i nocturna-postgres psql -U nocturna -d nocturna -X -v ON_ERROR_STOP=1` con `SET default_transaction_read_only = on`.
