@@ -30,11 +30,8 @@ if printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+commit'; then
   fi
 fi
 
-# 3. Nada de infraestructura de producción en fase 1
-if printf '%s' "$cmd" | grep -qiE 'traefik|hetzner|certbot|letsencrypt'; then
-  echo "BLOQUEADO: despliegue/Traefik no forman parte de la fase 1. Regístralo en docs/OPEN_DECISIONS.md si crees que hace falta." >&2
-  exit 2
-fi
+# 3. (Retirada en T107, 2026-11-06: el bloqueo de infraestructura de producción
+#    era de la fase 1; ADR 0044 autoriza el despliegue en la fase 3.)
 
 # 4. Comandos destructivos
 if printf '%s' "$cmd" | grep -qE 'rm\s+-rf\s+/|git\s+push\s+.*(-f|--force)|docker\s+compose\s+down\s+.*-v'; then

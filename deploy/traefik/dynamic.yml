@@ -1,0 +1,14 @@
+http:
+  routers:
+    nocturna:
+      rule: 'Host(`{{ env "NOCTURNA_DOMAIN" }}`)'
+      entryPoints:
+        - websecure
+      service: web
+      tls:
+        certResolver: le
+  services:
+    web:
+      loadBalancer:
+        servers:
+          - url: http://web:3000
