@@ -370,6 +370,48 @@ pmset -g sched
 
 **Requisito crítico**: el portátil **debe estar enchufado**. `caffeinate -s` solo impide la suspensión mientras hay corriente alterna. Sin adaptador de energía, la máquina no se despierta a las 00:00 aunque lo pidas.
 
+#### Paso 8: Informe matinal (T105, ADR 0045)
+
+El agente `com.nocturna.morning-report` lanza `morning-report-scheduled.sh` a las 07:30 y al iniciar sesión (`RunAtLoad`). Solo lee la base y los ficheros de estado; no usa Claude ni gasta tokens. Escribe `~/nocturna-logs/morning-YYYYMMDD.txt` y una línea en `morning-deliveries.log`, y avisa con una notificación de macOS si la noche no fue `completed` o si aún no hubo aviso para esa noche.
+
+Materializar el plist. Sustituciones: `__REPO_ROOT__` por la ruta absoluta del checkout principal (no de un worktree) y `__HOME__` por el home:
+
+```bash
+REPO_ROOT="<ruta absoluta del checkout principal>"
+mkdir -p ~/nocturna-logs    # ya existe si se hizo el Paso 1
+
+sed -e "s|__REPO_ROOT__|$REPO_ROOT|g" \
+    -e "s|__HOME__|$HOME|g" \
+    "$REPO_ROOT/backend/scripts/com.nocturna.morning-report.plist.template" \
+    > ~/Library/LaunchAgents/com.nocturna.morning-report.plist
+```
+
+El plist resultante tiene `Label` `com.nocturna.morning-report`, `ProgramArguments` con la ruta de `morning-report-scheduled.sh`, `StartCalendarInterval` a las 07:30, `RunAtLoad` verdadero, `StandardOutPath` y `StandardErrorPath` en `~/nocturna-logs/launchd-morning-report.log` (solo fallos de arranque del agente) y sin `KeepAlive`.
+
+Cargar y comprobar. Si una instalación anterior con la misma etiqueta sigue cargada, descargarla antes con `launchctl bootout gui/$(id -u)/com.nocturna.morning-report` (mismo criterio que el Paso 4):
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nocturna.morning-report.plist
+
+# Comprobar que ProgramArguments apunta a morning-report-scheduled.sh:
+launchctl print gui/$(id -u)/com.nocturna.morning-report
+```
+
+Prueba manual sin esperar a las 07:30 (no notifica con `--no-notify`; deja una línea `notified=skip` en `morning-deliveries.log`):
+
+```bash
+bash "$REPO_ROOT/backend/scripts/morning-report-scheduled.sh" --no-notify
+```
+
+**No programar un despertar a las 07:25 con `pmset repeat`.** `pmset repeat` admite un solo evento repetido de encendido o despertar, y en esta máquina ese hueco lo ocupa el `wakepoweron` de 00:00 del Paso 7 (comprobado con `pmset -g sched` el 2026-11-05). `sudo pmset repeat wake MTWRFSU 07:25:00` lo sustituiría y la noche quedaría sin despertador. `launchd` no despierta el Mac por sí solo: si a las 07:30 está dormido, el job corre al despertar (`StartCalendarInterval` recupera la hora perdida) y, si está apagado, al iniciar sesión (`RunAtLoad`). Se acepta ese retraso (ADR 0045, límites).
+
+Desinstalar:
+
+```bash
+launchctl bootout gui/$(id -u)/com.nocturna.morning-report
+rm ~/Library/LaunchAgents/com.nocturna.morning-report.plist
+```
+
 ---
 
 ## El centinela: alcance y límites

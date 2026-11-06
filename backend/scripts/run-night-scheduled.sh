@@ -33,6 +33,11 @@
 #           alcanzaron el estado esperado dentro de NOCTURNA_WAIT_S), o no
 #           se pudo crear el centinela (permisos de NOCTURNA_LOG_DIR).
 #     76    Ya hubo un lanzamiento en esta ventana (centinela de la noche).
+#     (T105) Cada salida deja una línea `clave=código` en
+#           $NOCTURNA_LOG_DIR/night-YYYYMMDD.status (`precondition`, `duplicate`,
+#           `environment`, `run-night`, `evaluate-tensions`) y, salvo --dry-run,
+#           lanza `nocturna morning-report --trigger run-night` al terminar: el
+#           informe y su aviso no cambian nunca el código de salida de la noche.
 #     77    Entorno o configuración inválidos: `uv`/`claude` no resolubles
 #           en PATH, o NOCTURNA_WAIT_S/NOCTURNA_LOG_DIR con un valor
 #           inválido (p.ej. NOCTURNA_WAIT_S no numérico, NOCTURNA_LOG_DIR
@@ -102,6 +107,30 @@ if [[ -z "$log_dir" ]]; then
     exit 77
 fi
 
+# T105: `--dry-run` entre los argumentos (un ensayo no escribe estado ni informe).
+dry_run=0
+for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+        dry_run=1
+    fi
+done
+
+# Clave de la noche. La ventana 00:00-04:45 no cruza medianoche, así que la
+# fecha local de "ahora" identifica sin ambigüedad la noche en curso.
+night_key="$(date +%Y%m%d)"
+# T105: misma fecha en formato ISO, derivada de `night_key` (no un segundo
+# `date` que pudiera cruzar medianoche) para `morning-report --night`.
+night_date="${night_key:0:4}-${night_key:4:2}-${night_key:6:2}"
+
+# T105: deja `clave=código` en night-YYYYMMDD.status, para que `morning-report`
+# distinga una noche sin `Run` por precondiciones, duplicado o entorno. Mejor
+# esfuerzo: un fallo de escritura nunca cambia el flujo ni el código de salida.
+record_status() {
+    if [[ "$dry_run" -eq 0 ]]; then
+        printf '%s=%s\n' "$1" "$2" >>"$log_dir/night-$night_key.status" 2>/dev/null || true
+    fi
+}
+
 # No se define, exporta ni borra ANTHROPIC_API_KEY: si estuviera presente en
 # el entorno de `launchd` (heredado de algún plist global, por ejemplo),
 # `AgentSDKProvider()` debe seguir fallando con `ApiKeyInEnvironment` -- esa
@@ -118,16 +147,16 @@ command -v claude >/dev/null 2>&1 || {
 }
 if [[ -n "$missing" ]]; then
     echo "run-night-scheduled: no se encuentra '$missing' en PATH ($PATH); abortando sin lanzar nada" >&2
+    if mkdir -p "$log_dir" 2>/dev/null; then
+        record_status environment 77
+    fi
     exit 77
 fi
 
 mkdir -p "$log_dir"
 
-# Centinela de una ejecución por ventana. La ventana 00:00-04:45 no cruza
-# medianoche (empieza y termina el mismo día natural), así que la fecha
-# local de "ahora" identifica sin ambigüedad la noche en curso: una noche es
-# exactamente una fecha local.
-night_key="$(date +%Y%m%d)"
+# Centinela de una ejecución por ventana: una noche es exactamente una fecha
+# local (`night_key`, arriba).
 sentinel="$log_dir/.launched-$night_key"
 out_log="$log_dir/night-$night_key.out.log"
 err_log="$log_dir/night-$night_key.err.log"
@@ -147,7 +176,22 @@ err_log="$log_dir/night-$night_key.err.log"
 abort_precondition() {
     rm -f "$sentinel"
     echo "$1" >&2
+    record_status precondition 75
+    run_morning_report
     exit 75
+}
+
+# T105: informe matinal y aviso. Solo lectura, sin `caffeinate` y sin tokens;
+# cualquier fallo se ignora (`|| true`): nunca altera el código de salida de la
+# noche. Se ejecuta desde `backend/` (el `cd` del final aún no ocurrió en los
+# abortos de precondición).
+run_morning_report() {
+    if [[ "$dry_run" -eq 0 ]]; then
+        # Una señal durante el informe no debe cambiar el código de la noche.
+        trap '' INT TERM
+        (cd "${repo_root}/backend" && uv run --frozen nocturna morning-report --trigger run-night --night "$night_date") \
+            >>"$out_log" 2>>"$err_log" || true
+    fi
 }
 
 # Comprobación-y-creación atómica del centinela, con `set -C` (noclobber):
@@ -173,9 +217,11 @@ else
         echo "run-night-scheduled: ya se lanzó una ejecución esta noche ($night_key); ver $sentinel." >&2
         echo "Para relanzar hay que borrar ese fichero a mano -- deliberadamente no hay --force" \
             "(docs/CALIBRACION.md, Regla de noches fallidas: una noche fallida no se relanza)." >&2
+        record_status duplicate 76
         exit 76
     fi
     echo "run-night-scheduled: no se pudo crear el centinela ($sentinel); comprueba permisos de $log_dir." >&2
+    record_status precondition 75
     exit 75
 fi
 
@@ -275,6 +321,7 @@ set +e
 caffeinate -is uv run --frozen nocturna run-night "$@" >>"$out_log" 2>>"$err_log"
 exit_code=$?
 set -e
+record_status run-night "$exit_code"
 
 # T89 (D10): evalúa las lecturas de la noche contra el archivo para que sus
 # findings de medidas aparezcan como candidatos la noche siguiente. Cero
@@ -283,12 +330,6 @@ set -e
 # el log y la noche conserva el código de `run-night`. Va después de run-night
 # y de la ventana de gasto (el Editor ya terminó), nunca antes. Con
 # `--dry-run` entre los argumentos no se ejecuta: un ensayo no debe escribir.
-dry_run=0
-for arg in "$@"; do
-    if [[ "$arg" == "--dry-run" ]]; then
-        dry_run=1
-    fi
-done
 evaluate_exit_code="omitido"
 if [[ "$dry_run" -eq 1 ]]; then
     echo "run-night-scheduled: --dry-run: se omite evaluate-tensions." >>"$out_log"
@@ -297,6 +338,7 @@ else
     caffeinate -is uv run --frozen nocturna evaluate-tensions >>"$out_log" 2>>"$err_log"
     evaluate_exit_code=$?
     set -e
+    record_status evaluate-tensions "$evaluate_exit_code"
     if [[ "$evaluate_exit_code" -eq 4 ]]; then
         echo "run-night-scheduled: evaluate-tensions terminó con planetas sin resolver (código 4); se reintentan la próxima vez; la noche conserva el código de run-night ($exit_code)." >>"$err_log"
     elif [[ "$evaluate_exit_code" -ne 0 ]]; then
@@ -311,5 +353,8 @@ fi
     echo "log de salida estándar: $out_log"
     echo "log de errores: $err_log"
 } >>"$out_log"
+
+# T105: informe matinal tras el bloque "fin:" (ver `run_morning_report`).
+run_morning_report
 
 exit "$exit_code"

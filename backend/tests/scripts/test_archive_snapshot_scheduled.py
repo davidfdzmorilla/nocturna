@@ -259,7 +259,12 @@ def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path
     caffeinate_calls = env.caffeinate_log.read_text().splitlines()
     assert caffeinate_calls == ["-is uv run --frozen nocturna archive-snapshot --full"]
     uv_calls = env.uv_log.read_text().splitlines()
-    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls]
+    # T105: el informe matinal va sin `caffeinate`, detrás del snapshot.
+    assert uv_calls[-1] == (
+        "run --frozen nocturna morning-report --trigger archive-snapshot "
+        f"--night {date.today().isoformat()}"
+    )
+    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls[:-1]]
 
 
 def test_levanta_postgres_con_el_compose_del_repositorio(tmp_path):
@@ -377,3 +382,26 @@ def test_el_path_por_defecto_coincide_con_el_de_run_night_y_incluye_homebrew():
 
     assert default == _default_path(run_night)
     assert "/opt/homebrew/bin" in default.split(":")
+
+
+# ------------------------------------------------------------------ T105
+
+
+def test_t105_deja_el_codigo_y_lanza_el_informe_sin_cambiar_el_codigo_de_salida(tmp_path):
+    env = Env(tmp_path)
+
+    result = env.run("--full", UV_EXIT_CODE="3")
+
+    assert result.returncode == 3
+    key = date.today().strftime("%Y%m%d")
+    assert (env.logs / f"archive-{key}.status").read_text() == "archive-snapshot=3\n"
+    assert "morning-report --trigger archive-snapshot" in env.uv_log.read_text().splitlines()[-1]
+
+
+def test_t105_dry_run_no_deja_estado_ni_informe(tmp_path):
+    env = Env(tmp_path)
+
+    assert env.run("--dry-run").returncode == 0
+
+    assert not list(env.logs.glob("archive-*.status"))
+    assert "morning-report" not in env.uv_log.read_text()

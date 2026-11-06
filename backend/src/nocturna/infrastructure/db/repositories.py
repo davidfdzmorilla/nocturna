@@ -55,6 +55,7 @@ from nocturna.domain.llm import AgentRole
 from nocturna.domain.solution_tension import SolutionTension
 from nocturna.domain.tension import PUBLISHED_CONFIRMED, TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
+    agent_call_from_row,
     agent_call_to_row,
     apply_tension_evaluation,
     archive_default_change_to_row,
@@ -423,6 +424,14 @@ class SqlAlchemyRunRepository:
         row = self._session.execute(stmt).scalar_one_or_none()
         return run_from_row(row) if row is not None else None
 
+    def started_between(self, start: datetime, end: datetime) -> list[Run]:
+        stmt = (
+            select(RunRow)
+            .where(RunRow.started_at >= start, RunRow.started_at <= end)
+            .order_by(RunRow.started_at.asc())
+        )
+        return [run_from_row(row) for row in self._session.execute(stmt).scalars()]
+
     def save(self, run: Run) -> None:
         """Persiste el estado actual del `Run`, incluido `tokens_used`.
 
@@ -455,6 +464,10 @@ class SqlAlchemyAgentCallRepository:
 
     def add(self, call: AgentCall) -> None:
         self._session.add(agent_call_to_row(call))
+
+    def calls_for_run(self, run_id: UUID) -> list[AgentCall]:
+        stmt = select(AgentCallRow).where(AgentCallRow.run_id == run_id)
+        return [agent_call_from_row(row) for row in self._session.execute(stmt).scalars()]
 
     def tokens_used_for_run(self, run_id: UUID) -> int:
         """Suma de `tokens_in + tokens_out` de todas las llamadas del Run.

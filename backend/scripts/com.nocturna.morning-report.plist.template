@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    com.nocturna.morning-report.plist.template — Plantilla del agente launchd
+    del informe matinal (T105). Se materializa con `sed` sustituyendo
+    __REPO_ROOT__ y __HOME__ por rutas absolutas, y se instala fuera del
+    repositorio, en ~/Library/LaunchAgents/com.nocturna.morning-report.plist.
+
+    Todos los días a las 07:30. RunAtLoad=true: si el Mac estaba apagado o sin
+    sesión a esa hora, el informe sale al iniciar sesión. Sin LLM ni tokens.
+    Deliberadamente sin KeepAlive: un fallo se anota, no se reintenta en bucle.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nocturna.morning-report</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO_ROOT__/backend/scripts/morning-report-scheduled.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!--
+        Solo para fallos de arranque del propio agente launchd. Los logs de la
+        ejecución los escribe morning-report-scheduled.sh en NOCTURNA_LOG_DIR
+        (por defecto __HOME__/nocturna-logs).
+    -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/nocturna-logs/launchd-morning-report.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/nocturna-logs/launchd-morning-report.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

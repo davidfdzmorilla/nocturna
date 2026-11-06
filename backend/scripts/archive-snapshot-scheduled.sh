@@ -53,6 +53,7 @@ fi
 
 mkdir -p "$log_dir"
 day_key="$(date +%Y%m%d)"
+day_date="${day_key:0:4}-${day_key:4:2}-${day_key:6:2}"
 out_log="$log_dir/archive-$day_key.out.log"
 err_log="$log_dir/archive-$day_key.err.log"
 
@@ -115,5 +116,20 @@ set -e
     echo "fin: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "código de salida: $exit_code"
 } >>"$out_log"
+
+# T105: deja el código para `morning-report` y lanza el informe y su aviso.
+# Salvo --dry-run (un ensayo no escribe estado ni informe). Mejor esfuerzo:
+# nunca cambia el código de salida del snapshot. Sin `caffeinate`.
+dry_run=0
+for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+        dry_run=1
+    fi
+done
+if [[ "$dry_run" -eq 0 ]]; then
+    printf 'archive-snapshot=%s\n' "$exit_code" >>"$log_dir/archive-$day_key.status" 2>/dev/null || true
+    uv run --frozen nocturna morning-report --trigger archive-snapshot --night "$day_date" \
+        >>"$out_log" 2>>"$err_log" || true
+fi
 
 exit "$exit_code"

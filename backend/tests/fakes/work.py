@@ -79,6 +79,10 @@ class InMemoryRunRepository:
     def current(self) -> Run | None:
         return next((r for r in self._runs.values() if r.status is RunStatus.RUNNING), None)
 
+    def started_between(self, start: datetime, end: datetime) -> list[Run]:
+        found = [r for r in self._runs.values() if start <= r.started_at <= end]
+        return sorted(found, key=lambda r: r.started_at)
+
     def save(self, run: Run) -> None:
         self._runs[run.id] = run
 
@@ -109,6 +113,9 @@ class InMemoryAgentCallRepository:
 
     def add(self, call: AgentCall) -> None:
         self.calls.append(call)
+
+    def calls_for_run(self, run_id: UUID) -> list[AgentCall]:
+        return [call for call in self.calls if call.run_id == run_id]
 
     def tokens_used_for_run(self, run_id: UUID) -> int:
         return sum(call.total_tokens for call in self.calls if call.run_id == run_id)
