@@ -193,6 +193,10 @@ class RunRepository(Protocol):
         """Recupera el Run en estado `RUNNING`, para recuperarse tras un reinicio. Usado por T30."""
         ...
 
+    def started_between(self, start: datetime, end: datetime) -> list[Run]:
+        """Runs con `start <= started_at <= end`, `started_at` ascendente (T105)."""
+        ...
+
     def save(self, run: Run) -> None:
         """Persiste el estado actual del Run. Usado por T30/T44."""
         ...
@@ -203,6 +207,10 @@ class AgentCallRepository(Protocol):
 
     def add(self, call: AgentCall) -> None:
         """Inserta el registro de una llamada a un agente. Usado por T41/T42/T43."""
+        ...
+
+    def calls_for_run(self, run_id: UUID) -> list[AgentCall]:
+        """Todas las llamadas del Run, de cualquier `status` (T105)."""
         ...
 
     def tokens_used_for_run(self, run_id: UUID) -> int:

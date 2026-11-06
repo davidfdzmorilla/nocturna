@@ -43,8 +43,10 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
          │    ├─ por cada semana cerrada del resumen (mismo tope): authorize(writer)? → redactor → archive_digest_text  [Sonnet, T84.r]
          │    ├─ authorize(editor, reserva)? → Editor (1 llamada, todos candidatos)  [Opus, Fase C]
          │    └─ cierra Run (COMPLETED | PARTIAL | KILLED | FAILED)
-         └─ tras la noche: nocturna evaluate-tensions (sin LLM, T89) → evaluaciones que la noche siguiente usan los hallazgos de medida y el redactor
+         ├─ tras la noche: nocturna evaluate-tensions (sin LLM, T89) → evaluaciones que la noche siguiente usan los hallazgos de medida y el redactor
+         └─ tras la noche: nocturna morning-report --trigger run-night (sin LLM, T105) → morning-YYYYMMDD.txt y aviso
 04:45  hard_stop incondicional (vigía asyncio + comprobación en cada authorize)
+07:30  launchd → morning-report-scheduled.sh → nocturna morning-report --trigger scheduled (sin LLM, T105; también al iniciar sesión)
 ```
 
 **Qué aporta el envoltorio**: configuración del PATH (para que `uv` y `claude` sean resolubles), validación de precondiciones (Docker, PostgreSQL), centinela (única invocación por ventana), rotación de logs en ficheros separados. **Sin** lógica de ventana ni presupuesto, que siguen siendo exclusivas de `application/budget.py`.
@@ -53,7 +55,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 
 **Mapa de desenlaces**: cada fase genera un desenlace que `_run_night_for_real` traduce a `RunStatus`. COMPLETED (noche íntegra) sale solo de fase C. Las fases A y B generan PARTIAL o KILLED; el Editor cierra con COMPLETED o PARTIAL. FAILED sale de una excepción inesperada.
 
-**Códigos de salida**: 0 = COMPLETED, 1 = PARTIAL/FAILED/KILLED, 7 = timeout de ejecución, 8 = error crítico.
+**Códigos de salida** (`cli.py`, `_EXIT_CODE_BY_RUN_STATUS` y `_run_night_for_real`): `run-night` sale con 0 = COMPLETED, 7 = PARTIAL, 8 = KILLED, y 1 = excepción que escapa de `RunNight` (el `Run` queda FAILED). El envoltorio `run-night-scheduled.sh` propaga esos códigos y añade 75 (precondiciones no listas), 76 (noche ya lanzada, centinela) y 77 (entorno o configuración inválidos, antes de tocar el centinela).
 
 **Doble defensa del `hard_stop`**: vigía asyncio cancela en vuelo, comprobación de segundos restantes en cada autorización rechaza nuevo gasto.
 
@@ -348,6 +350,18 @@ Implementado en T85 ([ADR 0029](adr/0029-tensiones-entre-soluciones-del-archivo.
 - **Guardas de gasto**: el contrato de `ItemRepository.next_unread` es solo `source = 'arxiv'`; `run-item` sale con 10 ante otra fuente; `ReadItem`, la relectura y `PopularizeReading` lanzan `InvariantViolation` antes de autorizar; la cola de `night_report.sql` y `backfill_exoplanet_match.py` cuentan solo arXiv; el downgrade se niega si hay ítems del archivo.
 - **Redactor y Editor (T85.e, [ADR 0030](adr/0030-redactor-de-tensiones-entre-soluciones.md))**: `application/use_cases/write_solution_tensions.py` con `SelectSolutionTensions` (solo lectura: excluye ya redactadas, ítems fallidos y datos inválidos; orden σ descendente) y `WriteSolutionTensions` (`AgentRunner`, rol `writer`, prompt `writer-archive-v2` desde T96, [ADR 0035](adr/0035-writer-archive-v2-redondeo-y-porcentaje-en-el-bloque.md): el bloque da la diferencia relativa en porcentaje y los valores redondeados por `prompt_text.round_to_error`; `writer_output` convierte un `\n` literal en salto de línea para los dos redactores). `_phase_writer` hace dos pasadas, primero arXiv y después el archivo, con un único bucle de denegaciones; cualquier parada de arXiv corta la del archivo. Tope y reserva del redactor compartidos (contados en base por rol). Marca derivada `extreme_sigma` por encima de `[solution_tensions] extreme_sigma` para el redactor y el Editor. Todo detrás de `[solution_tensions] writer_enabled` (apagado hasta T85.w): apagado, cero `authorize` y Editor en `editor-v3`; encendido, Editor en `editor-v4` (`cli.py::editor_prompt_version`). API `SolutionTensionOut` por lista blanca. `night_report.sql` Q9b por versión de prompt y Q9c.
 - **Un resultado, un hallazgo (T95, [ADR 0034](adr/0034-un-resultado-no-se-publica-dos-veces-por-las-dos-vias.md))**: `SelectSolutionTensions.pending()` excluye con `same_paper_arxiv` (motivo de selección, no de `SkipReason`; sin migración) la tensión cuya alta tiene el `arxiv_id` de un `catalog_tension`, `primera_medida` o `confirmacion_independiente` de un `Item` arXiv, publicado o no, del mismo planeta del archivo y parámetro (`domain/solution_tension.py::told_by_arxiv`). Va tras `already_written`; una evaluación con hallazgo sin `Item` lanza `InvariantViolation` y la pasada del archivo no corre. Altas sin `arxiv_id` y el sentido contrario quedan fuera.
+
+## Informe matinal (fase 3, T105, [ADR 0045](adr/0045-informe-matinal-y-causas-de-la-noche.md))
+
+Lectura de la noche, sin LLM, sin tokens y sin escritura en la base. Dispara tras `run-night`, tras `archive-snapshot` y por launchd a las 07:30 (con `RunAtLoad`).
+
+- **`domain/night_report.py`** (puro): `NightCause` (21 causas), `classify_night`, `parse_run_notes` (tolerante), `is_night_run` y `target_night`. Clasifica desde `Run`, `notes`, recuentos de llamadas y los códigos de los envoltorios; nunca lee logs.
+- **`application/use_cases/morning_report.py`**: `BuildMorningReport` y la presentación (informe de una pantalla, aviso, `should_notify`, línea de entrega). Puertos `MorningReportData`, `LaunchLog`, `Notifier` y `ReportSink`. No importa SQLAlchemy ni el proveedor LLM.
+- **`infrastructure/db/morning_report_data.py`**: `SqlMorningReportData`, solo `SELECT`; traduce los errores de SQLAlchemy a `ReportDataUnavailable`. Sin base, el informe sale igual con «base de datos inaccesible».
+- **`infrastructure/ops/`**: `FileLaunchLog` (existencia de centinela y logs, `clave=código` de `night-*.status` y `archive-*.status`), `FileReportSink` (`morning-YYYYMMDD.txt` 0600, atómico; `morning-deliveries.log` en modo añadir) y `OsascriptNotifier` (título y cuerpo por `argv`).
+- **Subcomando** `nocturna morning-report [--night YYYY-MM-DD] [--trigger run-night|archive-snapshot|scheduled] [--no-notify]`: 0 informe escrito, 1 no se pudo escribir.
+- **Envoltorios**: `run-night-scheduled.sh` y `archive-snapshot-scheduled.sh` registran su código en `*.status` y lanzan el informe con `--night` (sin informe en `--dry-run`); `morning-report-scheduled.sh` es la red de las 07:30. Ningún envoltorio cambia su código de salida por el informe.
+- **Instalación**: `docs/CALIBRACION.md`, Paso 8.
 
 ## Lo que no existe en fase 1 (a propósito)
 

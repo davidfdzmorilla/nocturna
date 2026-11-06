@@ -97,6 +97,17 @@ PLIST_TEMPLATE_PATH = BACKEND_ROOT / "scripts" / "com.nocturna.run-night.plist.t
 _LAUNCHD_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 _FAKE_UV = """#!/usr/bin/env bash
+# T105: `morning-report` se registra aparte (UV_REPORT_LOG_FILE) y no toca el resto de
+# variables: los tests de la noche cuentan solo las invocaciones de `run-night` y
+# `evaluate-tensions`.
+case "$*" in
+    *morning-report*)
+        if [ -n "${UV_REPORT_LOG_FILE:-}" ]; then
+            printf '%s\\n' "$*" >> "$UV_REPORT_LOG_FILE"
+        fi
+        exit "${UV_REPORT_EXIT_CODE:-0}"
+        ;;
+esac
 if [ -n "${UV_CALL_LOG_FILE:-}" ]; then
     printf '%s\\n' "$*" >> "$UV_CALL_LOG_FILE"
 fi
@@ -1169,3 +1180,102 @@ def test_plantilla_de_plist_es_coherente(tmp_path):
     assert plist["StartCalendarInterval"] == {"Hour": 0, "Minute": 5}
     assert plist["RunAtLoad"] is False
     assert "KeepAlive" not in plist
+
+
+# --- T105: estado de salida e informe matinal --------------------------------
+
+
+def _status_lines(home: Path) -> list[str]:
+    path = _log_dir(home) / f"night-{_night_key()}.status"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+@pytest.mark.parametrize("code", [0, 7, 8])
+def test_t105_deja_el_estado_y_lanza_el_informe_sin_cambiar_el_codigo(tmp_path, code):
+    home, bin_dir = _setup_env(tmp_path)
+    report_log = tmp_path / "report-calls.log"
+    env = _base_env(
+        home,
+        bin_dir,
+        extra={
+            "UV_EXIT_CODE": str(code),
+            "UV_EVALUATE_EXIT_CODE": "4",
+            "UV_REPORT_LOG_FILE": str(report_log),
+            "UV_REPORT_EXIT_CODE": "1",  # un informe fallido no cambia la noche
+        },
+    )
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == code
+    assert _status_lines(home) == [f"run-night={code}", "evaluate-tensions=4"]
+    assert report_log.read_text().splitlines() == [
+        f"run --frozen nocturna morning-report --trigger run-night --night {_today_iso()}"
+    ]
+
+
+def _today_iso() -> str:
+    from datetime import date
+
+    return date.today().isoformat()
+
+
+def test_t105_el_informe_no_pasa_por_caffeinate(tmp_path):
+    home, bin_dir = _setup_env(tmp_path)
+    env = _base_env(home, bin_dir)
+
+    _run_wrapper([], env, cwd=tmp_path)
+
+    calls = (tmp_path / "caffeinate-calls.log").read_text()
+    assert "morning-report" not in calls
+
+
+def test_t105_aborto_por_precondiciones_deja_estado_y_lanza_el_informe(tmp_path):
+    home, bin_dir = _setup_env(tmp_path)
+    report_log = tmp_path / "report-calls.log"
+    env = _base_env(
+        home, bin_dir, extra={"DOCKER_INFO_EXIT": "1", "UV_REPORT_LOG_FILE": str(report_log)}
+    )
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == 75
+    assert _status_lines(home) == ["precondition=75"]
+    assert report_log.read_text().splitlines() == [
+        f"run --frozen nocturna morning-report --trigger run-night --night {_today_iso()}"
+    ]
+
+
+def test_t105_duplicado_deja_estado_76_sin_nuevo_informe(tmp_path):
+    home, bin_dir = _setup_env(tmp_path)
+    report_log = tmp_path / "report-calls.log"
+    env = _base_env(home, bin_dir, extra={"UV_REPORT_LOG_FILE": str(report_log)})
+
+    first = _run_wrapper([], env, cwd=tmp_path)
+    second = _run_wrapper([], env, cwd=tmp_path)
+
+    assert (first.returncode, second.returncode) == (0, 76)
+    assert _status_lines(home) == ["run-night=0", "evaluate-tensions=0", "duplicate=76"]
+    assert len(report_log.read_text().splitlines()) == 1
+
+
+def test_t105_entorno_sin_uv_deja_estado_77(tmp_path):
+    home, bin_dir = _setup_env(tmp_path, uv=False)
+    env = _base_env(home, bin_dir)
+
+    result = _run_wrapper([], env, cwd=tmp_path)
+
+    assert result.returncode == 77
+    assert _status_lines(home) == ["environment=77"]
+
+
+def test_t105_dry_run_no_deja_estado_ni_lanza_informe(tmp_path):
+    home, bin_dir = _setup_env(tmp_path)
+    report_log = tmp_path / "report-calls.log"
+    env = _base_env(home, bin_dir, extra={"UV_REPORT_LOG_FILE": str(report_log)})
+
+    result = _run_wrapper(["--dry-run"], env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert _status_lines(home) == []
+    assert not report_log.exists()

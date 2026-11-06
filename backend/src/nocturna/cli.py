@@ -191,6 +191,7 @@ decisión abierta para quien la retome.
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import traceback
 from collections import Counter
@@ -198,6 +199,7 @@ from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -255,6 +257,15 @@ from nocturna.application.use_cases.ingest_arxiv import (
     IngestResult,
     default_since,
     since_was_capped,
+)
+from nocturna.application.use_cases.morning_report import (
+    BuildMorningReport,
+    MorningReport,
+    Trigger,
+    delivery_line,
+    render_notification,
+    render_report,
+    should_notify,
 )
 from nocturna.application.use_cases.popularize_reading import (
     PopularizeOutcome,
@@ -315,6 +326,7 @@ from nocturna.domain.entities import ITEM_SOURCE_ARXIV, Item, Reading, Run, RunS
 from nocturna.domain.errors import FindingNotFound, InvalidTransition, InvariantViolation
 from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
+from nocturna.domain.night_report import ORPHAN_NOTE, target_night
 from nocturna.domain.own_solution import OwnSolutionRule
 from nocturna.domain.repositories import ArchiveRepository
 from nocturna.domain.solution_tension import SolutionTension, SolutionTensionRule
@@ -331,6 +343,7 @@ from nocturna.infrastructure.arxiv.rate_limit import RateLimiter
 from nocturna.infrastructure.arxiv.retry import RetryPolicy
 from nocturna.infrastructure.clock import SystemClock
 from nocturna.infrastructure.config import PipelineConfig, Settings, load_pipeline_config
+from nocturna.infrastructure.db.morning_report_data import SqlMorningReportData
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
     SqlAlchemyArchiveDigestReader,
@@ -356,6 +369,9 @@ from nocturna.infrastructure.exoplanet_archive.client import (
 from nocturna.infrastructure.exoplanet_archive.mappers import planet_overview_url, reference_text
 from nocturna.infrastructure.exoplanet_archive.snapshot import ArchiveSnapshotSource
 from nocturna.infrastructure.logging import configure_json_logging
+from nocturna.infrastructure.ops.launch_log import FileLaunchLog
+from nocturna.infrastructure.ops.notifier import OsascriptNotifier
+from nocturna.infrastructure.ops.report_file import FileReportSink
 
 # `AgentSDKProvider` (infrastructure/llm/agent_sdk_provider.py) NO se importa
 # aquí arriba: un test de T20 comprueba que `claude_agent_sdk` no entra en
@@ -681,6 +697,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="YYYY-Www",
         help="Semana ISO (p. ej. 2026-W41). Por defecto, la última con snapshot.",
+    )
+
+    morning_report = subparsers.add_parser(
+        "morning-report",
+        help="Informe matinal de la noche: estado, causa, tokens y resumen semanal (sin LLM).",
+        description=(
+            "Lee el Run de la noche, sus llamadas y los ficheros de estado de los envoltorios, "
+            "clasifica la causa si la noche no fue completed (o no hubo Run), escribe "
+            "morning-YYYYMMDD.txt en el directorio de logs y avisa con una notificación de "
+            "macOS. Solo lectura de la base; no usa Claude ni gasta tokens. Códigos: 0 informe "
+            "escrito, 1 no se pudo escribir."
+        ),
+    )
+    morning_report.add_argument(
+        "--night",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Noche a informar. Por defecto, la de hoy si ya pasó window.hard_stop, si no ayer.",
+    )
+    morning_report.add_argument(
+        "--trigger",
+        default=Trigger.SCHEDULED.value,
+        choices=[t.value for t in Trigger],
+        help="Quién pide el informe; decide si se avisa (por defecto: scheduled).",
+    )
+    morning_report.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="No muestra la notificación de macOS.",
     )
 
     evaluate_tensions = subparsers.add_parser(
@@ -1184,6 +1230,80 @@ def _format_digest_writer_text(text: DigestText, digest: WeeklyDigest) -> str:
     lines.append("")
     lines.append(text.summary or "")
     return "\n".join(lines)
+
+
+def _log_dir() -> Path | None:
+    """Mismo origen que los envoltorios: `NOCTURNA_LOG_DIR` o `~/nocturna-logs`.
+
+    Una variable definida pero vacía no es válida (`None`), igual que en los envoltorios.
+    """
+    raw = os.environ.get("NOCTURNA_LOG_DIR")
+    if raw is None:
+        return Path.home() / "nocturna-logs"
+    return Path(raw) if raw else None
+
+
+_MORNING_REPORT_CONNECT_TIMEOUT_S = 5
+
+
+def _build_morning_report(
+    config: PipelineConfig, launch_log: FileLaunchLog, night: date | None, trigger: Trigger
+) -> MorningReport:
+    """Construye el informe; sin base (o con la base caída) lo construye igual."""
+    tz = ZoneInfo(config.window.timezone)
+    clock = SystemClock(tz)
+    window = config.window
+    resolved = night if night is not None else target_night(clock.now(), window.hard_stop)
+
+    def build(reader: SqlMorningReportData | None) -> MorningReport:
+        return BuildMorningReport(reader, launch_log, clock, tz, window.start, window.hard_stop)(
+            resolved, trigger
+        )
+
+    try:
+        settings = Settings()
+        engine = create_db_engine(settings, connect_timeout=_MORNING_REPORT_CONNECT_TIMEOUT_S)
+        with unit_of_work(create_session_factory(engine), commit=False) as session:
+            return build(SqlMorningReportData(session, tz))
+    except Exception as exc:  # noqa: BLE001
+        # Regla de T105: ningún fallo de base (ajustes, driver ausente, conexión) impide el
+        # informe. Solo el nombre de la clase: el mensaje puede contener el DSN.
+        _logger.warning("morning_report.no_database", extra={"error": type(exc).__name__})
+        return build(None)
+
+
+def _morning_report(args: argparse.Namespace) -> int:
+    """`morning-report`: `0` informe escrito; `1` no se pudo escribir. Solo lectura de la base."""
+    configure_json_logging()
+    log_dir = _log_dir()
+    if log_dir is None:
+        print("morning-report: NOCTURNA_LOG_DIR no puede estar vacío", file=sys.stderr)
+        return 1
+    config = load_pipeline_config()
+    trigger = Trigger(args.trigger)
+    report = _build_morning_report(config, FileLaunchLog(log_dir), args.night, trigger)
+    text = render_report(report)
+    sink = FileReportSink(log_dir)
+    try:
+        name = sink.write(report.night, text)
+    except OSError as exc:
+        print(
+            f"morning-report: no se pudo escribir el informe ({type(exc).__name__})",
+            file=sys.stderr,
+        )
+        return 1
+    print(text)
+
+    notified = "skip"
+    if not args.no_notify and should_notify(report, sink.delivered(report.night)):
+        title, body = render_notification(report)
+        notified = "ok" if OsascriptNotifier().notify(title, body) else "fail"
+    try:
+        sink.append_delivery(delivery_line(report, notified))
+    except OSError as exc:
+        _logger.warning("morning_report.delivery_log_failed", extra={"error": type(exc).__name__})
+    _logger.info("morning_report.written", extra={"file": name, "notified": notified})
+    return 0
 
 
 def _archive_digest(args: argparse.Namespace) -> int:
@@ -2185,7 +2305,7 @@ def _current_or_new_run_night(
             orphan.finish(
                 RunStatus.KILLED,
                 now,
-                notes="cerrado por run-night: quedó RUNNING de un proceso anterior",
+                notes=ORPHAN_NOTE,
             )
             runs.save(orphan)
             # `uq_runs_status_running` (índice único parcial, T41) solo
@@ -3360,6 +3480,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             except ValueError as exc:
                 parser.error(f"--week: {exc}")
         return _archive_digest(args)
+    if args.command == "morning-report":
+        return _morning_report(args)
     if args.command == "evaluate-tensions":
         return _evaluate_tensions(args)
     if args.command == "solution-tensions":

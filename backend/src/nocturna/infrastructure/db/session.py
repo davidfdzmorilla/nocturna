@@ -22,18 +22,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from nocturna.infrastructure.config import Settings
 
 
-def create_db_engine(settings: Settings) -> Engine:
+def create_db_engine(settings: Settings, *, connect_timeout: int | None = None) -> Engine:
     """Crea el motor de conexión a PostgreSQL.
 
     `connect_args={"options": "-c timezone=UTC"}` fija la zona horaria de la
     sesión de PostgreSQL a UTC en la conexión, no solo en el driver: así la
     rehidratación de timestamps es determinista sin importar la zona
     horaria configurada en la máquina donde corra el pipeline.
+
+    `connect_timeout` (segundos, T105) acota la espera de conexión de libpq;
+    `None` deja el valor por defecto del driver (los demás llamadores).
     """
-    return create_engine(
-        settings.database_url,
-        connect_args={"options": "-c timezone=UTC"},
-    )
+    connect_args: dict[str, str | int] = {"options": "-c timezone=UTC"}
+    if connect_timeout is not None:
+        connect_args["connect_timeout"] = connect_timeout
+    return create_engine(settings.database_url, connect_args=connect_args)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

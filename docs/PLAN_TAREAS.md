@@ -621,15 +621,16 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 
 ## Fase 3
 
-Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3.md): publicar la web en un VPS con el pipeline en el Mac (A) y robustez operativa mínima (C). Sin cambio de gasto: `nightly_tokens` no sube y la web no llama a Claude. Criterio de cierre (a)–(e) en ADR 0044. Orden: T105, T106, T107, T108, T109, T110; las dependencias están en cada tarea.
+Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3.md): publicar la web en un VPS con el pipeline en el Mac (A) y robustez operativa mínima (C). Sin cambio de gasto: `nightly_tokens` no sube y la web no llama a Claude. Criterio de cierre (a)–(e) en ADR 0044. Orden: T105, T106, T107, T108, T109, T110; las dependencias están en cada tarea. T111 (diagnóstico del 429) se dio de alta desde T105, fuera de ese orden.
 
 ### T105 · Informe matinal y aviso de noche fallida o ausente
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T104
 - **Toca agentes y gasto**: no. Solo lee `runs` y `agent_calls`; sin LLM ni tokens.
 - **Origen**: ADR 0044, C (decisión del autor, 2026-11-05).
 - **Alcance**: tras `run-night` y tras `archive-snapshot`, informe de una pantalla con estado de la noche, causa, tokens, publicados y semana del resumen. Notificación de macOS y fichero en `~/nocturna-logs`, sin secretos. Detecta la noche sin `Run` y clasifica la causa de cada noche `partial`, `killed` o sin `Run`.
 - **Hecho cuando**: lo fija el plan. Como mínimo, tests de la clasificación de causas y de la detección de la noche sin `Run`, sin llamar a Claude; suite backend verde; en una noche real, el informe entregado antes de las 09:00.
+- **Cierre (2026-11-05; sin migración)**: plan aprobado con las 10 decisiones recomendadas (ADR 0045). Qué se hizo: `domain/night_report.py` (`NightCause`, `classify_night`, `parse_run_notes`, `is_night_run`, `target_night`); `application/use_cases/morning_report.py` (`BuildMorningReport`, informe de pantalla, aviso y `should_notify`); `infrastructure/db/morning_report_data.py` (solo `SELECT`); `infrastructure/ops/` (`FileLaunchLog`, `FileReportSink`, `OsascriptNotifier`); subcomando `morning-report`; `run-night-scheduled.sh` y `archive-snapshot-scheduled.sh` con `.status` y `--night`; `morning-report-scheduled.sh`, plantilla de plist y job de las 07:30 con `RunAtLoad`. Tests: matrices de causas, contrato con `RunNight`, envoltorios (código de noche distinto del código del informe), secretos, `osascript` con argumentos por `argv`, `FileLaunchLog` sin leer logs. 11 de 11 mutantes muertos. El tester encontró un fallo (un DSN sin driver tumbaba el informe), corregido. Revisión rechazada en el ciclo 1 (el informe tras `run-night` describía la noche anterior; `exc_info` podía volcar DSN o rutas) y aprobada en el ciclo 2. Suite backend 4349 passed; `pytest -m db` 615 passed. Pendiente del autor: instalar `com.nocturna.morning-report.plist` (`docs/CALIBRACION.md`, Paso 8) y verificar una noche real con informe antes de las 09:00.
 
 ### T106 · Ingesta de arXiv fallida: reintento dentro de la ventana y estado de la noche
 - **Estado**: pending
@@ -670,6 +671,14 @@ Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3
 - **Origen**: ADR 0044, criterio (a)–(e) y D7 (ventana de 14 días).
 - **Alcance**: 14 días de comprobaciones; medición en solo lectura de los criterios (a)–(e); informe para el ADR de cierre de fase 3.
 - **Hecho cuando**: lo fija el plan. Como mínimo, 14 días registrados y los criterios medidos; si alguno falla, la tarea de corrección que exige D8.
+
+### T111 · Diagnóstico del 429 de la suscripción
+- **Estado**: pending
+- **Depende de**: T105
+- **Toca agentes y gasto**: sí. Toca el proveedor LLM (`infrastructure/llm/`); revisión con `budget-guard-review`.
+- **Origen**: OD T105 (decisión 6). Dada de alta el 2026-11-05 desde T105, fuera del orden de la fase.
+- **Alcance**: averiguar por qué el 429 de la suscripción del 2026-10-29 y del 2026-10-30 llegó como `agent_error` y no como `LLMRateLimited` (`api_error_status`), y que quede registrado como `rate_limited`. El informe de T105 clasifica esas noches como `circuit_breaker` mientras tanto (ADR 0045).
+- **Hecho cuando**: lo fija el plan; tests con `FakeLLMProvider` (ningún test llama a Claude).
 
 ---
 
