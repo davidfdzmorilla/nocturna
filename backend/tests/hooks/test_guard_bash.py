@@ -497,8 +497,9 @@ def test_regla2_commit_sin_aprobacion_bloquea(w):
     assert "aprobación" in r.stderr
 
 
-def test_regla3_traefik_bloquea(w):
-    _blocks(w, TRAEFIK)
+def test_regla3_retirada_en_t107_la_infraestructura_de_produccion_pasa(w):
+    # ADR 0044 autoriza el despliegue en la fase 3; la regla 3 se retiró en T107.
+    _passes(w, TRAEFIK)
 
 
 @pytest.mark.parametrize(

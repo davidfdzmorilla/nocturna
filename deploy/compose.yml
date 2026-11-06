@@ -1,0 +1,91 @@
+# Compose de produccion (T107, ADR 0044): web, API de lectura, PostgreSQL y proxy TLS.
+# Se lanza con deploy/.env (ver env.example):
+#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+# Solo el proxy publica puertos. El pipeline no se despliega aqui.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  traefik:
+    image: traefik:v3.2.3
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    networks: [edge]
+    environment:
+      NOCTURNA_DOMAIN: ${NOCTURNA_DOMAIN:?}
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${NOCTURNA_ACME_EMAIL:?}
+      - --certificatesresolvers.le.acme.caserver=${NOCTURNA_ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+    volumes:
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - traefik_acme:/letsencrypt
+    logging: *logging
+
+  web:
+    build: ../web
+    image: nocturna-web:local
+    restart: unless-stopped
+    networks: [edge, internal]
+    environment:
+      NOCTURNA_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: nocturna-api:local
+    restart: unless-stopped
+    networks: [internal]
+    environment:
+      NOCTURNA_DATABASE_URL: postgresql+psycopg://nocturna:${POSTGRES_PASSWORD:?}@postgres:5432/nocturna
+      NOCTURNA_CORS_ORIGINS: '["https://${NOCTURNA_DOMAIN:?}"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [internal]
+    environment:
+      POSTGRES_USER: nocturna
+      POSTGRES_DB: nocturna
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - nocturna_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocturna -d nocturna"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  traefik_acme:
+  nocturna_pgdata:

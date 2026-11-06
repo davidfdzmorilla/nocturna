@@ -23,6 +23,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 | Orquestador nocturno | `application/use_cases/run_night.py` | done (T44) |
 | API de lectura | FastAPI | done (T50) |
 | Web | Next.js | done (T51) |
+| Despliegue de producción | Docker Compose + Traefik v3 (`deploy/`, ADR 0047) | en repo (T107); VPS pendiente |
 
 ## Flujo de una noche
 
@@ -372,4 +373,28 @@ Contrastador, Analista, `ApiKeyProvider`, autenticación, panel de administraci�
 
 **Fase 2 (aprobada en T61, [ADR 0012](adr/0012-fase-2-tension-frente-a-catalogo.md))**: lo ya construido está en § "Cálculo de la tensión" (T73–T74) y en § "Modelo de dominio" (T72); la reserva del redactor (T75) y la API y web (T77) ya existen; el redactor y su integración en `run-night` (T76) también; el cierre de la fase (T78) está hecho ([ADR 0039](adr/0039-decision-final-de-fase-2.md)). El criterio de cierre está fijado en [ADR 0021](adr/0021-criterio-de-cierre-de-fase-2.md) (T86) y se cumple. La fase 2 añade un `Finding.type` nuevo (`catalog_tension`): la tensión entre lo que dice un paper de astro-ph.EP sobre un objeto y las medidas previas del NASA Exoplanet Archive. La discrepancia en σ la calcula Python y se guarda en un campo estructurado de `Finding`; Claude solo redacta a partir de números ya calculados, sin herramientas (`tools=[]`), y los candidatos pasan por el Editor como los demás. La etapa tiene una reserva de presupuesto fija, análoga a la del Editor, sin subir `nightly_tokens`, y `max_items_per_night` baja a 30. El archivo se integra como adaptador de `infrastructure/`, sin servidor MCP, porque ningún agente lo consulta. Todo lo que sigue a T71, el experimento de viabilidad sin tokens, depende de su resultado. Esta sección se reescribe tarea a tarea conforme las piezas existan.
 
-**Fase 3 (ADR 0044, T104).** El despliegue pasa a la fase 3 (T107–T109): web y API en un VPS con Docker y Traefik, y PostgreSQL con la base copiada desde el Mac (T108). El pipeline se queda en el Mac, con `launchd`. El VPS no ejecuta agentes y no tiene credenciales de Claude. Hasta T107 no existe ninguna imagen ni compose de producción.
+**Fase 3 (ADR 0044, T104).** El despliegue pasa a la fase 3 (T107–T109): web y API en un VPS con Docker y Traefik, y PostgreSQL con la base copiada desde el Mac (T108). El pipeline se queda en el Mac, con `launchd`. El VPS no ejecuta agentes y no tiene credenciales de Claude. La topología real está en § Despliegue (ADR 0047).
+
+## Despliegue (fase 3, T107, [ADR 0047](adr/0047-imagenes-y-compose-de-produccion.md))
+
+Dos entornos. El pipeline y sus credenciales están en el Mac; el VPS solo aloja la web, la API de lectura y la base.
+
+- **Mac**: pipeline con `launchd` (`run-night`, `archive-snapshot`, informe matinal), CLI de Claude, `docker-compose.yml` de la raíz (PostgreSQL local, sin proxy) y el grupo `pipeline` de dependencias, que incluye `claude-agent-sdk`.
+- **VPS**: `deploy/compose.yml`, con cuatro servicios:
+
+| Servicio | Imagen | Redes | Puertos publicados |
+|---|---|---|---|
+| `traefik` | `traefik:v3.2.3`, proveedor de fichero (`deploy/traefik/dynamic.yml`) | `edge` | 80, 443 |
+| `web` | `web/Dockerfile`: Next.js `standalone` sobre Node 24, usuario `node` | `edge`, `internal` | ninguno |
+| `api` | `backend/Dockerfile`: uvicorn con el grupo `serve`, usuario uid 10001, `tzdata` | `internal` | ninguno |
+| `postgres` | `postgres:16-alpine` | `internal` | ninguno |
+
+- **Dependencias**: `claude-agent-sdk` está en el grupo `pipeline`, que es el de por defecto en el Mac. La imagen de la API instala `--no-default-groups --group serve`; el cierre del `uv.lock` de `serve` no contiene el SDK ni `mcp`.
+- **Red interna**: `internal` tiene `internal: true`. La API y PostgreSQL no son alcanzables desde fuera del compose.
+- **Proxy**: Traefik sin proveedor Docker (sin `docker.sock`) y sin dashboard. TLS-ALPN-01 de Let's Encrypt; el 80 redirige al 443; la CA es configurable (`NOCTURNA_ACME_CA_SERVER`, staging para pruebas).
+- **Secretos**: solo en `deploy/.env` del VPS, ignorado por git.
+- **Esquema**: `alembic upgrade head` a mano, con `docker compose -f deploy/compose.yml run --rm api …` (T107 D5). La API no migra al arrancar.
+- **Construcción**: en el VPS, desde el repositorio clonado (T107 D4). No hay registro de imágenes.
+- **Tests**: `backend/tests/test_deploy_no_claude_credentials.py` (estático, en `pytest`) y `backend/tests/deploy/test_images.py` (`-m docker`, `NOCTURNA_CHECK_IMAGES=1`), que comprueban la ausencia de Claude y de sus credenciales en ficheros, imágenes y compose.
+- **Procedimiento**: `docs/DESPLIEGUE.md`.
+- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; sincronización de datos (T108); rol de solo lectura de la API y ramas de error de la web (T109); medición de la fase (T110).

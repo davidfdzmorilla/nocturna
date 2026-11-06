@@ -393,7 +393,6 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "anyio" },
-    { name = "claude-agent-sdk" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
@@ -408,12 +407,17 @@ dev = [
     { name = "ruff" },
     { name = "uvicorn" },
 ]
+pipeline = [
+    { name = "claude-agent-sdk" },
+]
+serve = [
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "anyio", specifier = ">=4" },
-    { name = "claude-agent-sdk", specifier = ">=0.1" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
@@ -428,6 +432,8 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
+pipeline = [{ name = "claude-agent-sdk", specifier = ">=0.1" }]
+serve = [{ name = "uvicorn", specifier = ">=0.30" }]
 
 [[package]]
 name = "opentelemetry-api"
