@@ -136,6 +136,7 @@ class MorningReport:
     digest_week: str | None = None
     digest_changes: int | None = None
     digest_text_status: str | None = None  # written | failed | none
+    ingest_recovered_from: str | None = None
     recent_nights: tuple[tuple[date, RunStatus | None], ...] = ()
     logs: tuple[str, ...] = ()
 
@@ -269,6 +270,11 @@ class BuildMorningReport:
             digest_week=digest.week if digest is not None else None,
             digest_changes=digest.changes if digest is not None else None,
             digest_text_status=digest.text_status if digest is not None else None,
+            ingest_recovered_from=(
+                parsed.ingest_retry.removeprefix("ok:")
+                if parsed.ingest_retry is not None and parsed.ingest_retry.startswith("ok:")
+                else None
+            ),
             recent_nights=recent,
             logs=launch.logs,
         )
@@ -413,10 +419,14 @@ def render_report(report: MorningReport) -> str:
             f" inválidas {cbs.get('invalid_output', 0)}, error {cbs.get('error', 0)},"
             f" timeout {cbs.get('timeout', 0)}"
         )
-    lines.append(
+    recovered = report.ingest_recovered_from
+    items_line = (
         f"Ítems: nuevos {_n(report.items_fetched)} · leídos {_n(report.items_read)}"
         f" (fallidos {_n(report.items_failed)}) · publicados {_n(report.findings_published)}"
     )
+    lines.append(items_line)
+    if recovered:
+        lines.append(f"Ingesta recuperada en el segundo intento ({recovered})")
 
     snap = report.last_snapshot
     snap_date = report.last_snapshot_local_date.isoformat() if snap is not None else _DASH

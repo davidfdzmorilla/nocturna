@@ -36,6 +36,7 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
          │    ├─ cierra `Run` huérfano si existe
          │    ├─ crea `Run` nuevo
          │    ├─ fetch_new(arXiv) → Items(new)                   [sin LLM, Fase A]
+         │    │    └─ si falla: espera 900 s y un segundo intento, solo si quedan ≥ 3600 s tras la espera (T106, ADR 0046)
          │    ├─ por cada Item (≤ max_items): authorize? → Reader → Reading   [Sonnet, Fase A]
          │    ├─ por cada Reading ≥ umbral: authorize? → Popularizer → Finding  [Sonnet, Fase B]
          │    ├─ hallazgos de medida desde tension_evaluation (≤ K)  [sin LLM, T89]
@@ -50,6 +51,8 @@ Pipeline nocturno batch → PostgreSQL → web de solo lectura. El análisis cor
 ```
 
 **Qué aporta el envoltorio**: configuración del PATH (para que `uv` y `claude` sean resolubles), validación de precondiciones (Docker, PostgreSQL), centinela (única invocación por ventana), rotación de logs en ficheros separados. **Sin** lógica de ventana ni presupuesto, que siguen siendo exclusivas de `application/budget.py`.
+
+**Segundo intento de la ingesta (T106, [ADR 0046](adr/0046-segundo-intento-de-la-ingesta-de-arxiv.md))**: si `fetch_new` falla tras el reintento del adaptador, `RunNight` espera `ingest_retry_delay_s` y lo repite una vez, solo si quedan `ingest_retry_min_remaining_s` de ventana tras la espera. Si el segundo intento va bien, la noche puede cerrar `COMPLETED`; si falla o se salta, `PARTIAL` (`end=ingest_error`). `notes` lleva `ingest_retry=...` tras `ingest=...` solo si el primer intento falló.
 
 **Degradación de estado**: `RunNight` propone estados en orden de severidad decreciente (COMPLETED < PARTIAL < KILLED). Un desenlace de fase se transfiere al siguiente: si fase A devuelve PARTIAL (Reader no completó), fase B hereda PARTIAL y solo puede bajar a KILLED por timeout. Si fase C devuelve PARTIAL (no hay presupuesto para Editor), el Run cierra PARTIAL, pero no se pierde lo publicado de las fases anteriores (eso es decisión del Editor).
 

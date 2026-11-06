@@ -53,7 +53,7 @@ Desde esa fecha la ingesta va por **OAI-PMH** (`ingest_via = "oai"`), no por la 
 
 #### Qué hacer si ves `retry_exhausted` por la mañana
 
-**No es una noche perdida: es la ingesta de esa noche.** El Run queda en `partial`, pero las fases Reader, Popularizer y Editor siguen corriendo sobre los `Item` en estado `NEW` que ya hubiera en base. Si la cola traía pendientes, esa noche publica con normalidad y su dato de gasto sigue siendo válido para la calibración.
+**No es una noche perdida: es la ingesta de esa noche.** El Run queda en `partial` si el segundo intento de la ingesta (T106, ver abajo) también falla o se salta; si funciona, cierra `completed`. Las fases Reader, Popularizer y Editor siguen corriendo sobre los `Item` en estado `NEW` que ya hubiera en base. Si la cola traía pendientes, esa noche publica con normalidad y su dato de gasto sigue siendo válido para la calibración.
 
 Procedimiento:
 
@@ -71,6 +71,29 @@ Procedimiento:
 Descartados como causa: `User-Agent`, `Accept`, `Accept-Encoding`, versión HTTP, codificación de `%3A`, `max_results` y el uso de cliente síncrono o asíncrono. La hipótesis de la huella del cliente (`curl` pasaba donde `httpx` fallaba) **no está confirmada** y perseguirla se parecería a evadir una protección del CDN, así que no se persigue. Ver ADR 0009 y `OPEN_DECISIONS.md`.
 
 **Qué hacer con los valores de reintento**: nada todavía. `retry_max_attempts`, `retry_base_delay_s` y `retry_max_elapsed_s` son provisionales y se calibran con estas catorce noches. Subir el tope para cubrir episodios de 40 s largos come tiempo de noche en todas las noches para salvar unas pocas; esa cuenta solo se puede hacer con la frecuencia real medida. Si al cerrar T60 hay varios `retry_exhausted`, entra en la decisión final junto a las siete reglas de cierre.
+
+#### Segundo intento de la ingesta (T106, ADR 0046)
+
+Si `fetch_new` falla tras el reintento del adaptador, `run-night` espera `ingest_retry_delay_s` (900 s) y lo repite una vez, solo si quedan `ingest_retry_min_remaining_s` (3600 s) de ventana tras la espera. Si no cabe, lo salta. Cada caso emite un evento `night.ingest_retry` con `status` = `scheduled`, `ok`, `error` o `skipped`, en el log de errores de la noche (solo se emite si el primer intento falló):
+
+```bash
+LOG=~/nocturna-logs/night-$(date +%Y%m%d).err.log
+
+# Eventos del segundo intento: scheduled (espera decidida), ok, error o skipped
+grep night.ingest_retry "$LOG"
+
+# Clase del error del segundo intento (`attempt` 2 de night.ingest)
+grep '^{' "$LOG" | grep '"event": "night.ingest"' | grep '"attempt": 2' | jq -c '{status, error}'
+```
+
+En `notes` (tabla `runs`), el segmento `ingest_retry=` aparece justo tras `ingest=` solo si el primer intento falló:
+
+```bash
+docker exec nocturna-postgres psql -U nocturna -d nocturna \
+  -c "select started_at, status, notes from runs where notes like '%ingest_retry=%' order by started_at desc limit 10;"
+```
+
+Valores: `ingest_retry=ok:<Clase>` (recuperada: la noche es `completed`), `error:<Clase>` (el segundo intento también falló: `partial`), `skipped:window` o `skipped:disabled` (no se intentó: `partial`). Anotar en `notas`: `ingesta: segundo intento ok (<Clase>)` o el motivo que corresponda. El informe matinal muestra «Ingesta recuperada en el segundo intento» en el caso `ok`.
 
 ### Paso 2: Abrir la web y emitir juicios de calidad
 
@@ -116,7 +139,7 @@ Si hoy cambió `config/pipeline.toml` o las versiones de CLI/SDK: aumenta `confi
    - `items_fetched = 0` o muy bajo; evento `ingest_error` en logs
    - BUT: cola de `new` de noches anteriores se procesó normalmente (fase A saca de `next_unread`, no solo ítems nuevos)
    - Reader/Popularizer/Editor corrieron con la cola vieja, publicaron hallazgos
-   - `run.status = partial` **por código de salida 7 (`ingest_error`)**, pero noche funcionó correctamente
+   - `run.status = partial` **por código de salida 7 (`ingest_error`)**, pero noche funcionó correctamente. Desde T106 (ADR 0046) solo ocurre si el segundo intento también falla o se salta; si el segundo intento funciona, la noche cierra `completed`
    - **Interpretación**: parcial "virtuoso" — no es una noche perdida, solo la ingesta no trajo nuevas fuentes
 
 3. **Presupuesto agotado en fase C** (Editor):

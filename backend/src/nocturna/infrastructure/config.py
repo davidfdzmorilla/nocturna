@@ -237,6 +237,12 @@ class ArxivConfig(BaseModel):
     # T93, ADR 0032: días máximos hacia atrás que recupera la ingesta tras
     # noches sin ejecutar o con ingesta fallida (ver `default_since`).
     max_catchup_days: int = Field(ge=1, le=14)
+    # T106 (ADR 0046): segundo intento de la ingesta si el primero
+    # falla. `ingest_retry_delay_s` es la espera antes del segundo intento
+    # (0 = desactivado); `ingest_retry_min_remaining_s`, el margen que debe
+    # quedar de ventana tras esa espera para intentarlo. Sin default.
+    ingest_retry_delay_s: float = Field(ge=0)
+    ingest_retry_min_remaining_s: float = Field(ge=0)
 
     @model_validator(mode="after")
     def _categories_traducibles_a_sets_oai(self) -> "ArxivConfig":
@@ -591,16 +597,38 @@ class PipelineConfig(BaseModel):
         archive_per_request_s = archive.request_timeout_s + archive.min_request_interval_s
         archive_worst_case_s = archive.max_requests_per_night * archive_per_request_s
         total_s = worst_case_s + archive_worst_case_s
+        retry_part = ""
+        if arxiv.ingest_retry_delay_s > 0:
+            # T106: el segundo intento repite el peor caso de arXiv tras la espera.
+            total_s += arxiv.ingest_retry_delay_s + worst_case_s
+            retry_part = (
+                f" + segundo intento (espera ingest_retry_delay_s "
+                f"{arxiv.ingest_retry_delay_s:.0f} s + arXiv {worst_case_s:.0f} s)"
+            )
         budget_s = self.limits.run_timeout_s * _INGEST_TIME_SHARE
         if total_s > budget_s:
             raise ValueError(
                 f"el peor caso de la ingesta ({total_s:.0f} s = arXiv {worst_case_s:.0f} s "
                 f"[{arxiv.max_requests_per_fetch} peticiones x {per_request_s:.0f} s] + "
                 f"Exoplanet Archive {archive_worst_case_s:.0f} s "
-                f"[{archive.max_requests_per_night} peticiones x {archive_per_request_s:.0f} s]) "
+                f"[{archive.max_requests_per_night} peticiones x {archive_per_request_s:.0f} s]"
+                f"{retry_part}) "
                 f"supera el {_INGEST_TIME_SHARE:.0%} de limits.run_timeout_s ({budget_s:.0f} s); "
-                f"baja max_requests_per_fetch, retry_max_elapsed_s o "
-                f"max_requests_per_night"
+                f"baja max_requests_per_fetch, retry_max_elapsed_s, "
+                f"max_requests_per_night o ingest_retry_delay_s (0 = sin reintento)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _ingest_retry_fits_in_run_timeout(self) -> "PipelineConfig":
+        """T106: espera + margen mínimo no pueden superar `run_timeout_s`;
+        si no, el segundo intento nunca se haría."""
+        arxiv = self.sources.arxiv
+        needed = arxiv.ingest_retry_delay_s + arxiv.ingest_retry_min_remaining_s
+        if needed > self.limits.run_timeout_s:
+            raise ValueError(
+                f"ingest_retry_delay_s + ingest_retry_min_remaining_s ({needed:.0f} s) "
+                f"supera limits.run_timeout_s ({self.limits.run_timeout_s})"
             )
         return self
 

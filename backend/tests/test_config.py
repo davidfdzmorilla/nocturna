@@ -6,6 +6,7 @@ ni la base de datos.
 """
 
 import json
+import re
 from datetime import time
 from pathlib import Path
 
@@ -76,6 +77,8 @@ max_requests_per_fetch = 6
 retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
+ingest_retry_delay_s = 900
+ingest_retry_min_remaining_s = 3600
 
 [sources.exoplanet_archive]
 tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
@@ -946,30 +949,31 @@ def test_falta_una_clave_de_exoplanet_archive_falla(tmp_path):
 
 
 # Con el TOML base: run_timeout_s = 16200 -> 25 % = 4050 s. arXiv: 6 x (60+30+3)
-# = 558 s. Archivo: N x (30 + 2) s. Caben N <= 109 (558 + 3488 = 4046).
+# = 558 s. Archivo: N x (30 + 2) s. Con el segundo intento de arXiv (T106) se suman
+# 900 s de espera y otros 558 s: 558 + 32 N + 1458 <= 4050 -> N <= 63.
 
 
 def test_ingesta_mas_archivo_dentro_del_25_por_ciento_es_valida(tmp_path):
-    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 109")
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 63")
 
     config = load_pipeline_config(_write_toml(tmp_path, content))
 
-    assert config.sources.exoplanet_archive.max_requests_per_night == 109
+    assert config.sources.exoplanet_archive.max_requests_per_night == 63
 
 
 def test_ingesta_mas_archivo_por_encima_del_25_por_ciento_falla(tmp_path):
-    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 110")
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 64")
 
     with pytest.raises(ValidationError, match="max_requests_per_night"):
         load_pipeline_config(_write_toml(tmp_path, content))
 
 
 def test_el_archivo_solo_cabria_pero_junto_a_arxiv_no(tmp_path):
-    """110 x 32 = 3.520 s < 4.050 s: por separado cabe. El validador es
-    CONJUNTO: solo falla porque arXiv ya ocupa 558 s."""
-    archive_alone = 110 * (30.0 + 2.0)
+    """64 x 32 = 2.048 s < 4.050 s: por separado cabe. El validador es
+    CONJUNTO: solo falla porque arXiv (con su segundo intento) ya ocupa 2.016 s."""
+    archive_alone = 64 * (30.0 + 2.0)
     assert archive_alone <= 16200 * 0.25
-    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 110")
+    content = BASE_TOML.replace("max_requests_per_night = 40", "max_requests_per_night = 64")
 
     with pytest.raises(ValidationError):
         load_pipeline_config(_write_toml(tmp_path, content))
@@ -1157,3 +1161,70 @@ def test_valores_invalidos_del_redactor_fallan(tmp_path, old, new):
 
     with pytest.raises(ValidationError):
         load_pipeline_config(path)
+
+
+# --- T106: segundo intento de la ingesta de arXiv ------------------------------
+
+
+def test_el_toml_real_trae_el_reintento_de_ingesta():
+    arxiv = load_pipeline_config(REAL_PIPELINE_TOML).sources.arxiv
+
+    assert arxiv.ingest_retry_delay_s == 900
+    assert arxiv.ingest_retry_min_remaining_s == 3600
+
+
+@pytest.mark.parametrize("key", ["ingest_retry_delay_s", "ingest_retry_min_remaining_s"])
+def test_falta_una_clave_del_reintento_de_ingesta_falla(tmp_path, key):
+    lines = [ln for ln in BASE_TOML.splitlines(keepends=True) if not ln.startswith(f"{key} =")]
+
+    with pytest.raises(ValidationError, match=key):
+        load_pipeline_config(_write_toml(tmp_path, "".join(lines)))
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("ingest_retry_delay_s = 900", "ingest_retry_delay_s = -1"),
+        ("ingest_retry_min_remaining_s = 3600", "ingest_retry_min_remaining_s = -1"),
+    ],
+)
+def test_reintento_de_ingesta_negativo_falla(tmp_path, old, new):
+    with pytest.raises(ValidationError):
+        load_pipeline_config(_write_toml(tmp_path, BASE_TOML.replace(old, new)))
+
+
+def test_delay_cero_desactiva_y_no_suma_al_tiempo_de_ingesta(tmp_path):
+    content = BASE_TOML.replace("ingest_retry_delay_s = 900", "ingest_retry_delay_s = 0")
+    content = content.replace("max_requests_per_night = 40", "max_requests_per_night = 109")
+
+    config = load_pipeline_config(_write_toml(tmp_path, content))
+
+    assert config.sources.arxiv.ingest_retry_delay_s == 0
+
+
+def test_delay_de_1700_no_cabe_en_el_25_por_ciento(tmp_path):
+    # 1.838 + 1.700 + 558 = 4.096 > 4.050
+    content = BASE_TOML.replace("ingest_retry_delay_s = 900", "ingest_retry_delay_s = 1700")
+
+    with pytest.raises(ValidationError, match="peor caso de la ingesta") as exc:
+        load_pipeline_config(_write_toml(tmp_path, content))
+
+    msg = str(exc.value)
+    assert "ingest_retry_delay_s" in msg
+    m = re.search(
+        r"\((\d+) s = arXiv (\d+) s .*?Exoplanet Archive (\d+) s .*?"
+        r"espera ingest_retry_delay_s (\d+) s \+ arXiv (\d+) s\)",
+        msg,
+    )
+    assert m is not None
+    total, arx, arch, delay, arx2 = (int(g) for g in m.groups())
+    assert arx + arch + delay + arx2 == total
+
+
+def test_delay_mas_margen_por_encima_de_run_timeout_falla(tmp_path):
+    content = BASE_TOML.replace(
+        "ingest_retry_min_remaining_s = 3600", "ingest_retry_min_remaining_s = 15400"
+    )
+
+    with pytest.raises(ValidationError, match="run_timeout_s"):
+        load_pipeline_config(_write_toml(tmp_path, content))

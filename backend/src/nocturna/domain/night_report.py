@@ -5,10 +5,10 @@ estado de salida del envoltorio, las llamadas fallidas) y devuelven una o
 varias causas. No deciden nada del pipeline: solo explican lo ocurrido.
 
 `Run.notes` lo escribe `RunNight._build_notes` con el formato
-`ingest=<ok|error[:Clase]> fetched=N new=M | expired=N[:err] | read=N(failed=M) |
-candidates=X published=Y | tokens=T | end=<motivo>`. `parse_run_notes` lo lee
-con tolerancia: ante cualquier cosa que no reconozca devuelve campos `None`;
-nunca lanza.
+`ingest=<ok|error[:Clase]> fetched=N new=M | [ingest_retry=<ok|error|skipped>:X |]
+expired=N[:err] | read=N(failed=M) | candidates=X published=Y | tokens=T |
+end=<motivo>`. `parse_run_notes` lo lee con tolerancia:
+ante cualquier cosa que no reconozca devuelve campos `None`; nunca lanza.
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ class ParsedNotes:
     ingest_error: str | None = None
     fetched: int | None = None
     new: int | None = None
+    ingest_retry: str | None = None
     expired: int | None = None
     expire_error: str | None = None
     read: int | None = None
@@ -74,6 +75,7 @@ class ParsedNotes:
 
 
 _INGEST_RE = re.compile(r"^ingest=(ok|error)(?::(\S+))?(?:\s+fetched=(\d+))?(?:\s+new=(\d+))?")
+_INGEST_RETRY_RE = re.compile(r"^ingest_retry=((?:ok|error|skipped):\S+)")
 _EXPIRED_RE = re.compile(r"^expired=(\d+)(?::(\S+))?")
 _READ_RE = re.compile(r"^read=(\d+)\(failed=(\d+)\)")
 _CANDIDATES_RE = re.compile(r"^candidates=(\d+)\s+published=(\d+)")
@@ -93,6 +95,8 @@ def parse_run_notes(notes: str | None) -> ParsedNotes:
             values["ingest_error"] = m.group(2)
             values["fetched"] = int(m.group(3)) if m.group(3) else None
             values["new"] = int(m.group(4)) if m.group(4) else None
+        elif m := _INGEST_RETRY_RE.match(part):
+            values["ingest_retry"] = m.group(1)
         elif m := _EXPIRED_RE.match(part):
             values["expired"] = int(m.group(1))
             values["expire_error"] = m.group(2)

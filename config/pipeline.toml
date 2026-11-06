@@ -328,6 +328,13 @@ max_requests_per_fetch = 6
 retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
+# T106 (ADR 0046): si la ingesta falla, UN segundo intento tras esta
+# espera, dentro de la ventana. 0 = desactivado. PipelineConfig suma espera +
+# peor caso de arXiv al presupuesto de tiempo de la ingesta.
+ingest_retry_delay_s = 900
+# Margen mínimo de ventana (hard_stop / run_timeout) que debe quedar tras la
+# espera para intentarlo; si no cabe, se salta el reintento (skipped:window).
+ingest_retry_min_remaining_s = 3600
 
 [sources.exoplanet_archive]
 # NASA Exoplanet Archive (T74, ADR 0012): fuente consumida solo por código
@@ -342,8 +349,10 @@ min_request_interval_s = 2.0
 # anyio.fail_after (httpx.Timeout solo acota cada operación por separado).
 request_timeout_s = 30.0
 # max_requests_per_night: techo duro, INTENTADAS, comprobado antes de enviar.
-# Peor caso: 40 x (30 + 2) = 1.280 s, que sumados al de arXiv (558 s) caben
-# en el 25 % de limits.run_timeout_s (4.050 s); PipelineConfig lo valida.
+# Peor caso: 40 x (30 + 2) = 1.280 s, que sumados al de arXiv con el segundo
+# intento de T106 (558 + 900 + 558 = 2.016 s) dan 3.296 s, dentro del 25 % de
+# limits.run_timeout_s (4.050 s); PipelineConfig lo valida. Techo de este
+# valor con T106: 63 ((4.050 - 2.016) / 32).
 # Cada nombre de planeta distinto cuesta como mucho 2 peticiones (alias y
 # ps) más 1 del índice. El peor caso del archivo se suma al presupuesto de
 # ingesta de la noche real aunque la noche aún no consulte el archivo

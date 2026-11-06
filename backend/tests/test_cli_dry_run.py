@@ -103,6 +103,8 @@ max_requests_per_fetch = 6
 retry_max_attempts = 4
 retry_base_delay_s = 5.0
 retry_max_elapsed_s = 60.0
+ingest_retry_delay_s = 900
+ingest_retry_min_remaining_s = 3600
 
 [sources.exoplanet_archive]
 tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
@@ -508,6 +510,20 @@ def test_build_run_night_con_run_id_coincidentes_devuelve_un_run_night() -> None
     night = cli._build_run_night(**kwargs)
 
     assert isinstance(night, cli.RunNight)
+
+
+def test_build_run_night_reenvia_el_reintento_de_ingesta() -> None:
+    kwargs = _build_run_night_kwargs(
+        work_run_id="run-x",
+        run_id="run-x",
+        ingest_retry_delay_s=900,
+        ingest_retry_min_remaining_s=3600,
+    )
+
+    night = cli._build_run_night(**kwargs)
+
+    assert night._ingest_retry_delay_s == 900  # noqa: SLF001
+    assert night._ingest_retry_min_remaining_s == 3600  # noqa: SLF001
 
 
 def test_build_run_night_con_run_id_distintos_lanza_valueerror() -> None:

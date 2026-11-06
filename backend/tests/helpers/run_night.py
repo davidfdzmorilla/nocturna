@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, time
 from uuid import UUID
 
@@ -258,6 +258,11 @@ def make_run_night(
     write_solution_tensions: WriteSolutionTensions | None = None,
     select_digest_weeks: object | None = None,
     write_digest_text: object | None = None,
+    ingest: Callable[[], Awaitable[IngestResult]] | None = None,
+    deadline_reason: str = "hard_stop",
+    ingest_retry_delay_s: float = 0,
+    ingest_retry_min_remaining_s: float = 0,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> RunNight:
     read_item = ReadItem(
         work=env.work,
@@ -310,11 +315,17 @@ def make_run_night(
     if write_digest_text is not None:
         digest_kwargs["write_digest_text"] = write_digest_text
 
+    if sleep is not None:
+        digest_kwargs["sleep"] = sleep
+
     return RunNight(
         **digest_kwargs,  # type: ignore[arg-type]
         work=env.work,
         clock=env.clock,
-        ingest=_ingest,
+        ingest=ingest or _ingest,
+        deadline_reason=deadline_reason,
+        ingest_retry_delay_s=ingest_retry_delay_s,
+        ingest_retry_min_remaining_s=ingest_retry_min_remaining_s,
         read_item=read_item,
         popularize=popularize,
         edit_night=edit_night,

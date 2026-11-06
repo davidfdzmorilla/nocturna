@@ -31,6 +31,17 @@ el límite de caducidad antes de que el Reader forme la cola. Es solo base de
 datos (cero agentes, cero tokens); si falla, la noche cierra `PARTIAL`
 (`expire_error`) y el Reader sigue con lo que haya.
 
+T106 (ADR 0046): si el primer intento de ingesta falla, se hace un
+único segundo intento tras `ingest_retry_delay_s`, dentro de `_run_body`
+(el vigía de hard_stop/run_timeout puede cancelar la espera o el intento y
+cerrar `KILLED`). Solo se espera si queda margen: `remaining_s - delay_s >=
+ingest_retry_min_remaining_s`; si no, `skipped:window` sin dormir; con
+`delay_s == 0` el reintento está desactivado (`skipped:disabled`). Sin
+bucle: nunca más de dos intentos. Si el segundo intento funciona la noche
+puede cerrar `COMPLETED`; `notes` lleva `ingest_retry=...` justo tras el
+segmento `ingest=...` solo si el primer intento falló. No toca el
+presupuesto ni llama a agentes.
+
 ## El modelo de "degradación monótona" que decide `RunNightResult.status`
 
 La noche empieza optimista (`RunStatus.COMPLETED`) y solo empeora: cada
@@ -46,10 +57,10 @@ sucesos que degradan, y a qué:
 
 - Ingesta fallida (`except Exception` alrededor de `ingest()`, el único
   punto de la ingesta que ve este módulo: no conoce `ArxivUnavailable` ni
-  ningún otro tipo de `infrastructure/`) -> `PARTIAL`, motivo
-  `ingest_error`. El resto de la noche sigue con lo que ya hubiera en base
-  (`ItemRepository.next_unread` no depende de que la ingesta de esta noche
-  haya añadido nada).
+  ningún otro tipo de `infrastructure/`) -> segundo intento (T106, abajo);
+  si también falla o no cabe -> `PARTIAL`, motivo `ingest_error`. El resto de la
+  noche sigue con lo que ya hubiera en base (`ItemRepository.next_unread` no
+  depende de que la ingesta de esta noche haya añadido nada).
 - `BudgetDenied` en la fase A o B, motivo `BUDGET_EXHAUSTED`,
   `CALL_LIMIT_REACHED` o `RUN_NOT_RUNNING` -> termina esa fase (no el
   ítem), degrada a `terminal_status_for(reason)` (siempre `PARTIAL` para
@@ -349,7 +360,13 @@ class RunNight:
         max_consecutive_failures: int,
         deadline_s: int,
         deadline_reason: str = "hard_stop",
+        ingest_retry_delay_s: float = 0,
+        ingest_retry_min_remaining_s: float = 0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        self._ingest_retry_delay_s = ingest_retry_delay_s
+        self._ingest_retry_min_remaining_s = ingest_retry_min_remaining_s
+        self._sleep = sleep
         self._work = work
         self._clock = clock
         self._ingest = ingest
@@ -400,6 +417,7 @@ class RunNight:
         self._ingest_status: str = "ok"
         self._ingest_error: str | None = None
         self._ingest_fetched: int = 0
+        self._ingest_retry: str | None = None
         self._expire_error: str | None = None
 
     async def __call__(self) -> RunNightResult:
@@ -418,6 +436,7 @@ class RunNight:
         self._ingest_status = "ok"
         self._ingest_error = None
         self._ingest_fetched = 0
+        self._ingest_retry = None
         self._expire_error = None
 
         with self._work() as w:
@@ -510,7 +529,7 @@ class RunNight:
         `except InvalidTransition` son excepciones concretas no
         relacionadas.
         """
-        await self._run_ingest_phase()
+        await self._run_ingest_phase(started_at)
         self._phase_expire()
 
         read_pairs = await self._phase_reader()
@@ -554,26 +573,72 @@ class RunNight:
 
     # --- ingesta -----------------------------------------------------------
 
-    async def _run_ingest_phase(self) -> None:
-        """Ejecuta `self._ingest()`; una excepción aquí degrada `PARTIAL`
-        pero no impide el resto de la noche (ver docstring del módulo).
+    async def _run_ingest_phase(self, started_at: float) -> None:
+        """Ingesta con un único segundo intento (T106). Un fallo definitivo
+        degrada `PARTIAL` (`ingest_error`) sin impedir el resto de la noche.
 
         `except Exception`, no un tipo concreto: este módulo no importa
-        `infrastructure/` y no puede nombrar `ArxivUnavailable`/
-        `ArxivFeedError`. No captura `asyncio.CancelledError` (hereda de
-        `BaseException`, fuera del alcance de `except Exception`).
+        `infrastructure/`. No captura `asyncio.CancelledError` (hereda de
+        `BaseException`): la espera y el segundo intento son cancelables por
+        el vigía.
         """
+        if await self._try_ingest(attempt=1):
+            return
+        first_error = self._ingest_error or "unknown"
+
+        delay_s = self._ingest_retry_delay_s
+        remaining_s = self._deadline_s - (monotonic() - started_at)
+        if delay_s <= 0:
+            skip = "disabled"
+        elif self._deadline_s <= 0 or remaining_s - delay_s < self._ingest_retry_min_remaining_s:
+            skip = "window"
+        else:
+            skip = ""
+        if skip:
+            self._ingest_retry = f"skipped:{skip}"
+            self._log_ingest_retry("skipped", delay_s, remaining_s, first_error)
+            self._degrade(RunStatus.PARTIAL, "ingest_error")
+            return
+
+        self._log_ingest_retry("scheduled", delay_s, remaining_s, first_error)
+        await self._sleep(delay_s)
+        if await self._try_ingest(attempt=2):
+            self._ingest_retry = f"ok:{first_error}"
+            self._log_ingest_retry("ok", delay_s, remaining_s, first_error)
+            return
+        self._ingest_retry = f"error:{self._ingest_error}"
+        self._log_ingest_retry("error", delay_s, remaining_s, first_error)
+        self._degrade(RunStatus.PARTIAL, "ingest_error")
+
+    def _log_ingest_retry(
+        self, status: str, delay_s: float, remaining_s: float, first_error: str
+    ) -> None:
+        _logger.info(
+            "night.ingest_retry",
+            extra={
+                "event": "night.ingest_retry",
+                "run_id": str(self._run_id),
+                "status": status,
+                "delay_s": delay_s,
+                "remaining_s": round(remaining_s, 3),
+                "first_error": first_error,
+            },
+        )
+
+    async def _try_ingest(self, *, attempt: int) -> bool:
+        """Un intento de `self._ingest()`; registra resultado o error en el
+        estado y en el log, sin degradar. Devuelve si funcionó."""
         try:
             result = await self._ingest()
         except Exception as exc:
             self._ingest_status = "error"
             self._ingest_error = type(exc).__name__
-            self._degrade(RunStatus.PARTIAL, "ingest_error")
             _logger.exception(
                 "night.ingest",
                 extra={
                     "event": "night.ingest",
                     "run_id": str(self._run_id),
+                    "attempt": attempt,
                     "fetched": 0,
                     "new": 0,
                     "duplicates": 0,
@@ -581,19 +646,15 @@ class RunNight:
                     "truncated": False,
                     "status": "error",
                     "error": self._ingest_error,
-                    # str(exc): hoy el texto de `ArxivUnavailable` (código,
-                    # intentos, motivo de corte -- ver
-                    # `infrastructure/arxiv/client.py::_get`) solo vive en
-                    # el traceback de `_logger.exception`, que no es
-                    # consultable como campo estructurado. No amplía
-                    # `SourceFetch` ni añade contadores de reintento a este
-                    # módulo: es solo el texto de la excepción ya
-                    # capturada.
+                    # str(exc): el texto de `ArxivUnavailable` (código,
+                    # intentos, motivo de corte) solo vive en el traceback.
                     "error_detail": str(exc),
                 },
             )
-            return
+            return False
 
+        self._ingest_status = "ok"
+        self._ingest_error = None
         self._items_fetched = result.new
         self._ingest_fetched = result.fetched
         _logger.info(
@@ -601,6 +662,7 @@ class RunNight:
             extra={
                 "event": "night.ingest",
                 "run_id": str(self._run_id),
+                "attempt": attempt,
                 "fetched": result.fetched,
                 "new": result.new,
                 "duplicates": result.duplicates,
@@ -610,6 +672,7 @@ class RunNight:
                 "error": None,
             },
         )
+        return True
 
     # --- caducidad (T94) ---------------------------------------------------
 
@@ -1251,6 +1314,9 @@ class RunNight:
         if self._ingest_error is not None:
             ingest_part += f":{self._ingest_error}"
         ingest_part += f" fetched={self._ingest_fetched} new={self._items_fetched}"
+        retry_part = (
+            f"ingest_retry={self._ingest_retry}" if self._ingest_retry is not None else None
+        )
         expire_part = f"expired={self._items_expired}"
         if self._expire_error is not None:
             expire_part += f":{self._expire_error}"
@@ -1258,7 +1324,10 @@ class RunNight:
         editor_part = f"candidates={self._candidates} published={self._findings_published}"
         tokens_part = f"tokens={tokens_used}"
         end_part = f"end={self._end_reason or 'unknown'}"
-        parts = (ingest_part, expire_part, read_part, editor_part, tokens_part, end_part)
+        parts = [ingest_part]
+        if retry_part is not None:
+            parts.append(retry_part)
+        parts += [expire_part, read_part, editor_part, tokens_part, end_part]
         return " | ".join(parts)
 
     def _log_night_end(self, *, tokens_used: int, elapsed_s: float, notes: str) -> None:

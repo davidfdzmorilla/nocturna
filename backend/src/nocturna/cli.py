@@ -2362,6 +2362,8 @@ def _build_run_night(
     write_solution_tensions: WriteSolutionTensions | None = None,
     select_digest_weeks: SelectDigestWeeks | None = None,
     write_digest_text: WriteDigestText | None = None,
+    ingest_retry_delay_s: float = 0,
+    ingest_retry_min_remaining_s: float = 0,
 ) -> RunNight:
     """Construye `RunNight`, comprobando explícitamente que `run_id` -- el
     que `RunNight` reenviará a `EditNight.__call__` -- coincide con
@@ -2415,6 +2417,8 @@ def _build_run_night(
         max_consecutive_failures=max_consecutive_failures,
         deadline_s=deadline_s,
         deadline_reason=deadline_reason,
+        ingest_retry_delay_s=ingest_retry_delay_s,
+        ingest_retry_min_remaining_s=ingest_retry_min_remaining_s,
     )
 
 
@@ -2685,6 +2689,8 @@ def _run_night_for_real(args: argparse.Namespace) -> int:
         max_consecutive_failures=config.limits.max_consecutive_failures,
         deadline_s=deadline_s,
         deadline_reason=deadline_reason,
+        ingest_retry_delay_s=config.sources.arxiv.ingest_retry_delay_s,
+        ingest_retry_min_remaining_s=config.sources.arxiv.ingest_retry_min_remaining_s,
     )
 
     try:
