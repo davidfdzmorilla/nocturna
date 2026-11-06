@@ -101,6 +101,27 @@ def test_los_tokens_salen_de_las_llamadas_y_no_del_contador_del_run():
     assert "Tokens: 4.321 / 300.000 (1 %)" in render_report(report)
 
 
+def test_ingesta_recuperada_en_el_segundo_intento_sale_en_el_informe():
+    notes = (
+        "ingest=ok fetched=3 new=2 | ingest_retry=ok:ArxivUnavailable | expired=0 | "
+        "read=2(failed=0) | candidates=0 published=0 | tokens=10 | end=edited"
+    )
+    report = _build(_Data([_run(NIGHT, RunStatus.COMPLETED, notes)]))
+
+    text = render_report(report)
+
+    assert report.classification.causes == ()
+    assert "Ingesta recuperada en el segundo intento (ArxivUnavailable)" in text
+    assert len(text.splitlines()) <= 15
+    assert all(len(line) <= 100 for line in text.splitlines())
+
+
+def test_sin_reintento_el_informe_no_menciona_el_segundo_intento():
+    run = _run(NIGHT, RunStatus.COMPLETED, "ingest=ok fetched=1 new=1 | end=edited")
+
+    assert "segundo intento" not in render_report(_build(_Data([run])))
+
+
 def _scenarios():
     run_partial = _run(NIGHT, RunStatus.PARTIAL, NOTES_ARXIV, published=9, read=7)
     calls = [_call(AgentCallStatus.OK, run_partial) for _ in range(5)]
@@ -230,6 +251,47 @@ async def test_contrato_ingesta_con_arxiv_unavailable_se_clasifica_como_arxiv():
 
     assert classification.causes == (NightCause.ARXIV_UNAVAILABLE,)
     assert classification.detail == "ArxivUnavailable"
+
+
+@pytest.mark.anyio
+async def test_contrato_ingesta_recuperada_en_el_segundo_intento_no_tiene_causas():
+    items = [make_item()]
+    env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    fake.respond(
+        AgentRole.READER, json=valid_reading_json(interest_score=1), tokens_in=1, tokens_out=1
+    )
+    calls = 0
+
+    async def _flaky() -> IngestResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ArxivUnavailable("406")
+        return IngestResult(fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=items)
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    night = make_run_night(
+        env=env,
+        provider=fake,
+        ingest_result=IngestResult(
+            fetched=0, new=0, duplicates=0, skipped=0, truncated=False, items=[]
+        ),
+        ingest=_flaky,
+        sleep=_no_sleep,
+        ingest_retry_delay_s=900,
+        ingest_retry_min_remaining_s=3600,
+    )
+    result = await night()
+
+    assert "ingest_retry=ok:ArxivUnavailable" in result.notes
+    classification = classify_night(
+        NightEvidence(run_status=result.status, notes=result.notes, launched=True)
+    )
+    assert result.status is RunStatus.COMPLETED
+    assert classification.causes == ()
 
 
 @pytest.mark.anyio

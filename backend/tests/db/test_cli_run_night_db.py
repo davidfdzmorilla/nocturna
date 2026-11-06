@@ -441,6 +441,28 @@ def test_item_viejo_sin_leer_queda_expired_aunque_el_reader_no_llegue_a_correr(
     assert _item_status(db_session_factory, fresh_id) is ItemStatus.NEW
 
 
+def test_run_night_pasa_a_run_night_los_valores_del_reintento_de_ingesta_de_la_config(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+) -> None:
+    """T106: `_run_night_for_real` reenvía `ingest_retry_*` de la config real."""
+    seen: dict[str, object] = {}
+    real_build = cli._build_run_night
+
+    def _spy(**kwargs: object):
+        seen.update(kwargs)
+        return real_build(**kwargs)
+
+    monkeypatch.setattr(cli, "_build_run_night", _spy)
+
+    main(["run-night"])
+
+    arxiv = load_pipeline_config().sources.arxiv
+    assert seen["ingest_retry_delay_s"] == arxiv.ingest_retry_delay_s == 900
+    assert seen["ingest_retry_min_remaining_s"] == arxiv.ingest_retry_min_remaining_s == 3600
+
+
 # --- --dry-run: sin Run, sin llamada a ningún agente ------------------------
 
 
