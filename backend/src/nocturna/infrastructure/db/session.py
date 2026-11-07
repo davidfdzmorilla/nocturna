@@ -22,7 +22,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from nocturna.infrastructure.config import Settings
 
 
-def create_db_engine(settings: Settings, *, connect_timeout: int | None = None) -> Engine:
+def create_db_engine(
+    settings: Settings, *, connect_timeout: int | None = None, read_only: bool = False
+) -> Engine:
     """Crea el motor de conexión a PostgreSQL.
 
     `connect_args={"options": "-c timezone=UTC"}` fija la zona horaria de la
@@ -32,8 +34,16 @@ def create_db_engine(settings: Settings, *, connect_timeout: int | None = None) 
 
     `connect_timeout` (segundos, T105) acota la espera de conexión de libpq;
     `None` deja el valor por defecto del driver (los demás llamadores).
+
+    `read_only=True` (T109, API de lectura) añade
+    `-c default_transaction_read_only=on`: toda transacción de la sesión nace
+    de solo lectura y PostgreSQL rechaza cualquier escritura
+    (`ReadOnlySqlTransaction`), aunque el rol de conexión pudiera escribir.
     """
-    connect_args: dict[str, str | int] = {"options": "-c timezone=UTC"}
+    options = "-c timezone=UTC"
+    if read_only:
+        options += " -c default_transaction_read_only=on"
+    connect_args: dict[str, str | int] = {"options": options}
     if connect_timeout is not None:
         connect_args["connect_timeout"] = connect_timeout
     return create_engine(settings.database_url, connect_args=connect_args)

@@ -659,12 +659,13 @@ Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3
 - **Hecho cuando**: lo fija el plan. Como mínimo, dos restauraciones seguidas dejan el mismo estado; la web muestra la fecha; el flujo no contiene credenciales de Claude.
 
 ### T109 · Endurecimiento para exposición pública
-- **Estado**: pending
+- **Estado**: done
 - **Depende de**: T107
 - **Toca agentes y gasto**: no.
 - **Origen**: ADR 0044, A (D4).
 - **Alcance**: API solo en red interna; rol PostgreSQL de solo lectura para la API; 404/503 honestos en la web. Cierra las OD de T50 y T51 que apliquen (`/docs`, `/redoc` y `/openapi.json`; sesión de solo lectura; ramas de error con HTTP 200).
 - **Hecho cuando**: lo fija el plan. Como mínimo, la API no responde desde fuera de la red interna; el rol de la API no puede escribir; las OD aplicables quedan cerradas en `OPEN_DECISIONS.md`.
+- **Cierre (2026-11-06; sin migración)**: plan aprobado con D1–D8. D3 se resolvió con la alternativa B tras la prueba previa: el alcance decía 404/503 y quedó 404 real y 200 con aviso y `noindex` ([ADR 0048](adr/0048-endurecimiento-para-exposicion-publica.md)). Qué se hizo: `deploy/postgres/api-readonly-role.sql` y `10-api-readonly-role.sh` (rol `nocturna_ro`, idempotente, lo aplica initdb y se reaplica a mano); `deploy/compose.yml` (rol de la API, servicio `migrate` con perfil `ops`, healthcheck de PostgreSQL por TCP, `NOCTURNA_API_DOCS_ENABLED=false`); `deploy/env.example` (`NOCTURNA_API_DB_PASSWORD`); `infrastructure/config.py` (`api_docs_enabled`); `infrastructure/db/session.py` y `api/deps.py` (sesión de solo lectura); `api/app.py` (documentación opcional); web: `generateMetadata` con `noindex` en las páginas, `lib/noindex.ts`, `notFound()` en los 404 reales, `React.cache` en `lib/api/client.ts`, texto de `app/error.tsx`; `docs/DESPLIEGUE.md` y `docs/ARCHITECTURE.md`. Tests: estáticos de deploy; `-m db` del rol (17 casos); `-m docker` (16) con aislamiento de red, `/docs` en 404, matriz de 404 y `noindex` con la API parada, y user agent de Googlebot. 22 mutantes muertos. Revisión aprobada en el ciclo 1, con la sugerencia del healthcheck por TCP aplicada. Suites: backend 4448 passed; `-m db` 634; `-m docker` 16; web 335. D8 de `OPEN_DECISIONS.md` queda abierta para T108. Pendiente del autor: verificación en el VPS (`docs/DESPLIEGUE.md`).
 
 ### T110 · Puesta en marcha y medición del criterio de cierre de la fase 3
 - **Estado**: pending

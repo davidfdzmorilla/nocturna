@@ -37,8 +37,12 @@ ENV_FILE = (
     "NOCTURNA_DOMAIN=nocturna.test\n"
     "NOCTURNA_ACME_EMAIL=test@nocturna.test\n"
     "POSTGRES_PASSWORD=t107-test-password\n"
+    "NOCTURNA_API_DB_PASSWORD=t109apitestpassword\n"
 )
-OVERRIDE = f"services:\n  api:\n    image: {IMG_API}\n  web:\n    image: {IMG_WEB}\n"
+OVERRIDE = (
+    f"services:\n  api:\n    image: {IMG_API}\n  migrate:\n    image: {IMG_API}\n"
+    f"  web:\n    image: {IMG_WEB}\n"
+)
 
 
 def _run(cmd, *, timeout=900, check=True, **kw):
@@ -169,9 +173,40 @@ def test_compose_resuelto_solo_el_proxy_publica_y_la_red_interna_es_cerrada(dc, 
         assert "env_file" not in svc, name
 
 
-def test_humo_postgres_api_y_web_arrancan_sanos_y_la_web_sirve_200(dc, built):
-    dc("run", "--rm", "api", "alembic", "upgrade", "head", timeout=300)
-    dc("up", "-d", "--wait", "--wait-timeout", "180", "postgres", "api", "web", timeout=400)
+@pytest.fixture(scope="module")
+def stack(dc, built):
+    """postgres (initdb con el rol de lectura) -> `migrate` con el propietario -> api y web."""
+    dc("up", "-d", "--wait", "--wait-timeout", "120", "postgres", timeout=300)
+    dc("run", "--rm", "migrate", timeout=300)
+    dc("up", "-d", "--wait", "--wait-timeout", "180", "api", "web", timeout=400)
+    return True
+
+
+_BANNER = "Análisis generado automáticamente por IA"
+
+
+def _web_get(dc, path: str, ua: str | None = None) -> tuple[int, str]:
+    """GET desde dentro del contenedor web a su propio servidor; devuelve (estado, html)."""
+    script = (
+        "const h=process.argv[1]?{'user-agent':process.argv[1]}:{};"
+        "fetch('http://localhost:3000'+process.argv[2],{headers:h,redirect:'manual'})"
+        ".then(async r=>console.log(JSON.stringify([r.status,await r.text()])))"
+        ".catch(e=>{console.error(e);process.exit(1)})"
+    )
+    out = dc("exec", "-T", "web", "node", "-e", script, ua or "", path).stdout
+    status, html = json.loads(out.strip().splitlines()[-1])
+    return status, html
+
+
+def _web_status(dc, url: str) -> int:
+    script = (
+        "fetch(process.argv[1]).then(r=>console.log(r.status))"
+        ".catch(e=>{console.error(e);process.exit(1)})"
+    )
+    return int(dc("exec", "-T", "web", "node", "-e", script, url).stdout.strip())
+
+
+def test_humo_postgres_api_y_web_arrancan_sanos_y_la_web_sirve_200(dc, stack):
     dc(
         "exec",
         "-T",
@@ -182,4 +217,92 @@ def test_humo_postgres_api_y_web_arrancan_sanos_y_la_web_sirve_200(dc, built):
         ".catch(()=>process.exit(1))",
     )
     ps = json.loads("[" + ",".join(dc("ps", "--format", "json").stdout.strip().splitlines()) + "]")
-    assert {p["Service"] for p in ps} == {"postgres", "api", "web"}  # el proxy no arranca
+    assert {p["Service"] for p in ps} == {"postgres", "api", "web"}  # ni proxy ni migrate
+
+
+_API_PROBE = """
+import json, os, urllib.request
+import sqlalchemy as sa
+e = sa.create_engine(os.environ["NOCTURNA_DATABASE_URL"])
+out = {}
+with e.connect() as c:
+    out["user"] = c.execute(sa.text("select current_user")).scalar_one()
+    out["ro"] = c.execute(sa.text("show default_transaction_read_only")).scalar_one()
+    out["select"] = c.execute(sa.text("select count(*) from items")).scalar_one()
+try:
+    with e.begin() as c:
+        c.execute(sa.text("insert into items (source, external_id, title, abstract) "
+                          "values ('arxiv','x','t','a')"))
+    out["insert"] = "ok"
+except Exception as exc:
+    out["insert"] = type(exc.orig).__name__
+out["health"] = urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=4).status
+print(json.dumps(out))
+"""
+
+
+def test_la_api_se_conecta_con_el_rol_de_lectura_y_rechaza_insert(dc, stack):
+    r = dc("exec", "-T", "api", "python", "-c", _API_PROBE)
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["user"] == "nocturna_ro"
+    assert out["ro"] == "on"
+    assert out["select"] == 0
+    assert out["insert"] in ("ReadOnlySqlTransaction", "InsufficientPrivilege")
+    assert out["health"] == 200
+
+
+def test_la_api_no_expone_docs_ni_openapi_a_la_red_interna(dc, stack):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert _web_status(dc, f"http://api:8000{path}") == 404, path
+    assert _web_status(dc, "http://api:8000/health") == 200
+
+
+def test_contenedor_solo_en_la_red_edge_no_alcanza_la_api(dc, stack):
+    r = _run(
+        [
+            "docker", "run", "--rm", "--network", f"{PROJECT}_edge", "--entrypoint", "node",
+            IMG_WEB, "-e",
+            "fetch('http://api:8000/health',{signal:AbortSignal.timeout(4000)})"
+            ".then(()=>process.exit(1)).catch(()=>process.exit(0))",
+        ],
+        check=False,
+    )  # fmt: skip
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/hallazgo/00000000-0000-4000-8000-000000000000",
+        "/hallazgo/no-uuid",
+        "/archivo/2026-W99",
+        "/ruta-inexistente",
+    ],
+)
+def test_matriz_con_base_vacia_not_found_es_404(dc, stack, path):
+    assert _web_get(dc, path)[0] == 404
+
+
+def test_matriz_con_base_vacia_la_portada_es_200_y_se_indexa(dc, stack):
+    status, html = _web_get(dc, "/")
+    assert status == 200
+    assert _BANNER in html
+    assert "noindex" not in html
+
+
+@pytest.mark.parametrize("ua", [None, "Mozilla/5.0 (compatible; Googlebot/2.1)"])
+def test_con_la_api_parada_las_paginas_dan_200_con_banner_y_noindex(dc, stack, ua):
+    dc("stop", "api")
+    try:
+        for path in (
+            "/",
+            "/archivo",
+            "/hallazgo/00000000-0000-4000-8000-000000000000",
+            "/archivo/2026-W41",
+        ):
+            status, html = _web_get(dc, path, ua)
+            assert status == 200, path
+            assert _BANNER in html, path
+            assert "noindex, nofollow" in html, path
+    finally:
+        dc("up", "-d", "--wait", "--wait-timeout", "120", "api", timeout=200)

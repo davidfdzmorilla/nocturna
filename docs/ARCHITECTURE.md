@@ -380,21 +380,24 @@ Contrastador, Analista, `ApiKeyProvider`, autenticación, panel de administraci�
 Dos entornos. El pipeline y sus credenciales están en el Mac; el VPS solo aloja la web, la API de lectura y la base.
 
 - **Mac**: pipeline con `launchd` (`run-night`, `archive-snapshot`, informe matinal), CLI de Claude, `docker-compose.yml` de la raíz (PostgreSQL local, sin proxy) y el grupo `pipeline` de dependencias, que incluye `claude-agent-sdk`.
-- **VPS**: `deploy/compose.yml`, con cuatro servicios:
+- **VPS**: `deploy/compose.yml`, con cinco servicios (`migrate` solo con el perfil `ops`):
 
 | Servicio | Imagen | Redes | Puertos publicados |
 |---|---|---|---|
 | `traefik` | `traefik:v3.2.3`, proveedor de fichero (`deploy/traefik/dynamic.yml`) | `edge` | 80, 443 |
 | `web` | `web/Dockerfile`: Next.js `standalone` sobre Node 24, usuario `node` | `edge`, `internal` | ninguno |
-| `api` | `backend/Dockerfile`: uvicorn con el grupo `serve`, usuario uid 10001, `tzdata` | `internal` | ninguno |
-| `postgres` | `postgres:16-alpine` | `internal` | ninguno |
+| `api` | `backend/Dockerfile`: uvicorn con el grupo `serve`, usuario uid 10001, `tzdata`; lee con el rol `nocturna_ro`; `/docs` apagado | `internal` | ninguno |
+| `migrate` | `backend/Dockerfile` (la imagen de `api`), perfil `ops`, conecta como propietario `nocturna` | `internal` | ninguno |
+| `postgres` | `postgres:16-alpine`; crea el rol `nocturna_ro` al inicializar el volumen (`deploy/postgres/`) | `internal` | ninguno |
 
 - **Dependencias**: `claude-agent-sdk` está en el grupo `pipeline`, que es el de por defecto en el Mac. La imagen de la API instala `--no-default-groups --group serve`; el cierre del `uv.lock` de `serve` no contiene el SDK ni `mcp`.
 - **Red interna**: `internal` tiene `internal: true`. La API y PostgreSQL no son alcanzables desde fuera del compose.
 - **Proxy**: Traefik sin proveedor Docker (sin `docker.sock`) y sin dashboard. TLS-ALPN-01 de Let's Encrypt; el 80 redirige al 443; la CA es configurable (`NOCTURNA_ACME_CA_SERVER`, staging para pruebas).
 - **Secretos**: solo en `deploy/.env` del VPS, ignorado por git.
-- **Esquema**: `alembic upgrade head` a mano, con `docker compose -f deploy/compose.yml run --rm api …` (T107 D5). La API no migra al arrancar.
+- **Esquema**: `alembic upgrade head` a mano, con el servicio `migrate` (`docker compose -f deploy/compose.yml --profile ops run --rm migrate`; T109, ADR 0048, sustituye al `run --rm api` de T107 D5). La API no migra al arrancar.
+- **Rol de solo lectura** (ADR 0048): `nocturna_ro` tiene `SELECT` sobre `public`, también sobre las tablas que cree el propietario después; `default_transaction_read_only` en el rol y en la conexión de la API; `REVOKE TEMPORARY` a `PUBLIC` sobre la base. Lo crea `deploy/postgres/10-api-readonly-role.sh` con initdb y se reaplica tras cada restauración (T108).
+- **Errores de la web** (ADR 0048): 404 reales si el recurso no existe; si la API no responde, 200 con aviso y `noindex`.
 - **Construcción**: en el VPS, desde el repositorio clonado (T107 D4). No hay registro de imágenes.
-- **Tests**: `backend/tests/test_deploy_no_claude_credentials.py` (estático, en `pytest`) y `backend/tests/deploy/test_images.py` (`-m docker`, `NOCTURNA_CHECK_IMAGES=1`), que comprueban la ausencia de Claude y de sus credenciales en ficheros, imágenes y compose.
+- **Tests**: `backend/tests/test_deploy_no_claude_credentials.py` (estático, en `pytest`) y `backend/tests/deploy/test_images.py` (`-m docker`, `NOCTURNA_CHECK_IMAGES=1`), que comprueban la ausencia de Claude y de sus credenciales en ficheros, imágenes y compose. T109 añade `backend/tests/deploy/test_readonly_hardening.py` (estático y `-m docker`), `backend/tests/db/test_api_readonly_role_db.py` y `backend/tests/db/test_api_read_only_session_db.py` (`-m db`) y `backend/tests/test_api_docs_toggle.py`.
 - **Procedimiento**: `docs/DESPLIEGUE.md`.
-- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; sincronización de datos (T108); rol de solo lectura de la API y ramas de error de la web (T109); medición de la fase (T110).
+- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; sincronización de datos (T108); medición de la fase (T110).

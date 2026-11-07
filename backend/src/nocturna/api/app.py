@@ -37,7 +37,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_json_logging()
     resolved_settings = settings if settings is not None else get_settings()
 
-    app = FastAPI(title="Nocturna API", debug=False)
+    if resolved_settings.api_docs_enabled:
+        app = FastAPI(title="Nocturna API", debug=False)
+    else:
+        app = FastAPI(
+            title="Nocturna API",
+            debug=False,
+            docs_url=None,
+            redoc_url=None,
+            openapi_url=None,
+        )
 
     app.add_middleware(
         CORSMiddleware,

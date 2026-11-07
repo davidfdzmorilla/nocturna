@@ -22,6 +22,7 @@ DEPLOY_FILES = [
     ROOT / "deploy" / "compose.yml",
     ROOT / "deploy" / "env.example",
     *sorted((ROOT / "deploy").glob("*/dynamic.yml")),
+    *sorted((ROOT / "deploy" / "postgres").glob("*")),
     BACKEND / "Dockerfile",
     ROOT / "web" / "Dockerfile",
     ROOT / ".dockerignore",
@@ -37,6 +38,8 @@ _API_KEY_LINE = "ANTHROPIC" + "_API_KEY=x"
 def test_hay_ficheros_de_despliegue_que_escanear():
     assert all(p.is_file() for p in DEPLOY_FILES), [p for p in DEPLOY_FILES if not p.is_file()]
     assert any(p.name == "dynamic.yml" for p in DEPLOY_FILES)
+    names = {p.name for p in DEPLOY_FILES}
+    assert {"api-readonly-role.sql", "10-api-readonly-role.sh"} <= names  # T109
 
 
 @pytest.mark.parametrize("path", DEPLOY_FILES, ids=lambda p: str(p.relative_to(ROOT)))
@@ -176,7 +179,8 @@ def _compose_config(compose: Path) -> subprocess.CompletedProcess[str]:
         **os.environ,
         "NOCTURNA_DOMAIN": "example.test",
         "NOCTURNA_ACME_EMAIL": "ops@example.test",
-        "POSTGRES_PASSWORD": "synthetic-password",
+        "POSTGRES_PASSWORD": "syntheticpassword",
+        "NOCTURNA_API_DB_PASSWORD": "syntheticapipassword",
     }
     return subprocess.run(
         ["docker", "compose", "-f", str(compose), "config", "-q"],

@@ -17,11 +17,10 @@ export default function GlobalError({
   return (
     <div className="mx-auto max-w-3xl py-12 sm:py-16 text-center">
       <h1 className="font-display text-3xl leading-tight text-balance text-text sm:text-4xl">
-        Algo ha fallado
+        No se ha podido cargar esta página
       </h1>
       <p className="mt-4 text-text-muted">
-        Ha ocurrido un error inesperado al cargar esta página. Puedes reintentar
-        o volver al feed.
+        Vuelve a intentarlo en unos minutos.
       </p>
       <div className="mt-6 flex justify-center gap-6">
         <button

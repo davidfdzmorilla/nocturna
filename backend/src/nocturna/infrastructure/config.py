@@ -737,3 +737,7 @@ class Settings(BaseSettings):
     # (`run-night`, `run-item`), así que un .env mal escrito con comas rompe
     # también el arranque de esos comandos, no solo la API.
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Documentación interactiva de la API (/docs, /redoc, /openapi.json). Activa
+    # por defecto para local; en despliegue público se desactiva con
+    # NOCTURNA_API_DOCS_ENABLED=false (T109).
+    api_docs_enabled: bool = True

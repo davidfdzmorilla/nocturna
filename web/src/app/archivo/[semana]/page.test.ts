@@ -95,9 +95,21 @@ describe("página /archivo/[semana]", () => {
     expect(html).toContain("Una semana tranquila en el archivo");
   });
 
-  it("generateMetadata no llama a la API", async () => {
+  it("generateMetadata: sin noindex en éxito y not_found; semana inválida sin API", async () => {
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: true, data: week42WithText });
     expect(await generateMetadata(params("2026-W41"))).toEqual({ title: "Semana 41 de 2026" });
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: false, reason: "not_found" });
+    expect(await generateMetadata(params("2026-W41"))).toEqual({ title: "Semana 41 de 2026" });
+    vi.mocked(fetchArchiveWeek).mockClear();
     expect(await generateMetadata(params("zzz"))).toEqual({ title: "Resumen del archivo" });
     expect(fetchArchiveWeek).not.toHaveBeenCalled();
+  });
+
+  it("generateMetadata: noindex en unavailable", async () => {
+    vi.mocked(fetchArchiveWeek).mockResolvedValue({ ok: false, reason: "unavailable" });
+    expect(await generateMetadata(params("2026-W41"))).toEqual({
+      title: "Semana 41 de 2026",
+      robots: { index: false, follow: false },
+    });
   });
 });

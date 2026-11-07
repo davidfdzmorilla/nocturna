@@ -6,6 +6,8 @@ import {
 import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
 import { parseTypeParam } from "@/lib/findingTypes";
 import { homeDigestState, latestWeekWithChanges } from "@/lib/archiveRoute";
+import type { Metadata } from "next";
+import { NOINDEX } from "@/lib/noindex";
 import { FindingsFeed } from "@/components/FindingsFeed";
 import { HomeDigest } from "@/components/HomeDigest";
 
@@ -23,6 +25,30 @@ type HomeProps = {
     tipo?: string | string[];
   }>;
 };
+
+/**
+ * `noindex` solo si TODAS las peticiones de la portada fallan (resumen y
+ * feed). Las peticiones se comparten con la página vía `cache()`.
+ */
+export async function generateMetadata({
+  searchParams,
+}: HomeProps): Promise<Metadata> {
+  const params = await searchParams;
+  const [weeks, findings] = await Promise.all([
+    fetchArchiveWeeks(),
+    fetchFindingsPage(
+      parsePageParam(params.page),
+      PAGE_SIZE,
+      parseTypeParam(params.tipo),
+    ),
+  ]);
+  const allDown =
+    !weeks.ok &&
+    weeks.reason === "unavailable" &&
+    !findings.ok &&
+    findings.reason === "unavailable";
+  return allDown ? NOINDEX : {};
+}
 
 export default async function Home({ searchParams }: HomeProps) {
   const params = await searchParams;
