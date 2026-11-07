@@ -7,7 +7,7 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { fetchArchiveWeeks } from "@/lib/api/client";
-import ArchivePage, { metadata } from "./page";
+import ArchivePage, { generateMetadata } from "./page";
 
 async function render() {
   return renderToStaticMarkup(await ArchivePage());
@@ -16,8 +16,17 @@ async function render() {
 beforeEach(() => vi.mocked(fetchArchiveWeeks).mockReset());
 
 describe("página /archivo", () => {
-  it("título de pestaña", () => {
-    expect(metadata.title).toBe("Resumen del archivo");
+  it("título de pestaña, sin noindex en éxito", async () => {
+    vi.mocked(fetchArchiveWeeks).mockResolvedValue({ ok: true, data: { weeks: [] } });
+    expect(await generateMetadata()).toEqual({ title: "Resumen del archivo" });
+  });
+
+  it("noindex solo en unavailable", async () => {
+    vi.mocked(fetchArchiveWeeks).mockResolvedValue({ ok: false, reason: "unavailable" });
+    expect(await generateMetadata()).toEqual({
+      title: "Resumen del archivo",
+      robots: { index: false, follow: false },
+    });
   });
 
   it("lista: H1, nota de D6, filas enlazadas con recuentos y 'Sin cambios'", async () => {

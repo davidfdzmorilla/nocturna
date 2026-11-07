@@ -7,7 +7,7 @@ vi.mock("@/lib/api/client", () => ({
 
 import { fetchFinding } from "@/lib/api/client";
 import { HD_202206_C_MASS, detailWith, retractedDetail } from "@/lib/findingFixtures";
-import FindingPage from "./page";
+import FindingPage, { generateMetadata } from "./page";
 
 const ID = "1a2b3c4d-1111-2222-3333-444455556666";
 
@@ -169,5 +169,31 @@ describe("detalle de hallazgo retirado (T100)", () => {
     expect(aviso).toBeGreaterThan(-1);
     expect(html.indexOf("Candidato")).toBeGreaterThan(aviso);
     expect(html.indexOf("Datos del contraste")).toBeGreaterThan(aviso);
+  });
+});
+
+describe("generateMetadata", () => {
+  const meta = () => generateMetadata({
+    params: Promise.resolve({ id: ID }),
+    searchParams: Promise.resolve({}),
+  });
+
+  it("éxito: título del hallazgo y sin robots", async () => {
+    const m = await meta();
+    expect(m.title).toBe(detailWith(HD_202206_C_MASS).title);
+    expect(m.robots).toBeUndefined();
+  });
+
+  it("not_found: sin noindex", async () => {
+    vi.mocked(fetchFinding).mockResolvedValue({ ok: false, reason: "not_found" });
+    expect(await meta()).toEqual({ title: "Hallazgo" });
+  });
+
+  it("unavailable: noindex, nofollow", async () => {
+    vi.mocked(fetchFinding).mockResolvedValue({ ok: false, reason: "unavailable" });
+    expect(await meta()).toEqual({
+      title: "Hallazgo",
+      robots: { index: false, follow: false },
+    });
   });
 });

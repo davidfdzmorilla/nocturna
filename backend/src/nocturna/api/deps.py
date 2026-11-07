@@ -58,7 +58,7 @@ def get_settings() -> Settings:
 def get_session_factory() -> sessionmaker[Session]:
     """Fábrica de sesiones, cacheada: un único motor de conexión por proceso."""
     settings = get_settings()
-    engine = create_db_engine(settings)
+    engine = create_db_engine(settings, read_only=True)
     return create_session_factory(engine)
 
 

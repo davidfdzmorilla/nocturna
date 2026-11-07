@@ -8,6 +8,7 @@ import { FindingData } from "@/components/FindingData";
 import { TypeBadge } from "@/components/TypeBadge";
 import { safeArxivSourceUrl } from "@/lib/externalLinks";
 import { LevelNav } from "@/components/LevelNav";
+import { NOINDEX } from "@/lib/noindex";
 import { Notice } from "@/components/Notice";
 import { RetractionNotice } from "@/components/RetractionNotice";
 
@@ -51,7 +52,10 @@ export async function generateMetadata({
 
   const result = await fetchFinding(id);
   if (!result.ok) {
-    return { title: "Hallazgo" };
+    return {
+      title: "Hallazgo",
+      ...(result.reason === "unavailable" ? NOINDEX : {}),
+    };
   }
 
   return { title: result.data.title };

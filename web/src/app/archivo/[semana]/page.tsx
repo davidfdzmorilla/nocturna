@@ -12,6 +12,7 @@ import {
 import { archiveWeekState } from "@/lib/archiveRoute";
 import { DigestWriterText } from "@/components/DigestWriterText";
 import { DigestSection } from "@/components/DigestSection";
+import { NOINDEX } from "@/lib/noindex";
 import { Notice } from "@/components/Notice";
 
 export const dynamic = "force-dynamic";
@@ -21,13 +22,16 @@ type Props = { params: Promise<{ semana: string }> };
 const INTRO =
   "La referencia de un planeta es la solución por defecto del archivo: la que el NASA Exoplanet Archive marca como principal para ese planeta.";
 
-/** Sin fetch: el título sale solo del parámetro de la URL. */
+/** El título sale del parámetro; la petición (compartida vía `cache()`) solo decide `noindex`. */
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { semana } = await params;
   const week = parseWeekParam(semana);
+  const result = week === null ? null : await fetchArchiveWeek(week);
+  const down = result !== null && !result.ok && result.reason === "unavailable";
   return {
     title:
       week === null ? "Resumen del archivo" : weekLabel(week).split(" (")[0],
+    ...(down ? NOINDEX : {}),
   };
 }
 

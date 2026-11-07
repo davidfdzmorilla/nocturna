@@ -83,7 +83,11 @@ async function getJson<T>(
   }
 }
 
-export async function fetchFindingsPage(
+/**
+ * `cache()` también aquí: `generateMetadata` de `/` pide lo mismo que la
+ * página para decidir `noindex` (T109), y comparten una sola petición.
+ */
+export const fetchFindingsPage = cache(async function fetchFindingsPage(
   page: number,
   size: number = PAGE_SIZE,
   type: FindingType | null = null,
@@ -96,7 +100,7 @@ export async function fetchFindingsPage(
     params.set("type", type);
   }
   return getJson<FindingsPage>(`/findings?${params.toString()}`);
-}
+});
 
 /**
  * `cache()` de React deduplica por argumentos dentro del mismo render:
@@ -113,11 +117,11 @@ export const fetchFinding = cache(async function fetchFinding(
   return getJson<FindingDetail>(`/findings/${encodeURIComponent(id)}`);
 });
 
-export async function fetchArchiveWeeks(): Promise<
+export const fetchArchiveWeeks = cache(async function fetchArchiveWeeks(): Promise<
   ApiResult<DigestWeeksResponse>
 > {
   return getJson<DigestWeeksResponse>("/archive/weeks");
-}
+});
 
 /**
  * `422` (formato de semana inválido) se trata como `not_found`: solo aquí,

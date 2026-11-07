@@ -55,8 +55,23 @@ services:
     restart: unless-stopped
     networks: [internal]
     environment:
-      NOCTURNA_DATABASE_URL: postgresql+psycopg://nocturna:${POSTGRES_PASSWORD:?}@postgres:5432/nocturna
+      NOCTURNA_DATABASE_URL: postgresql+psycopg://nocturna_ro:${NOCTURNA_API_DB_PASSWORD:?}@postgres:5432/nocturna
       NOCTURNA_CORS_ORIGINS: '["https://${NOCTURNA_DOMAIN:?}"]'
+      NOCTURNA_API_DOCS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  # Migraciones con el propietario: docker compose -f deploy/compose.yml --profile ops run --rm migrate
+  migrate:
+    image: nocturna-api:local
+    profiles: ["ops"]
+    restart: "no"
+    networks: [internal]
+    environment:
+      NOCTURNA_DATABASE_URL: postgresql+psycopg://nocturna:${POSTGRES_PASSWORD:?}@postgres:5432/nocturna
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,10 +85,14 @@ services:
       POSTGRES_USER: nocturna
       POSTGRES_DB: nocturna
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      NOCTURNA_API_DB_PASSWORD: ${NOCTURNA_API_DB_PASSWORD:?}
     volumes:
       - nocturna_pgdata:/var/lib/postgresql/data
+      - ./postgres/10-api-readonly-role.sh:/docker-entrypoint-initdb.d/10-api-readonly-role.sh:ro
+      - ./postgres/api-readonly-role.sql:/nocturna/api-readonly-role.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nocturna -d nocturna"]
+      # Por TCP: el servidor temporal de initdb solo escucha en el socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U nocturna -d nocturna"]
       interval: 10s
       timeout: 5s
       retries: 5

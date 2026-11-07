@@ -15,7 +15,7 @@ import {
 import { week40, week42WithText } from "@/lib/archiveFixtures";
 import type { FindingsPage } from "@/lib/api/types";
 import { HOME_AI_TEXT_LEGEND, HOME_AI_TEXT_NOTE } from "@/lib/archiveDigest";
-import Home from "./page";
+import Home, { generateMetadata } from "./page";
 
 async function render(searchParams: { page?: string; tipo?: string }) {
   return renderToStaticMarkup(
@@ -355,5 +355,36 @@ describe("feed agrupado por noche (T102)", () => {
       "Recuperados: 0",
       "Pierden la referencia: 0",
     ]);
+  });
+});
+
+describe("generateMetadata de la portada", () => {
+  const meta = (sp: { page?: string; tipo?: string } = {}) =>
+    generateMetadata({ searchParams: Promise.resolve(sp) });
+  const down = { ok: false as const, reason: "unavailable" as const };
+
+  it("éxito: sin robots", async () => {
+    expect((await meta()).robots).toBeUndefined();
+  });
+
+  it("fallo total (resumen y feed): noindex, nofollow", async () => {
+    vi.mocked(fetchArchiveWeeks).mockResolvedValue(down);
+    vi.mocked(fetchFindingsPage).mockResolvedValue(down);
+    expect((await meta()).robots).toEqual({ index: false, follow: false });
+  });
+
+  it("fallo parcial: sin noindex", async () => {
+    vi.mocked(fetchArchiveWeeks).mockResolvedValue(down);
+    expect((await meta()).robots).toBeUndefined();
+    vi.mocked(fetchArchiveWeeks).mockResolvedValue(WEEKS);
+    vi.mocked(fetchFindingsPage).mockResolvedValue(down);
+    expect((await meta()).robots).toBeUndefined();
+  });
+
+  it("pide el feed con los mismos argumentos que la página", async () => {
+    await meta({ page: "2", tipo: "catalog_tension" });
+    await render({ page: "2", tipo: "catalog_tension" });
+    const calls = vi.mocked(fetchFindingsPage).mock.calls;
+    expect(calls[0]).toEqual(calls[1]);
   });
 });

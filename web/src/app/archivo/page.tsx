@@ -9,11 +9,16 @@ import {
   weekLabel,
   weekTotal,
 } from "@/lib/archiveDigest";
+import { NOINDEX } from "@/lib/noindex";
 import { Notice } from "@/components/Notice";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Resumen del archivo" };
+export async function generateMetadata(): Promise<Metadata> {
+  const result = await fetchArchiveWeeks();
+  const down = !result.ok && result.reason === "unavailable";
+  return { title: "Resumen del archivo", ...(down ? NOINDEX : {}) };
+}
 
 export default async function ArchivePage() {
   const state = archiveIndexState(await fetchArchiveWeeks());
