@@ -621,7 +621,7 @@ Aprobada el 2026-09-28 (T61). Decisiones de fondo en [ADR 0012](adr/0012-fase-2-
 
 ## Fase 3
 
-Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3.md): publicar la web en un VPS con el pipeline en el Mac (A) y robustez operativa mínima (C). Sin cambio de gasto: `nightly_tokens` no sube y la web no llama a Claude. Criterio de cierre (a)–(e) en ADR 0044. Orden: T105, T106, T107, T108, T109, T110; las dependencias están en cada tarea. T111 (diagnóstico del 429) se dio de alta desde T105, fuera de ese orden.
+Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3.md): publicar la web en un VPS con el pipeline en el Mac (A) y robustez operativa mínima (C). Sin cambio de gasto: `nightly_tokens` no sube y la web no llama a Claude. Criterio de cierre (a)–(e) en ADR 0044. Orden: T105, T106, T107, T108, T109, T110; las dependencias están en cada tarea. T111 (diagnóstico de las noches del 10-29 y 10-30: 429 y autenticación) se dio de alta desde T105, fuera de ese orden; T112 (sesión del CLI caducada) sale de T111 D1.
 
 ### T105 · Informe matinal y aviso de noche fallida o ausente
 - **Estado**: done
@@ -675,13 +675,23 @@ Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3
 - **Alcance**: 14 días de comprobaciones; medición en solo lectura de los criterios (a)–(e); informe para el ADR de cierre de fase 3.
 - **Hecho cuando**: lo fija el plan. Como mínimo, 14 días registrados y los criterios medidos; si alguno falla, la tarea de corrección que exige D8.
 
-### T111 · Diagnóstico del 429 de la suscripción
-- **Estado**: pending
+### T111 · Diagnóstico de las noches del 10-29 y 10-30 (429 y autenticación)
+- **Estado**: done
 - **Depende de**: T105
 - **Toca agentes y gasto**: sí. Toca el proveedor LLM (`infrastructure/llm/`); revisión con `budget-guard-review`.
 - **Origen**: OD T105 (decisión 6). Dada de alta el 2026-11-05 desde T105, fuera del orden de la fase.
 - **Alcance**: averiguar por qué el 429 de la suscripción del 2026-10-29 y del 2026-10-30 llegó como `agent_error` y no como `LLMRateLimited` (`api_error_status`), y que quede registrado como `rate_limited`. El informe de T105 clasifica esas noches como `circuit_breaker` mientras tanto (ADR 0045).
+- **Hallazgo (2026-11-07)**: el 10-29 fue un 429 reconocido; el 10-30 fue autenticación caducada. T111 cierra el hueco del 429 en las ramas ProcessError/Exception y añade el log estructurado `llm.call_failed`; la detección de autenticación es T112.
 - **Hecho cuando**: lo fija el plan; tests con `FakeLLMProvider` (ningún test llama a Claude).
+- **Cierre (2026-11-07; sin migración)**: plan aprobado con D1–D4 recomendadas ([ADR 0049](adr/0049-causa-de-las-noches-del-29-y-30-de-octubre-y-senales-de-limite.md)). Qué se hizo: código de producción solo en `infrastructure/llm/agent_sdk_provider.py` (`_llm_error_class`, `_failed_status`, `_log_call_failure` y las ramas de error de `run_agent`); tests en `test_agent_sdk_errors.py`, `test_night_report.py` y `test_run_night.py`. Cubren: casos reales del 10-29 y del 10-30 con mensajes del SDK construidos a mano; ramas `ProcessError` y `Exception`; éxito pese a señales de límite (sigue siendo éxito, con sus tokens); tokens conservados; log sin texto del modelo ni del prompt; notas reales en el informe; corte del Reader con `LLMRateLimited` sin Editor. 9 de 9 mutantes muertos. Revisión general y `budget-guard-review` aprobadas en el ciclo 1, con la cita de ADR 0045 corregida a 0049 y dos sugerencias aplicadas (comentario sobre señales antiguas y `exit_code` solo entero). Suite backend 4463 passed; `pytest -m db` 634 passed. Siguiente: T112.
+
+### T112 · Sesión del CLI caducada: causa propia y aviso
+- **Estado**: pending
+- **Depende de**: T111
+- **Toca agentes y gasto**: sí (proveedor LLM, runner y casos de uso; revisión budget-guard-review).
+- **Origen**: T111 D1.
+- **Alcance**: `LLMAuthenticationFailed(LLMError)` cuando `AssistantMessage.error == "authentication_failed"`; resultado terminal en el runner sin reintento, cortando la noche en la 1.ª llamada; `end=auth_failed_<rol>`; `NightCause.AUTH_FAILED` en el informe matinal con «renueva la sesión: `claude /login`».
+- **Hecho cuando**: lo fija el plan; tests con `FakeLLMProvider`.
 
 ---
 

@@ -579,6 +579,26 @@ async def test_rate_limited_en_fase_b_aborta_y_no_llama_al_editor():
     assert "end=rate_limited_popularizer" in result.notes
 
 
+async def test_t111_rate_limited_en_el_reader_acaba_partial_sin_llamar_al_editor():
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.READER,
+        error=LLMRateLimited("límite alcanzado", tokens_in=40, tokens_out=3),
+    )
+    ingest_result = IngestResult(
+        fetched=1, new=1, duplicates=0, skipped=0, truncated=False, items=[item]
+    )
+    run_night = make_run_night(env=env, provider=fake, ingest_result=ingest_result)
+
+    result = await run_night()
+
+    assert [call.role for call in fake.calls] == [AgentRole.READER]
+    assert result.status is RunStatus.PARTIAL
+    assert "end=rate_limited_reader" in result.notes
+
+
 # --- 10. BUDGET_EXHAUSTED en fase B: la reserva del Editor sigue intacta --
 
 

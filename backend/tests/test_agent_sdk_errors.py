@@ -13,9 +13,18 @@ de las 04:45.
 """
 
 import asyncio
+import logging
 
 import pytest
-from claude_agent_sdk import ClaudeSDKError
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeSDKError,
+    ProcessError,
+    RateLimitEvent,
+    RateLimitInfo,
+    ResultError,
+    ResultMessage,
+)
 from helpers.sdk_doubles import (
     build_fake_query,
     build_fake_query_with_unreliable_aclose,
@@ -407,7 +416,6 @@ async def test_result_error_expone_api_error_status_como_atributo_no_solo_en_el_
     `str(exc)`: T44 necesita poder escribir `exc.api_error_status == 529`
     para distinguir un fallo transitorio del servidor de otros fallos.
     """
-    from claude_agent_sdk import ResultError
 
     result_error = ResultError(
         "el servicio está sobrecargado",
@@ -552,7 +560,6 @@ async def test_result_error_sin_result_message_recupera_model_usage_del_payload(
     -- 929 + 523 = 1452 de entrada, 17 + 6 = 23 de salida -- sin que haga
     falta ningún `ResultMessage` visto en el stream.
     """
-    from claude_agent_sdk import ResultError
 
     result_error = ResultError(
         "el agente falló antes de emitir ningún ResultMessage",
@@ -664,7 +671,6 @@ async def test_result_error_con_api_error_status_429_lanza_llm_rate_limited(monk
     T44 pueda distinguir un límite de tasa de cualquier otro fallo de API y
     cortar la noche sin reintentar.
     """
-    from claude_agent_sdk import ResultError
 
     result_error = ResultError(
         "límite de tasa alcanzado",
@@ -687,7 +693,6 @@ async def test_llm_rate_limited_sigue_siendo_capturable_como_llm_error(monkeypat
     (T41-siguiente) ordena sus `except` contando con que un `except LLMError`
     también atrape un límite de tasa, no solo `LLMError` a secas.
     """
-    from claude_agent_sdk import ResultError
 
     result_error = ResultError(
         "límite de tasa alcanzado",
@@ -703,3 +708,291 @@ async def test_llm_rate_limited_sigue_siendo_capturable_como_llm_error(monkeypat
         pytest.fail("se esperaba que run_agent lanzara una excepción")
     except LLMError as exc:
         assert isinstance(exc, LLMRateLimited)
+
+
+# --- T111: señales de límite/autenticación del SDK (ADR 0049) ---------------
+
+
+def _assistant(error: str | None) -> AssistantMessage:
+    return AssistantMessage(content=[], model="claude-sonnet-4-5", error=error)  # type: ignore[arg-type]
+
+
+def _rate_limit_event(status: str, rate_limit_type: str | None = None) -> RateLimitEvent:
+    return RateLimitEvent(
+        rate_limit_info=RateLimitInfo(
+            status=status,  # type: ignore[arg-type]
+            resets_at=1_788_000_000,
+            rate_limit_type=rate_limit_type,  # type: ignore[arg-type]
+        ),
+        uuid="uuid-de-test",
+        session_id="session-de-test",
+    )
+
+
+def _result_429(**overrides: object) -> ResultMessage:
+    kwargs: dict[str, object] = dict(
+        is_error=True,
+        api_error_status=429,
+        result="You've hit your limit",
+        usage={"input_tokens": 40, "output_tokens": 3},
+    )
+    kwargs.update(overrides)
+    return make_result_message(**kwargs)  # type: ignore[arg-type]
+
+
+class _Capture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def provider_logs():
+    """Handler propio sobre el logger del módulo: no depende de la config global."""
+    logger = agent_sdk_provider._logger
+    handler = _Capture()
+    old_level = logger.level
+    old_disabled = logger.disabled
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    # Otro test (p. ej. `fileConfig` de Alembic) puede haber dejado el logger
+    # deshabilitado (`disable_existing_loggers`); se fuerza aquí.
+    logger.disabled = False
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+        logger.disabled = old_disabled
+
+
+def _failure_records(handler: _Capture) -> list[logging.LogRecord]:
+    return [r for r in handler.records if r.getMessage() == "llm.call_failed"]
+
+
+def test_llm_error_class_con_assistant_error_rate_limit_devuelve_llm_rate_limited():
+    assert _llm_error_class(None, "rate_limit") is LLMRateLimited
+    assert _llm_error_class(None, "authentication_failed") is LLMError
+    assert _llm_error_class(500, "server_error") is LLMError
+
+
+@pytest.mark.anyio
+async def test_caso_10_29_assistant_rate_limit_y_resultado_429_lanza_llm_rate_limited(monkeypatch):
+    messages = (_assistant("rate_limit"), _result_429())
+    original = ResultError("limite", data={"api_error_status": 429})
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=messages, raise_after=original),
+        raising=True,
+    )
+    with pytest.raises(LLMRateLimited) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert excinfo.value.api_error_status == 429
+
+
+@pytest.mark.anyio
+async def test_resultado_429_seguido_de_process_error_lanza_llm_rate_limited(monkeypatch):
+    original = ProcessError("Command failed", exit_code=1)
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_result_429(),), raise_after=original),
+        raising=True,
+    )
+    with pytest.raises(LLMRateLimited) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert excinfo.value.api_error_status == 429
+    assert excinfo.value.__cause__ is original
+    # los tokens ya gastados se conservan.
+    assert excinfo.value.tokens_in == 40
+    assert excinfo.value.tokens_out == 3
+
+
+@pytest.mark.anyio
+async def test_resultado_429_seguido_de_exception_pelada_lanza_llm_rate_limited(monkeypatch):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_result_429(),), raise_after=RuntimeError("otro mensaje")),
+        raising=True,
+    )
+    with pytest.raises(LLMRateLimited) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert excinfo.value.api_error_status == 429
+
+
+@pytest.mark.anyio
+async def test_assistant_rate_limit_con_resultado_de_error_sin_status_lanza_llm_rate_limited(
+    monkeypatch,
+):
+    messages = (_assistant("rate_limit"), _result_429(api_error_status=None))
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMRateLimited) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert excinfo.value.api_error_status is None
+
+
+@pytest.mark.anyio
+async def test_caso_10_30_authentication_failed_es_llm_error_a_secas(monkeypatch):
+    messages = (
+        _assistant("authentication_failed"),
+        make_result_message(is_error=True, result="Failed to authenticate"),
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMError
+
+
+@pytest.mark.anyio
+async def test_resultado_500_con_server_error_es_llm_error_a_secas(monkeypatch):
+    messages = (_assistant("server_error"), _result_429(api_error_status=500))
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMError
+    assert excinfo.value.api_error_status == 500
+
+
+@pytest.mark.anyio
+async def test_exito_tras_senales_de_limite_previas_devuelve_agent_result(
+    monkeypatch, provider_logs
+):
+    messages = (
+        _assistant("rate_limit"),
+        _rate_limit_event("rejected", "seven_day"),
+        make_result_message(usage={"input_tokens": 10, "output_tokens": 2}),
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    result = await AgentSDKProvider().run_agent(_request())
+    assert result.output_text == "resultado del agente"
+    assert (result.tokens_in, result.tokens_out) == (10, 2)
+    # en éxito no hay llm.call_failed.
+    assert _failure_records(provider_logs) == []
+
+
+@pytest.mark.anyio
+async def test_log_de_fallo_de_autenticacion_lleva_campos_y_no_contenido(
+    monkeypatch, provider_logs
+):
+    messages = (
+        _assistant("authentication_failed"),
+        make_result_message(
+            is_error=True,
+            result="Failed to authenticate. API Error: 401",
+            session_id="sesion-secreta",
+        ),
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMError):
+        await AgentSDKProvider().run_agent(_request(prompt="PROMPT-CONFIDENCIAL"))
+
+    records = _failure_records(provider_logs)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.levelno == logging.WARNING
+    assert rec.event == "llm.call_failed"
+    assert rec.role == "reader"
+    assert rec.item_id is None
+    assert rec.error_class == "LLMError"
+    assert rec.sdk_exception is None
+    assert rec.subtype == "success"
+    assert rec.is_error is True
+    assert rec.api_error_status is None
+    assert rec.assistant_error == "authentication_failed"
+    assert rec.rate_limit_status is None
+    assert rec.exit_code is None
+    rendered = " ".join(f"{k}={v}" for k, v in vars(rec).items())
+    assert "Failed to authenticate" not in rendered
+    assert "PROMPT-CONFIDENCIAL" not in rendered
+    assert "sesion-secreta" not in rendered
+    assert not hasattr(rec, "session_id")
+    assert not hasattr(rec, "result")
+
+
+@pytest.mark.anyio
+async def test_log_de_rate_limit_incluye_estado_y_tipo_del_evento(monkeypatch, provider_logs):
+    messages = (
+        _assistant("rate_limit"),
+        _rate_limit_event("rejected", "seven_day"),
+        _result_429(),
+    )
+    original = ProcessError("Command failed", exit_code=1, stderr="stderr-secreto")
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=messages, raise_after=original),
+        raising=True,
+    )
+    with pytest.raises(LLMRateLimited):
+        await AgentSDKProvider().run_agent(_request())
+
+    records = _failure_records(provider_logs)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.error_class == "LLMRateLimited"
+    assert rec.sdk_exception == "ProcessError"
+    assert rec.api_error_status == 429
+    assert rec.assistant_error == "rate_limit"
+    assert rec.rate_limit_status == "rejected"
+    assert rec.rate_limit_type == "seven_day"
+    assert rec.rate_limit_resets_at == 1_788_000_000
+    assert rec.exit_code == 1
+    rendered = " ".join(f"{k}={v}" for k, v in vars(rec).items())
+    assert "stderr-secreto" not in rendered
+    assert "hit your limit" not in rendered
+
+
+@pytest.mark.anyio
+async def test_resultado_ok_con_status_429_residual_y_process_error_no_es_limite(monkeypatch):
+    """`api_error_status` solo cuenta si el último resultado fue de error."""
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(
+            messages=(_result_429(is_error=False),),
+            raise_after=ProcessError("Command failed", exit_code=1),
+        ),
+        raising=True,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMError
+    assert excinfo.value.api_error_status is None
+
+
+@pytest.mark.anyio
+async def test_result_error_registra_llm_call_failed_sin_texto(monkeypatch, provider_logs):
+    result_error = ResultError(
+        "TEXTO-DEL-MODELO",
+        data={"api_error_status": 429, "usage": {"input_tokens": 5, "output_tokens": 1}},
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(), raise_after=result_error),
+        raising=True,
+    )
+    with pytest.raises(LLMRateLimited):
+        await AgentSDKProvider().run_agent(_request())
+
+    records = _failure_records(provider_logs)
+    assert len(records) == 1
+    assert records[0].error_class == "LLMRateLimited"
+    assert records[0].sdk_exception == "ResultError"
+    rendered = " ".join(f"{k}={v}" for k, v in vars(records[0]).items())
+    assert "TEXTO-DEL-MODELO" not in rendered

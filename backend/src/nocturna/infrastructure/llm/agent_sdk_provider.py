@@ -28,15 +28,29 @@ frontera.
   en snake_case) — pero hay que leerlas con `.get()` sobre un `dict`, no
   como atributos.
 - El SDK **sí** exporta señal de límite de tasa: `RateLimitEvent` y
-  `RateLimitInfo` están en `__all__` de `claude_agent_sdk/__init__.py` y se
-  definen en `types.py` con `status` (`allowed`/`allowed_warning`/
-  `rejected`), `utilization`, `resets_at` y `rate_limit_type`. El CLI los
-  emite como mensajes normales del mismo stream que recorre `run_agent`
-  (junto a `AssistantMessage`, `ResultMessage`, etc.), no como excepción.
-  Hoy el bucle de `run_agent` solo mira `isinstance(message, ResultMessage)`
-  y descarta cualquier otro tipo, `RateLimitEvent` incluido. No se captura
-  aquí a propósito: decidir la reacción (avisar, cortar, reintentar) es
-  alcance de T41/T44, no de T40 (ver `LLMRateLimited` en `domain/errors.py`).
+  `RateLimitInfo` (`status` `allowed`/`allowed_warning`/`rejected`,
+  `utilization`, `resets_at`, `rate_limit_type`). El CLI los emite como
+  mensajes normales del stream, no como excepción. `run_agent` guarda el
+  último y lo **registra** en `llm.call_failed`, pero no decide con él la
+  clase de la excepción (T111, ADR 0049): solo informa.
+
+**Fallos reales de límite y de autenticación (T111, diagnóstico de las
+noches 2026-10-29 y 2026-10-30).**
+
+- 2026-10-29 (límite semanal): el SDK emitió un `AssistantMessage`
+  sintético con `error="rate_limit"` y un `ResultMessage` con
+  `is_error=True` y `api_error_status=429`. Se reconoce como
+  `LLMRateLimited`.
+- 2026-10-30 (OAuth caducada): `AssistantMessage` con
+  `error="authentication_failed"` y ningún `api_error_status`. Es un
+  `LLMError` a secas: no es un límite de tasa y no debe cortar la noche
+  como tal.
+- Hueco corregido: si tras el `ResultMessage` con 429 llega otro mensaje
+  del CLI, el SDK lanza `ProcessError` (no `ResultError`), y las ramas
+  `except ClaudeSDKError`/`except Exception` no miraban
+  `last_result.api_error_status`. Ahora lo hacen y eligen la clase con
+  `_llm_error_class(status, assistant_error)`. Las señales solo cambian la
+  CLASE de un error que ya existe; nunca convierten un éxito en fallo.
 - `ResultMessage` no expone ningún id de modelo "efectivo" distinto del
   `model` que ya viaja en `AgentRequest`; no hay nada que decidir en el
   punto 9 del plan más allá de usar `request.model` tal cual.
@@ -104,7 +118,16 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultError, ResultMessage, query
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKError,
+    RateLimitEvent,
+    RateLimitInfo,
+    ResultError,
+    ResultMessage,
+    query,
+)
 
 from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRequest, AgentResult
@@ -116,19 +139,68 @@ _logger = logging.getLogger(__name__)
 RATE_LIMIT_STATUS = 429
 
 
-def _llm_error_class(status: int | None) -> type[LLMError]:
-    """Elige la excepción a lanzar según `api_error_status`.
+#: Valor de `AssistantMessage.error` con el que el SDK señala un límite de tasa.
+RATE_LIMIT_ASSISTANT_ERROR = "rate_limit"
+
+
+def _llm_error_class(status: int | None, assistant_error: str | None = None) -> type[LLMError]:
+    """Elige la excepción a lanzar según `api_error_status` y `AssistantMessage.error`.
 
     `LLMRateLimited` (subclase de `LLMError`, `domain/errors.py`) señala un
-    límite de tasa (`status == 429`); cualquier otro código, o su ausencia,
-    usa `LLMError` sin más. Quien capture `LLMError` sigue atrapando ambas
-    (`budget-guard-review` § 6: un límite de tasa termina la noche, no se
-    reintenta; esa reacción es del consumidor, T44 — este proveedor solo da
-    la señal tipada).
+    límite de tasa: `status == 429` o `assistant_error == "rate_limit"`;
+    cualquier otra cosa usa `LLMError` sin más (p. ej.
+    `authentication_failed`). Sin comparar textos. Quien capture `LLMError`
+    sigue atrapando ambas (`budget-guard-review` § 6: un límite de tasa
+    termina la noche, no se reintenta; esa reacción es del consumidor,
+    T44 — este proveedor solo da la señal tipada).
     """
-    if status == RATE_LIMIT_STATUS:
+    if status == RATE_LIMIT_STATUS or assistant_error == RATE_LIMIT_ASSISTANT_ERROR:
         return LLMRateLimited
     return LLMError
+
+
+def _failed_status(last_result: ResultMessage | None) -> int | None:
+    """`api_error_status` del último resultado, solo si fue un resultado de error."""
+    if last_result is not None and last_result.is_error:
+        return last_result.api_error_status
+    return None
+
+
+def _log_call_failure(
+    request: AgentRequest,
+    *,
+    error_class: type[LLMError],
+    sdk_exc: BaseException | None,
+    last_result: ResultMessage | None,
+    assistant_error: str | None,
+    rate_limit_info: RateLimitInfo | None,
+) -> None:
+    """Un `llm.call_failed` (WARNING) por fallo, solo con campos estructurados.
+
+    Nunca se vuelcan `result`, `errors[]`, `stderr`, `session_id`, el
+    prompt ni `str(exc)`: pueden llevar texto del modelo o del abstract.
+    """
+    _logger.warning(
+        "llm.call_failed",
+        extra={
+            "event": "llm.call_failed",
+            "role": request.role.value,
+            "item_id": str(request.item_id) if request.item_id is not None else None,
+            "error_class": error_class.__name__,
+            "sdk_exception": type(sdk_exc).__name__ if sdk_exc is not None else None,
+            "subtype": getattr(last_result, "subtype", None),
+            "is_error": getattr(last_result, "is_error", None),
+            "api_error_status": getattr(last_result, "api_error_status", None),
+            "terminal_reason": getattr(last_result, "terminal_reason", None),
+            "assistant_error": assistant_error,
+            "rate_limit_status": getattr(rate_limit_info, "status", None),
+            "rate_limit_type": getattr(rate_limit_info, "rate_limit_type", None),
+            "rate_limit_resets_at": getattr(rate_limit_info, "resets_at", None),
+            "exit_code": exit_code
+            if isinstance(exit_code := getattr(sdk_exc, "exit_code", None), int)
+            else None,
+        },
+    )
 
 
 #: Variables de entorno que este proveedor nunca tolera. Solo
@@ -593,6 +665,8 @@ class AgentSDKProvider:
         # este punto (acumular en vez de sobreescribir) antes de activar
         # herramientas o servidores MCP para algún rol.
         last_result: ResultMessage | None = None
+        assistant_error: str | None = None
+        rate_limit_info: RateLimitInfo | None = None
         in_flight_exception = False
         agen = query(prompt=request.prompt, options=options)
         try:
@@ -600,6 +674,15 @@ class AgentSDKProvider:
                 async for message in agen:
                     if isinstance(message, ResultMessage):
                         last_result = message
+                    elif isinstance(message, AssistantMessage):
+                        # Último error no nulo. Con `tools=[]` hay un solo
+                        # turno; si se activan herramientas o MCP, una señal
+                        # de un turno anterior podría reclasificar un fallo
+                        # posterior: revisarlo entonces (como `last_result`).
+                        if message.error is not None:
+                            assistant_error = message.error
+                    elif isinstance(message, RateLimitEvent):
+                        rate_limit_info = message.rate_limit_info
         except TimeoutError as exc:
             in_flight_exception = True
             tokens_in, tokens_out = _extract_tokens(
@@ -614,12 +697,28 @@ class AgentSDKProvider:
                 # no respondió en Ns", así que no se traduce a
                 # `LLMTimeout`: se trata como cualquier otra excepción no
                 # reconocida.
+                _log_call_failure(
+                    request,
+                    error_class=LLMError,
+                    sdk_exc=exc,
+                    last_result=last_result,
+                    assistant_error=assistant_error,
+                    rate_limit_info=rate_limit_info,
+                )
                 raise LLMError(
                     f"el agente '{request.role.value}' falló con un TimeoutError "
                     f"ajeno al deadline de {request.timeout_s}s: {exc}",
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                 ) from exc
+            _log_call_failure(
+                request,
+                error_class=LLMTimeout,
+                sdk_exc=None,
+                last_result=last_result,
+                assistant_error=assistant_error,
+                rate_limit_info=rate_limit_info,
+            )
             raise LLMTimeout(
                 f"el agente '{request.role.value}' no respondió en {request.timeout_s}s",
                 tokens_in=tokens_in,
@@ -661,7 +760,16 @@ class AgentSDKProvider:
                 if exc.api_error_status is not None
                 else ""
             )
-            raise _llm_error_class(exc.api_error_status)(
+            error_class = _llm_error_class(exc.api_error_status, assistant_error)
+            _log_call_failure(
+                request,
+                error_class=error_class,
+                sdk_exc=exc,
+                last_result=last_result,
+                assistant_error=assistant_error,
+                rate_limit_info=rate_limit_info,
+            )
+            raise error_class(
                 f"el agente '{request.role.value}' falló: {exc}{status_suffix}",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
@@ -673,10 +781,21 @@ class AgentSDKProvider:
                 usage=last_result.usage if last_result is not None else None,
                 model_usage=last_result.model_usage if last_result is not None else None,
             )
-            raise LLMError(
+            status = _failed_status(last_result)
+            error_class = _llm_error_class(status, assistant_error)
+            _log_call_failure(
+                request,
+                error_class=error_class,
+                sdk_exc=exc,
+                last_result=last_result,
+                assistant_error=assistant_error,
+                rate_limit_info=rate_limit_info,
+            )
+            raise error_class(
                 f"el agente '{request.role.value}' falló: {exc}",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
+                api_error_status=status,
             ) from exc
         except Exception as exc:
             in_flight_exception = True
@@ -684,11 +803,22 @@ class AgentSDKProvider:
                 usage=last_result.usage if last_result is not None else None,
                 model_usage=last_result.model_usage if last_result is not None else None,
             )
-            raise LLMError(
+            status = _failed_status(last_result)
+            error_class = _llm_error_class(status, assistant_error)
+            _log_call_failure(
+                request,
+                error_class=error_class,
+                sdk_exc=exc,
+                last_result=last_result,
+                assistant_error=assistant_error,
+                rate_limit_info=rate_limit_info,
+            )
+            raise error_class(
                 f"el agente '{request.role.value}' falló con una excepción del SDK "
                 f"no traducida ({type(exc).__name__}): {exc}",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
+                api_error_status=status,
             ) from exc
         finally:
             try:
@@ -709,7 +839,18 @@ class AgentSDKProvider:
 
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
+        def _log_post(error_class: type[LLMError]) -> None:
+            _log_call_failure(
+                request,
+                error_class=error_class,
+                sdk_exc=None,
+                last_result=last_result,
+                assistant_error=assistant_error,
+                rate_limit_info=rate_limit_info,
+            )
+
         if last_result is None:
+            _log_post(LLMError)
             raise LLMError(f"el agente '{request.role.value}' terminó sin emitir ResultMessage")
         if last_result.subtype != "success" or last_result.is_error:
             tokens_in, tokens_out = _extract_tokens(
@@ -720,7 +861,9 @@ class AgentSDKProvider:
                 if last_result.api_error_status is not None
                 else ""
             )
-            raise _llm_error_class(last_result.api_error_status)(
+            error_class = _llm_error_class(last_result.api_error_status, assistant_error)
+            _log_post(error_class)
+            raise error_class(
                 f"el agente '{request.role.value}' terminó con "
                 f"subtype='{last_result.subtype}', is_error={last_result.is_error}"
                 f"{status_suffix}",
@@ -732,6 +875,7 @@ class AgentSDKProvider:
             tokens_in, tokens_out = _extract_tokens(
                 usage=last_result.usage, model_usage=last_result.model_usage
             )
+            _log_post(LLMError)
             raise LLMError(
                 f"el agente '{request.role.value}' terminó con subtype='success' "
                 f"pero terminal_reason='{last_result.terminal_reason}': la salida "
@@ -756,6 +900,7 @@ class AgentSDKProvider:
             # ocurrió. `tokens_in`/`tokens_out` son 0 aquí por construcción
             # (ambas fuentes vacías), se pasan igual que en las otras ramas
             # para mantener la forma uniforme.
+            _log_post(LLMError)
             raise LLMError(
                 f"el agente '{request.role.value}' terminó con éxito pero sin 'usage' "
                 "ni 'model_usage': no se puede contabilizar el gasto",
@@ -763,6 +908,7 @@ class AgentSDKProvider:
                 tokens_out=tokens_out,
             )
         if last_result.result is None:
+            _log_post(LLMError)
             raise LLMError(
                 f"el agente '{request.role.value}' terminó con éxito pero sin texto de salida",
                 tokens_in=tokens_in,
