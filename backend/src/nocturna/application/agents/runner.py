@@ -4,9 +4,10 @@ Refactor de T42. Extrae, generalizado por `role`, las ~170 líneas que antes
 vivían en `ReadItem.__call__` y sus tres helpers de contabilización, que no
 tienen nada que ver con "leer un `Item`": el bucle de intentos, la unidad de
 trabajo de `authorize` + `timeout_for_call` + lectura de `run_id`, la guarda
-`timeout_s <= 0`, los `except LLMRateLimited` / `LLMTimeout` / `LLMError` /
-`CancelledError` en su orden actual, y el registro de `AgentCall` en sus tres
-variantes (éxito, salida inválida, fallo terminal). Nada de esto sabe qué es
+`timeout_s <= 0`, los `except LLMAuthenticationFailed` / `LLMRateLimited` /
+`LLMTimeout` / `LLMError` / `CancelledError` en su orden actual, y el
+registro de `AgentCall` en sus tres variantes (éxito, salida inválida, fallo
+terminal). Nada de esto sabe qué es
 un `Item`, un `Reading` ni un `ItemStatus` -- ver la sección "Qué NO hace" más
 abajo --, así que sirve igual para `PopularizeReading` (siguiente paso) y
 `EditNight` (T43) sin que ninguno de los tres tenga que reinventar el patrón
@@ -58,7 +59,13 @@ from uuid import UUID
 from nocturna.application.agents.parsing import InvalidAgentOutput
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.domain.entities import AgentCall, AgentCallStatus
-from nocturna.domain.errors import InvariantViolation, LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import (
+    InvariantViolation,
+    LLMAuthenticationFailed,
+    LLMError,
+    LLMRateLimited,
+    LLMTimeout,
+)
 from nocturna.domain.llm import AgentRequest, AgentResult, AgentRole, LLMProvider
 
 _logger = logging.getLogger(__name__)
@@ -78,6 +85,7 @@ class AttemptOutcome(StrEnum):
     AGENT_ERROR = "agent_error"
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
+    AUTH_FAILED = "auth_failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +227,19 @@ class AgentRunner:
             started_at = monotonic()
             try:
                 result = await self._provider.run_agent(request)
+            except LLMAuthenticationFailed as exc:
+                # T112: sesión caducada; terminal, sin reintento.
+                return self._record_terminal_failure(
+                    run_id=run_id,
+                    item_id=item_id,
+                    tokens_in=exc.tokens_in,
+                    tokens_out=exc.tokens_out,
+                    duration_ms=_duration_ms(started_at),
+                    status=AgentCallStatus.ERROR,
+                    outcome=AttemptOutcome.AUTH_FAILED,
+                    attempt=attempt,
+                    tokens_spent=tokens_spent,
+                )
             except LLMRateLimited as exc:
                 # Antes que LLMError (de la que es subclase): un límite de
                 # tasa termina la noche, no se reintenta

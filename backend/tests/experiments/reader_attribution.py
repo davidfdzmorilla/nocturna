@@ -487,6 +487,8 @@ async def run_attribution(runner: AgentRunner, items: Sequence[Item]) -> list[At
 
         if runner_result.outcome is AttemptOutcome.RATE_LIMITED:
             stop_reason = "no ejecutado: límite de tasa alcanzado en el ítem anterior"
+        elif runner_result.outcome is AttemptOutcome.AUTH_FAILED:
+            stop_reason = "no ejecutado: sesión de Claude caducada en el ítem anterior"
 
     return records
 

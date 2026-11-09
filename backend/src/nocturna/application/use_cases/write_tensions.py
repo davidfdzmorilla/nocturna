@@ -67,6 +67,7 @@ class WriteOutcome(StrEnum):
     AGENT_ERROR = "agent_error"
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
+    AUTH_FAILED = "auth_failed"
 
 
 OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, WriteOutcome] = {
@@ -75,6 +76,7 @@ OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, WriteOutcome] = {
     AttemptOutcome.AGENT_ERROR: WriteOutcome.AGENT_ERROR,
     AttemptOutcome.TIMEOUT: WriteOutcome.TIMEOUT,
     AttemptOutcome.RATE_LIMITED: WriteOutcome.RATE_LIMITED,
+    AttemptOutcome.AUTH_FAILED: WriteOutcome.AUTH_FAILED,
 }
 
 

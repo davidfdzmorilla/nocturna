@@ -302,3 +302,38 @@ def test_noche_del_30_de_octubre_es_cortacircuitos_y_no_limite_de_uso():
 
     assert result.causes == (NightCause.CIRCUIT_BREAKER,)
     assert NightCause.RATE_LIMITED not in result.causes
+
+
+# --- T112: sesión de Claude caducada ----------------------------------------------------
+
+
+def test_t112_auth_failed_reader_es_auth_failed_con_el_rol_en_el_detalle():
+    result = classify_night(_evidence(RunStatus.PARTIAL, _notes("auth_failed_reader")))
+
+    assert result.causes == (NightCause.AUTH_FAILED,)
+    assert result.detail == "reader"
+
+
+def test_t112_auth_failed_con_ingesta_caida_da_auth_failed_y_arxiv():
+    notes = _notes("auth_failed_reader", ingest="error:ArxivUnavailable")
+
+    result = classify_night(_evidence(RunStatus.PARTIAL, notes))
+
+    assert result.causes == (NightCause.AUTH_FAILED, NightCause.ARXIV_UNAVAILABLE)
+    assert result.detail == "reader"
+
+
+def test_t112_auth_failed_editor_es_auth_failed_y_no_editor_failed():
+    result = classify_night(_evidence(RunStatus.PARTIAL, _notes("auth_failed_editor")))
+
+    assert result.causes == (NightCause.AUTH_FAILED,)
+    assert NightCause.EDITOR_FAILED not in result.causes
+
+
+def test_t112_el_cortacircuitos_sigue_siendo_cortacircuitos():
+    result = classify_night(
+        _evidence(RunStatus.PARTIAL, _notes("circuit_breaker_reader"), failed_calls=5)
+    )
+
+    assert result.causes == (NightCause.CIRCUIT_BREAKER,)
+    assert NightCause.AUTH_FAILED not in result.causes

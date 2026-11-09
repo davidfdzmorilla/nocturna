@@ -342,6 +342,8 @@ El envoltorio propaga los códigos de `nocturna run-night` (0–8) sin modificar
 | 76 | Ya se lanzó una ejecución esta noche (centinela del fichero) | Normal si `launchd` se dispara dos veces por error (rarísimo). Borrar el centinela solo si estás seguro de que no hay un `run-night` en vuelo. Regla de noches fallidas: nunca relanzar en la misma ventana. |
 | 77 | Entorno o configuración inválidos: `uv` o `claude` no resolubles en `PATH`, o `NOCTURNA_WAIT_S`/`NOCTURNA_LOG_DIR` mal formadas | Verificar las variables si las definiste y que `uv` y `claude` se resuelven. Ocurre **antes** de crear el centinela y de tocar Docker: cero gasto, noche aún disponible. Arreglado el problema, esperar a mañana noche. |
 
+**Sesión de Claude caducada (`auth_failed_<rol>`, T112, [ADR 0050](adr/0050-sesion-del-cli-caducada-causa-propia-y-aviso.md))**: la noche sale con código 7 (`PARTIAL`) y el informe matinal dice «sesión de Claude caducada (<rol>) · renueva la sesión: claude /login». La noche se corta en la primera llamada fallida. Qué hacer: ejecutar `claude /login` en el Mac y comprobar que `claude` responde. **No relanzar** en la misma ventana (regla de noches fallidas); la noche siguiente abre un `Run` nuevo. Una noche `circuit_breaker` anterior a T112 con autenticación caducada (como el 2026-10-30) sigue así en el informe.
+
 #### Paso 6: Comprender los logs
 
 El envoltorio genera dos ficheros por noche (fuera del repo):

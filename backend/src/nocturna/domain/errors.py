@@ -119,6 +119,15 @@ class LLMError(DomainError):
         self.api_error_status = api_error_status
 
 
+class LLMAuthenticationFailed(LLMError):
+    """La sesión OAuth del CLI de Claude Code no es válida (T112).
+
+    Hermana de `LLMRateLimited`: `AgentSDKProvider` la lanza cuando el SDK
+    señala `authentication_failed`. Reintentar no sirve; hay que renovar la
+    sesión (`claude /login`).
+    """
+
+
 class LLMRateLimited(LLMError):
     """El proveedor LLM ha rechazado la llamada por límite de tasa.
 

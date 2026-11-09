@@ -77,7 +77,7 @@ from nocturna import cli
 from nocturna.application.agents.prompt_loader import EDITOR_PROMPT_VERSION
 from nocturna.cli import main
 from nocturna.domain.entities import AgentCall, AgentCallStatus, ItemStatus, Run, RunStatus
-from nocturna.domain.errors import LLMError
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError
 from nocturna.domain.llm import AgentRole
 from nocturna.infrastructure.config import load_pipeline_config
 from nocturna.infrastructure.db.models import AgentCallRow, FindingRow, ItemRow, ReadingRow, RunRow
@@ -954,3 +954,29 @@ def test_item_astro_ph_ep_con_presupuesto_entre_v2_y_v3_se_deniega_sin_llamar_al
         "'_finish_run' solo se llama si 'not run_reused' -- así que la denegación de "
         "BudgetGuard no debe tocar su estado"
     )
+
+
+# --- T112: sesión de Claude caducada en el Reader: código 1, stderr con auth_failed ---
+
+
+def test_sesion_caducada_en_el_reader_devuelve_1_y_nombra_auth_failed_en_stderr(
+    db_session_factory: object,
+    fake_provider: FakeLLMProvider,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_provider.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=40, tokens_out=3),
+    )
+    item_id = _seed_item(db_session_factory)
+
+    code = main(["run-item", str(item_id)])
+
+    assert code == 1
+    assert "auth_failed" in capsys.readouterr().err
+    assert len(fake_provider.calls) == 1, "sin reintento ni Popularizer"
+    assert _item_status(db_session_factory, item_id) is ItemStatus.NEW
+    assert _all_readings(db_session_factory) == []
+    calls = _all_agent_calls(db_session_factory)
+    assert len(calls) == 1 and calls[0].status is AgentCallStatus.ERROR
+    assert (calls[0].tokens_in, calls[0].tokens_out) == (40, 3)

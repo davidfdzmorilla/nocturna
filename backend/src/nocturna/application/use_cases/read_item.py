@@ -142,6 +142,7 @@ class ReadOutcome(StrEnum):
     AGENT_ERROR = "agent_error"
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
+    AUTH_FAILED = "auth_failed"
 
 
 #: Traduce el vocabulario general de `AgentRunner` (`AttemptOutcome`) al
@@ -153,6 +154,7 @@ _OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, ReadOutcome] = {
     AttemptOutcome.AGENT_ERROR: ReadOutcome.AGENT_ERROR,
     AttemptOutcome.TIMEOUT: ReadOutcome.TIMEOUT,
     AttemptOutcome.RATE_LIMITED: ReadOutcome.RATE_LIMITED,
+    AttemptOutcome.AUTH_FAILED: ReadOutcome.AUTH_FAILED,
 }
 
 

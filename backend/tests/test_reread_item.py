@@ -37,7 +37,7 @@ from nocturna.application.use_cases.read_item import (
     reread_refusal,
 )
 from nocturna.domain.entities import AgentCallStatus, Item, ItemStatus, Reading, Run
-from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -301,6 +301,7 @@ async def test_json_invalido_dos_veces_no_cambia_nada_ni_marca_failed(status):
     [
         (LLMTimeout("t"), ReadOutcome.TIMEOUT, AgentCallStatus.TIMEOUT),
         (LLMRateLimited("r"), ReadOutcome.RATE_LIMITED, AgentCallStatus.ERROR),
+        (LLMAuthenticationFailed("a"), ReadOutcome.AUTH_FAILED, AgentCallStatus.ERROR),
         (LLMError("e"), ReadOutcome.AGENT_ERROR, AgentCallStatus.ERROR),
     ],
 )

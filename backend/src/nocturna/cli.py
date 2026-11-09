@@ -25,7 +25,7 @@ composition root, y en ningún otro sitio.
 Códigos de salida de `run-item`: `0` noche completa (el Editor se ejecutó
 -- con o sin publicaciones -- o no había ningún candidato que ofrecerle),
 `1` lectura fallida (JSON inválido agotado tras los reintentos, un
-`LLMTimeout`/`LLMRateLimited` o cualquier otro `LLMError` del proveedor --
+`LLMTimeout`/`LLMRateLimited`/`LLMAuthenticationFailed` o cualquier otro `LLMError` del proveedor --
 `ReadItem` (T41) captura los tres y los traduce a `ReadItemResult.outcome`;
 ninguno llega a `cli.py` como excepción, ver `_read_one_item`), `2` UUID de
 `item_id` mal formado (lo produce `argparse` al fallar la conversión de

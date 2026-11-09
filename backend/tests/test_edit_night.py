@@ -45,7 +45,7 @@ from nocturna.domain.entities import (
     ItemStatus,
     Run,
 )
-from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -659,12 +659,17 @@ async def test_agent_request_contrato_role_model_item_id_system_prompt_y_sin_niv
             AgentCallStatus.ERROR,
         ),
         (
+            LLMAuthenticationFailed("sesión caducada", tokens_in=800, tokens_out=50),
+            EditOutcome.AUTH_FAILED,
+            AgentCallStatus.ERROR,
+        ),
+        (
             LLMError("fallo genérico del agente", tokens_in=800, tokens_out=50),
             EditOutcome.AGENT_ERROR,
             AgentCallStatus.ERROR,
         ),
     ],
-    ids=["timeout", "rate_limited", "agent_error"],
+    ids=["timeout", "rate_limited", "auth_failed", "agent_error"],
 )
 async def test_fallo_transitorio_del_proveedor_no_reintenta_ni_publica_nada(
     error, expected_outcome, expected_call_status

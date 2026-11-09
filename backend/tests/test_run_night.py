@@ -73,7 +73,7 @@ from nocturna.application.use_cases.popularize_reading import PopularizeReading
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem
 from nocturna.application.use_cases.run_night import RunNight, RunNightResult
 from nocturna.domain.entities import AgentCall, AgentCallStatus, ItemStatus, RunStatus
-from nocturna.domain.errors import LLMError, LLMRateLimited
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError, LLMRateLimited
 from nocturna.domain.llm import AgentRequest, AgentResult, AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -1034,3 +1034,156 @@ async def test_no_candidates_tras_descartar_todo_cierra_completed_con_coste_cero
     assert result.status is RunStatus.COMPLETED
     assert result.findings_published == 0
     assert "end=no_candidates" in result.notes
+
+
+# --- T112: sesión de Claude caducada (LLMAuthenticationFailed) ---------------
+
+
+def _ingest_of(items: list) -> IngestResult:
+    return IngestResult(
+        fetched=len(items), new=len(items), duplicates=0, skipped=0, truncated=False, items=items
+    )
+
+
+def _spy_measurement_findings(monkeypatch) -> list[bool]:
+    ran: list[bool] = []
+
+    def _spy(self) -> None:
+        ran.append(True)
+
+    monkeypatch.setattr(RunNight, "_phase_measurement_findings", _spy)
+    return ran
+
+
+def _roles_called(fake: FakeLLMProvider) -> list[AgentRole]:
+    return [call.role for call in fake.calls]
+
+
+async def test_t112_auth_failed_en_el_primer_reader_corta_la_noche_entera_regresion_10_30(
+    monkeypatch,
+):
+    """Regresión de la noche del 10-30: antes, con `max_consecutive_failures=5`,
+    el Reader seguía llamando al proveedor con la sesión caducada hasta el
+    cortacircuitos y la noche se explicaba como un fallo genérico."""
+    ran_measurements = _spy_measurement_findings(monkeypatch)
+    items = [make_item() for _ in range(4)]
+    env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=40, tokens_out=3),
+    )
+    run_night = make_run_night(
+        env=env, provider=fake, ingest_result=_ingest_of(items), max_consecutive_failures=5
+    )
+
+    result = await run_night()
+
+    assert _roles_called(fake) == [AgentRole.READER], "exactamente una llamada al proveedor"
+    assert ran_measurements == [], "los hallazgos de medida no se ejecutan"
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_reader" in result.notes
+    assert "circuit_breaker" not in result.notes
+    assert result.items_failed == 1
+    assert all(item.status is ItemStatus.NEW for item in items)
+
+
+async def test_t112_auth_failed_en_el_tercer_reader_no_llama_al_popularizer_con_lecturas_previas():
+    items = [make_item() for _ in range(3)]
+    env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    for _ in range(2):
+        fake.respond(
+            AgentRole.READER,
+            json=valid_reading_json(interest_score=5),
+            tokens_in=100,
+            tokens_out=10,
+        )
+    fake.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=40, tokens_out=3),
+    )
+    run_night = make_run_night(env=env, provider=fake, ingest_result=_ingest_of(items))
+
+    result = await run_night()
+
+    assert _roles_called(fake) == [AgentRole.READER] * 3
+    assert result.items_read == 2
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_reader" in result.notes
+
+
+async def test_t112_auth_failed_en_el_popularizer_corta_candidatos_redactor_y_editor(
+    monkeypatch,
+):
+    ran_measurements = _spy_measurement_findings(monkeypatch)
+    items = [make_item() for _ in range(2)]
+    env = Environment(items=items, policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    for _ in range(2):
+        fake.respond(
+            AgentRole.READER,
+            json=valid_reading_json(interest_score=5),
+            tokens_in=100,
+            tokens_out=10,
+        )
+    fake.fail(
+        AgentRole.POPULARIZER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=50, tokens_out=5),
+    )
+    run_night = make_run_night(env=env, provider=fake, ingest_result=_ingest_of(items))
+
+    result = await run_night()
+
+    assert _roles_called(fake) == [AgentRole.READER, AgentRole.READER, AgentRole.POPULARIZER]
+    assert ran_measurements == []
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_popularizer" in result.notes
+
+
+async def test_t112_auth_failed_en_el_editor_da_auth_failed_editor_y_no_editor_auth_failed():
+    item = make_item()
+    env = Environment(items=[item], policy=make_policy(), now=WITHIN_WINDOW)
+    fake = FakeLLMProvider()
+    fake.respond(AgentRole.READER, json=valid_reading_json(), tokens_in=100, tokens_out=10)
+    fake.respond(
+        AgentRole.POPULARIZER, json=_valid_popularizer_json(), tokens_in=100, tokens_out=10
+    )
+    fake.fail(
+        AgentRole.EDITOR,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=60, tokens_out=6),
+    )
+    run_night = make_run_night(env=env, provider=fake, ingest_result=_ingest_of([item]))
+
+    result = await run_night()
+
+    assert _roles_called(fake).count(AgentRole.EDITOR) == 1, "el Editor no se reintenta"
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_editor" in result.notes
+    assert "editor_auth_failed" not in result.notes
+    assert result.findings_published == 0
+
+
+def test_t112_stop_on_auth_failure_no_cambia_el_motivo_de_una_noche_killed():
+    env = Environment(items=[], policy=make_policy(), now=WITHIN_WINDOW)
+    run_night = make_run_night(env=env, provider=FakeLLMProvider(), ingest_result=_ingest_of([]))
+    run_night._status = RunStatus.KILLED
+    run_night._end_reason = "hard_stop"
+
+    run_night._stop_on_auth_failure("reader")
+
+    assert run_night._status is RunStatus.KILLED
+    assert run_night._end_reason == "hard_stop"
+    assert run_night._auth_failed and run_night._skip_editor
+
+
+def test_t112_stop_on_auth_failure_sustituye_un_motivo_partial_previo():
+    env = Environment(items=[], policy=make_policy(), now=WITHIN_WINDOW)
+    run_night = make_run_night(env=env, provider=FakeLLMProvider(), ingest_result=_ingest_of([]))
+    run_night._status = RunStatus.PARTIAL
+    run_night._end_reason = "ingest_error"
+
+    run_night._stop_on_auth_failure("popularizer")
+
+    assert run_night._status is RunStatus.PARTIAL
+    assert run_night._end_reason == "auth_failed_popularizer"

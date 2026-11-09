@@ -31,7 +31,7 @@ from helpers.sdk_doubles import (
     make_result_message,
 )
 
-from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRequest, AgentRole
 from nocturna.infrastructure.llm import agent_sdk_provider
 from nocturna.infrastructure.llm.agent_sdk_provider import AgentSDKProvider, _llm_error_class
@@ -775,7 +775,7 @@ def _failure_records(handler: _Capture) -> list[logging.LogRecord]:
 
 def test_llm_error_class_con_assistant_error_rate_limit_devuelve_llm_rate_limited():
     assert _llm_error_class(None, "rate_limit") is LLMRateLimited
-    assert _llm_error_class(None, "authentication_failed") is LLMError
+    assert _llm_error_class(None, "authentication_failed") is LLMAuthenticationFailed
     assert _llm_error_class(500, "server_error") is LLMError
 
 
@@ -839,7 +839,7 @@ async def test_assistant_rate_limit_con_resultado_de_error_sin_status_lanza_llm_
 
 
 @pytest.mark.anyio
-async def test_caso_10_30_authentication_failed_es_llm_error_a_secas(monkeypatch):
+async def test_caso_10_30_authentication_failed_lanza_llm_authentication_failed(monkeypatch):
     messages = (
         _assistant("authentication_failed"),
         make_result_message(is_error=True, result="Failed to authenticate"),
@@ -847,9 +847,9 @@ async def test_caso_10_30_authentication_failed_es_llm_error_a_secas(monkeypatch
     monkeypatch.setattr(
         agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
     )
-    with pytest.raises(LLMError) as excinfo:
+    with pytest.raises(LLMAuthenticationFailed) as excinfo:
         await AgentSDKProvider().run_agent(_request())
-    assert type(excinfo.value) is LLMError
+    assert type(excinfo.value) is LLMAuthenticationFailed
 
 
 @pytest.mark.anyio
@@ -898,7 +898,7 @@ async def test_log_de_fallo_de_autenticacion_lleva_campos_y_no_contenido(
     monkeypatch.setattr(
         agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
     )
-    with pytest.raises(LLMError):
+    with pytest.raises(LLMAuthenticationFailed):
         await AgentSDKProvider().run_agent(_request(prompt="PROMPT-CONFIDENCIAL"))
 
     records = _failure_records(provider_logs)
@@ -908,7 +908,7 @@ async def test_log_de_fallo_de_autenticacion_lleva_campos_y_no_contenido(
     assert rec.event == "llm.call_failed"
     assert rec.role == "reader"
     assert rec.item_id is None
-    assert rec.error_class == "LLMError"
+    assert rec.error_class == "LLMAuthenticationFailed"
     assert rec.sdk_exception is None
     assert rec.subtype == "success"
     assert rec.is_error is True
@@ -996,3 +996,227 @@ async def test_result_error_registra_llm_call_failed_sin_texto(monkeypatch, prov
     assert records[0].sdk_exception == "ResultError"
     rendered = " ".join(f"{k}={v}" for k, v in vars(records[0]).items())
     assert "TEXTO-DEL-MODELO" not in rendered
+
+
+# --- T112: sesión caducada (authentication_failed) -> LLMAuthenticationFailed ---
+
+
+def _auth_result(**overrides: object) -> ResultMessage:
+    kwargs: dict[str, object] = dict(
+        is_error=True,
+        api_error_status=None,
+        result="Failed to authenticate",
+        usage={"input_tokens": 40, "output_tokens": 3},
+    )
+    kwargs.update(overrides)
+    return make_result_message(**kwargs)  # type: ignore[arg-type]
+
+
+_AUTH_BRANCHES = {
+    "final_del_bucle": dict(messages=(_assistant("authentication_failed"), _auth_result())),
+    "result_error": dict(
+        messages=(_assistant("authentication_failed"), _auth_result()),
+        raise_after=ResultError("fallo", data={"api_error_status": None}),
+    ),
+    "claude_sdk_error": dict(
+        messages=(_assistant("authentication_failed"), _auth_result()),
+        raise_after=ClaudeSDKError("transporte"),
+    ),
+    "process_error": dict(
+        messages=(_assistant("authentication_failed"), _auth_result()),
+        raise_after=ProcessError("Command failed", exit_code=1),
+    ),
+    "exception_generica": dict(
+        messages=(_assistant("authentication_failed"), _auth_result()),
+        raise_after=RuntimeError("otro"),
+    ),
+    "last_result_none": dict(messages=(_assistant("authentication_failed"),)),
+    "timeout_error_ajeno": dict(
+        messages=(_assistant("authentication_failed"), _auth_result()),
+        raise_after=TimeoutError("socket"),
+    ),
+}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("branch", list(_AUTH_BRANCHES))
+async def test_authentication_failed_lanza_llm_authentication_failed_en_cada_rama(
+    monkeypatch, branch
+):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(**_AUTH_BRANCHES[branch]),  # type: ignore[arg-type]
+        raising=True,
+    )
+    with pytest.raises(LLMAuthenticationFailed) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    exc = excinfo.value
+    assert type(exc) is LLMAuthenticationFailed
+    assert isinstance(exc, LLMError)
+    assert not isinstance(exc, LLMRateLimited)
+    if branch != "last_result_none":
+        # los tokens ya gastados se conservan.
+        assert (exc.tokens_in, exc.tokens_out) == (40, 3)
+
+
+@pytest.mark.anyio
+async def test_authentication_failed_conserva_los_tokens_y_es_instancia_de_llm_error(monkeypatch):
+    messages = (_assistant("authentication_failed"), _auth_result())
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert isinstance(excinfo.value, LLMAuthenticationFailed)
+    assert (excinfo.value.tokens_in, excinfo.value.tokens_out) == (40, 3)
+
+
+@pytest.mark.anyio
+async def test_authentication_failed_con_429_gana_llm_authentication_failed(monkeypatch):
+    messages = (_assistant("authentication_failed"), _result_429())
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMAuthenticationFailed) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMAuthenticationFailed
+    assert excinfo.value.api_error_status == 429
+
+
+@pytest.mark.anyio
+async def test_exito_con_assistant_error_authentication_failed_no_lanza_y_conserva_tokens(
+    monkeypatch, provider_logs
+):
+    messages = (
+        _assistant("authentication_failed"),
+        make_result_message(usage={"input_tokens": 10, "output_tokens": 2}),
+    )
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    result = await AgentSDKProvider().run_agent(_request())
+    assert (result.tokens_in, result.tokens_out) == (10, 2)
+    assert _failure_records(provider_logs) == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("branch", list(_AUTH_BRANCHES))
+async def test_llm_call_failed_de_autenticacion_nombra_la_clase_y_no_vuelca_el_texto(
+    monkeypatch, provider_logs, branch
+):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(**_AUTH_BRANCHES[branch]),  # type: ignore[arg-type]
+        raising=True,
+    )
+    with pytest.raises(LLMAuthenticationFailed) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    records = _failure_records(provider_logs)
+    assert len(records) == 1
+    assert records[0].error_class == "LLMAuthenticationFailed"
+    assert records[0].assistant_error == "authentication_failed"
+    rendered = " ".join(f"{k}={v}" for k, v in vars(records[0]).items())
+    assert str(excinfo.value) not in rendered
+
+
+@pytest.mark.parametrize(
+    ("status", "assistant_error", "expected"),
+    [
+        (None, "authentication_failed", LLMAuthenticationFailed),
+        (429, "authentication_failed", LLMAuthenticationFailed),
+        (500, "authentication_failed", LLMAuthenticationFailed),
+        (429, "rate_limit", LLMRateLimited),
+        (429, None, LLMRateLimited),
+        (None, "rate_limit", LLMRateLimited),
+        (500, "server_error", LLMError),
+        (None, None, LLMError),
+        (401, None, LLMError),
+        (None, "Authentication_Failed", LLMError),
+    ],
+)
+def test_llm_error_class_tabla_completa(status, assistant_error, expected):
+    assert _llm_error_class(status, assistant_error) is expected
+
+
+# --- T112: revisión (terminal_reason, deadline, cancelación con la señal) ---
+
+
+def _terminal_result(**overrides: object) -> ResultMessage:
+    kwargs: dict[str, object] = dict(
+        terminal_reason="max_turns", usage={"input_tokens": 10, "output_tokens": 2}
+    )
+    kwargs.update(overrides)
+    return make_result_message(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.anyio
+async def test_terminal_reason_con_authentication_failed_lanza_llm_authentication_failed(
+    monkeypatch,
+):
+    messages = (_assistant("authentication_failed"), _terminal_result())
+    monkeypatch.setattr(
+        agent_sdk_provider, "query", build_fake_query(messages=messages), raising=True
+    )
+    with pytest.raises(LLMAuthenticationFailed) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert (excinfo.value.tokens_in, excinfo.value.tokens_out) == (10, 2)
+
+
+@pytest.mark.anyio
+async def test_terminal_reason_sin_senal_sigue_siendo_llm_error_a_secas(monkeypatch):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_terminal_result(),)),
+        raising=True,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMError
+
+
+@pytest.mark.anyio
+async def test_terminal_reason_ignora_un_status_429_residual_sin_is_error(monkeypatch):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_terminal_result(api_error_status=429),)),
+        raising=True,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        await AgentSDKProvider().run_agent(_request())
+    assert type(excinfo.value) is LLMError
+
+
+@pytest.mark.anyio
+async def test_authentication_failed_con_deadline_real_expirado_sigue_siendo_llm_timeout(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_assistant("authentication_failed"),), sleep_after_s=10),
+        raising=True,
+    )
+    with pytest.raises(LLMTimeout) as excinfo:
+        await AgentSDKProvider().run_agent(_request(timeout_s=0.2))
+    assert type(excinfo.value) is LLMTimeout
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_con_authentication_failed_se_propaga_como_cancelled_error(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        agent_sdk_provider,
+        "query",
+        build_fake_query(messages=(_assistant("authentication_failed"),), sleep_after_s=10),
+        raising=True,
+    )
+    task = asyncio.ensure_future(AgentSDKProvider().run_agent(_request(timeout_s=3600)))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

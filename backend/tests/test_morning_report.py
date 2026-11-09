@@ -387,3 +387,81 @@ def test_t105_fallo_de_base_no_vuelca_causa_encadenada_en_los_logs():
     assert "RuntimeError" in out
     assert "s3cr3t" not in out
     assert "/Users/" not in out
+
+
+# --- T112: sesión de Claude caducada -------------------------------------------------------
+
+NOTES_AUTH = (
+    "ingest=ok fetched=3 new=3 | expired=0 | read=0(failed=1) | "
+    "candidates=0 published=0 | tokens=43 | end=auth_failed_reader"
+)
+NOTES_AUTH_ARXIV = NOTES_AUTH.replace("ingest=ok", "ingest=error:ArxivUnavailable")
+
+
+def _cause_line(text: str) -> str:
+    (line,) = [x for x in text.splitlines() if x.startswith("Estado:")]
+    return line
+
+
+def test_t112_render_report_pide_renovar_la_sesion_y_cabe_en_100_columnas():
+    run = _run(NIGHT, RunStatus.PARTIAL, NOTES_AUTH)
+
+    text = render_report(_build(_Data([run])))
+
+    line = _cause_line(text)
+    assert "sesión de Claude caducada (reader)" in line
+    assert "claude /login" in line
+    assert len(line) <= 100
+    assert all(len(x) <= 100 for x in text.splitlines())
+
+
+def test_t112_render_report_con_ademas_trunca_por_el_final_pero_conserva_claude_login():
+    run = _run(NIGHT, RunStatus.PARTIAL, NOTES_AUTH_ARXIV)
+
+    report = _build(_Data([run]))
+    line = _cause_line(render_report(report))
+
+    assert report.classification.causes == (NightCause.AUTH_FAILED, NightCause.ARXIV_UNAVAILABLE)
+    assert "claude /login" in line
+    assert len(line) <= 100
+    assert "claude /login · ad" in line, "lo que se corta es el final de «además», no la orden"
+    assert line.endswith("…")
+
+
+def test_t112_render_notification_incluye_la_orden_de_renovar_la_sesion():
+    run = _run(NIGHT, RunStatus.PARTIAL, NOTES_AUTH)
+
+    title, body = render_notification(_build(_Data([run])))
+
+    assert title == "Nocturna · 11-05 partial"
+    assert "renueva la sesión: claude /login" in body
+    assert "sesión de Claude caducada" in body
+    assert "\n" not in body
+
+
+def test_t112_delivery_line_incluye_auth_failed():
+    run = _run(NIGHT, RunStatus.PARTIAL, NOTES_AUTH)
+
+    line = delivery_line(_build(_Data([run])), "ok")
+
+    assert line == "2026-11-05T07:30:00+01:00 2026-11-05 scheduled partial auth_failed notified=ok"
+
+
+def test_t112_delivery_line_con_dos_causas_las_separa_por_comas():
+    run = _run(NIGHT, RunStatus.PARTIAL, NOTES_AUTH_ARXIV)
+
+    line = delivery_line(_build(_Data([run])), "ok")
+
+    assert " partial auth_failed,arxiv_unavailable notified=ok" in line
+
+
+@pytest.mark.parametrize("cause", list(NightCause), ids=lambda c: c.name)
+def test_t112_cause_text_cubre_todo_night_cause(cause):
+    from nocturna.application.use_cases.morning_report import _cause_short, _cause_text
+
+    text = _cause_text(cause, "detalle")
+    assert text and text != cause.value, "sin rama propia en _cause_text"
+    short = _cause_short(cause, "detalle")
+    assert short and short != cause.value
+    if cause is NightCause.AUTH_FAILED:
+        assert "claude /login" in text and "claude /login" in short
