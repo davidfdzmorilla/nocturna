@@ -269,3 +269,36 @@ def test_nota_de_huerfano_es_la_del_cli():
 )
 def test_target_night(now, expected):
     assert target_night(now, time(4, 45)).isoformat() == expected
+
+
+# --- T111: notas reales de las noches 2026-10-29 y 2026-10-30 ---------------
+
+_NOTES_10_29 = (
+    "ingest=ok fetched=25 new=12 | expired=0 | read=0(failed=1) | "
+    "candidates=0 published=0 | tokens=43 | end=rate_limited_reader"
+)
+_NOTES_10_30 = (
+    "ingest=ok fetched=25 new=12 | expired=0 | read=0(failed=5) | "
+    "candidates=0 published=0 | tokens=0 | end=circuit_breaker_reader"
+)
+
+
+def test_noche_del_29_de_octubre_es_limite_de_uso_en_el_reader():
+    result = classify_night(_evidence(RunStatus.PARTIAL, _NOTES_10_29))
+
+    assert result.causes == (NightCause.RATE_LIMITED,)
+    assert "reader" in result.detail
+
+
+def test_noche_del_30_de_octubre_es_cortacircuitos_y_no_limite_de_uso():
+    result = classify_night(
+        _evidence(
+            RunStatus.PARTIAL,
+            _NOTES_10_30,
+            failed_calls=5,
+            failed_calls_zero_tokens=5,
+        )
+    )
+
+    assert result.causes == (NightCause.CIRCUIT_BREAKER,)
+    assert NightCause.RATE_LIMITED not in result.causes
