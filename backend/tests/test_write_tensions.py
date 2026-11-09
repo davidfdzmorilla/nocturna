@@ -22,6 +22,7 @@ from helpers.tension_writer import v1298_evaluation
 from nocturna.application.budget import BudgetDenied, DenyReason
 from nocturna.application.use_cases.write_tensions import WriteOutcome
 from nocturna.domain.entities import AgentCall, AgentCallStatus, FindingType, ItemStatus
+from nocturna.domain.errors import LLMAuthenticationFailed
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -72,6 +73,27 @@ async def test_valido_crea_finding_sin_publicar_y_registra_la_llamada() -> None:
     assert call.status is AgentCallStatus.OK
     assert call.item_id == item.id
     assert [c.role for c in fake.calls] == [AgentRole.WRITER]
+
+
+async def test_authentication_failed_no_reintenta_y_no_deja_finding() -> None:
+    env, item, _ = _env()
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.WRITER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=100, tokens_out=10),
+    )
+    writer = make_writer(env, fake, max_attempts=2)
+    (candidate,) = make_selector(env).pending().candidates
+
+    result = await writer(candidate)
+
+    assert result.outcome is WriteOutcome.AUTH_FAILED
+    assert result.finding is None
+    assert len(fake.calls) == 1
+    assert env.findings.unpublished_for_run(env.run.id) == []
+    assert env.items.get(item.id).status is ItemStatus.READ
+    (call,) = env.agent_calls.calls
+    assert call.status is AgentCallStatus.ERROR and (call.tokens_in, call.tokens_out) == (100, 10)
 
 
 async def test_invalido_y_luego_valido_deja_finding_y_dos_agent_calls() -> None:

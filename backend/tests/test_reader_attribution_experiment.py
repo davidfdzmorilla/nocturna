@@ -53,7 +53,7 @@ from nocturna.application.agents.parsing import InvalidAgentOutput
 from nocturna.application.agents.runner import AgentRunner
 from nocturna.application.budget import BudgetGuard, BudgetPolicy
 from nocturna.domain.entities import Item, Run
-from nocturna.domain.errors import LLMRateLimited
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMRateLimited
 from nocturna.domain.llm import AgentRole
 
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -948,3 +948,23 @@ def test_fixture_abstracts_tiene_los_cuatro_external_id_y_abstracts_no_vacios():
     for abstract in abstracts:
         assert abstract["abstract"].strip() != ""
         assert abstract["title"].strip() != ""
+
+
+@pytest.mark.anyio
+async def test_run_attribution_sesion_caducada_deja_de_llamar_al_resto():
+    work, _agent_calls = _make_environment()
+    provider = FakeLLMProvider()
+    provider.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=1_000, tokens_out=100),
+    )
+    runner = _make_experiment_runner(work=work, provider=provider, max_attempts=2)
+
+    records = await ra.run_attribution(runner, _items(3))
+
+    assert len(records) == 3
+    assert records[0].outcome == "auth_failed"
+    assert records[0].tokens_spent == 1_100
+    assert [r.outcome for r in records[1:]] == ["not_run", "not_run"]
+    assert "sesión de Claude caducada" in records[1].note
+    assert len(provider.calls) == 1

@@ -24,6 +24,7 @@ from helpers.run_night import (
 from nocturna.application.use_cases import run_night as run_night_module
 from nocturna.application.use_cases.ingest_arxiv import IngestResult
 from nocturna.domain.entities import RunStatus
+from nocturna.domain.errors import LLMAuthenticationFailed
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.night_report import NightCause, NightEvidence, classify_night, parse_run_notes
 
@@ -436,3 +437,24 @@ async def test_evento_ingest_retry_solo_lleva_el_nombre_de_la_clase_sin_secretos
         assert "LeakyError" in line
         assert "s3cr3t" not in line
         assert "export.arxiv.org" not in line
+
+
+async def test_t112_ingesta_fallida_y_sesion_caducada_el_motivo_es_auth_failed_reader():
+    item = make_item()
+    env = _env([item])
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=40, tokens_out=3),
+    )
+    ingest = Ingest(_result([]), failures=99)
+
+    result = await _night(env, fake, ingest, Sleeper())()
+
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_reader" in result.notes
+    assert "end=ingest_error" not in result.notes
+    assert "ingest=error:ArxivUnavailable" in result.notes
+    assert [c.role for c in fake.calls] == [AgentRole.READER]
+    c = classify_night(NightEvidence(run_status=result.status, notes=result.notes, launched=True))
+    assert c.causes == (NightCause.AUTH_FAILED, NightCause.ARXIV_UNAVAILABLE)

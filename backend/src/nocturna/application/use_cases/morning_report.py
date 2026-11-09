@@ -308,6 +308,8 @@ def _cause_text(cause: NightCause, detail: str) -> str:
             return "fallo al caducar ítems antiguos"
         case NightCause.CIRCUIT_BREAKER:
             return f"cortacircuitos{extra}"
+        case NightCause.AUTH_FAILED:
+            return f"sesión de Claude caducada{extra} · renueva la sesión: claude /login"
         case NightCause.RATE_LIMITED:
             return f"límite de uso de Claude{extra}"
         case NightCause.BUDGET_EXHAUSTED:

@@ -51,7 +51,13 @@ from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.application.use_cases import read_item as read_item_module
 from nocturna.application.use_cases.read_item import ReaderPrompt, ReadItem, ReadOutcome
 from nocturna.domain.entities import AgentCall, AgentCallStatus, Item, ItemStatus, Reading, Run
-from nocturna.domain.errors import InvalidTransition, LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import (
+    InvalidTransition,
+    LLMAuthenticationFailed,
+    LLMError,
+    LLMRateLimited,
+    LLMTimeout,
+)
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -340,6 +346,33 @@ async def test_rate_limited_no_reintenta_y_deja_el_item_en_new():
     assert call.status is AgentCallStatus.ERROR
     assert call.tokens_in == 400
     assert call.tokens_out == 10
+
+
+# --- 6b. LLMAuthenticationFailed (T112): no reintenta, item se queda NEW ---
+
+
+async def test_authentication_failed_no_reintenta_y_deja_el_item_en_new():
+    item = _make_item()
+    env = _make_environment(item=item)
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=400, tokens_out=10),
+    )
+    read_item = _make_read_item(work=env.work, provider=fake, max_attempts=3)
+
+    result = await read_item(item)
+
+    assert result.outcome is ReadOutcome.AUTH_FAILED
+    assert result.reading is None
+    assert result.attempts == 1
+    assert result.tokens_spent == 410
+    assert len(fake.calls) == 1, "una sesión caducada no se reintenta"
+    assert item.status is ItemStatus.NEW, "no es un fallo del ítem: sigue NEW para otra noche"
+    assert len(env.agent_calls.calls) == 1
+    call = env.agent_calls.calls[0]
+    assert call.status is AgentCallStatus.ERROR
+    assert (call.tokens_in, call.tokens_out) == (400, 10)
 
 
 # --- 7. LLMTimeout: no reintenta, item se queda NEW ------------------------

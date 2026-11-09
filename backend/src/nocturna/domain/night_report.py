@@ -35,6 +35,7 @@ class NightCause(StrEnum):
     INGEST_ERROR = "ingest_error"
     EXPIRE_ERROR = "expire_error"
     CIRCUIT_BREAKER = "circuit_breaker"
+    AUTH_FAILED = "auth_failed"
     RATE_LIMITED = "rate_limited"
     BUDGET_EXHAUSTED = "budget_exhausted"
     BUDGET_DENIED = "budget_denied"
@@ -156,6 +157,7 @@ _EDITOR_FAILED_ENDS = frozenset(
 )
 _BREAKER_PREFIX = "circuit_breaker_"
 _RATE_LIMITED_PREFIX = "rate_limited_"
+_AUTH_FAILED_PREFIX = "auth_failed_"
 
 
 def breaker_role(end: str | None) -> str | None:
@@ -166,6 +168,8 @@ def breaker_role(end: str | None) -> str | None:
 
 
 def _from_end(end: str, evidence: NightEvidence, parsed: ParsedNotes) -> tuple[NightCause, str]:
+    if end.startswith(_AUTH_FAILED_PREFIX):
+        return NightCause.AUTH_FAILED, end[len(_AUTH_FAILED_PREFIX) :]
     if end == "ingest_error":
         if parsed.ingest_error == _ARXIV_ERROR_CLASS:
             return NightCause.ARXIV_UNAVAILABLE, _ARXIV_ERROR_CLASS

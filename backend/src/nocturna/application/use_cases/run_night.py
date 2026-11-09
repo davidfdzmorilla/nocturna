@@ -79,6 +79,13 @@ sucesos que degradan, y a qué:
   = True`: si la suscripción está limitando peticiones, la llamada más
   cara de la noche es la última que conviene lanzar (motivo explícito del
   plan de esta tarea).
+- `ReadOutcome.AUTH_FAILED` / `PopularizeOutcome.AUTH_FAILED` /
+  `WriteOutcome.AUTH_FAILED` / `EditOutcome.AUTH_FAILED` (T112, sesión de
+  Claude caducada: `LLMAuthenticationFailed`) -> `PARTIAL` con motivo
+  `auth_failed_<rol>`, que sustituye a un motivo `PARTIAL` previo (no a
+  `KILLED`), y corta la noche entera: no corre ningún agente después
+  (tampoco el Popularizer sobre lecturas previas), se saltan los hallazgos
+  de medida, el redactor (las tres pasadas) y el Editor.
 - El cortacircuitos de `max_consecutive_failures` (ítems consecutivos, en
   una misma fase, cuyo desenlace no es el "bueno" de esa fase --
   `ReadOutcome.READ` en A, `PopularizeOutcome.POPULARIZED` en B -- ni un
@@ -407,6 +414,7 @@ class RunNight:
         self._status: RunStatus = RunStatus.COMPLETED
         self._end_reason: str = ""
         self._skip_editor: bool = False
+        self._auth_failed: bool = False
         self._hard_stop_fired: bool = False
         self._items_fetched: int = 0
         self._items_expired: int = 0
@@ -426,6 +434,7 @@ class RunNight:
         self._status = RunStatus.COMPLETED
         self._end_reason = ""
         self._skip_editor = False
+        self._auth_failed = False
         self._hard_stop_fired = False
         self._items_fetched = 0
         self._items_expired = 0
@@ -533,7 +542,8 @@ class RunNight:
         self._phase_expire()
 
         read_pairs = await self._phase_reader()
-        await self._phase_popularizer(read_pairs)
+        if not self._auth_failed:
+            await self._phase_popularizer(read_pairs)
 
         if not self._skip_editor:
             self._phase_measurement_findings()
@@ -806,6 +816,10 @@ class RunNight:
 
             failed += 1
             self._items_failed += 1
+            if result.outcome is ReadOutcome.AUTH_FAILED:
+                stop_reason = "auth_failed"
+                self._stop_on_auth_failure("reader")
+                break
             if result.outcome is ReadOutcome.RATE_LIMITED:
                 stop_reason = "rate_limited"
                 self._skip_editor = True
@@ -922,6 +936,10 @@ class RunNight:
                 continue
 
             failed += 1
+            if result.outcome is PopularizeOutcome.AUTH_FAILED:
+                stop_reason = "auth_failed"
+                self._stop_on_auth_failure("popularizer")
+                break
             if result.outcome is PopularizeOutcome.RATE_LIMITED:
                 stop_reason = "rate_limited"
                 self._skip_editor = True
@@ -1176,6 +1194,11 @@ class RunNight:
                 stats.ok += 1
                 continue
             stats.failed += 1
+            if result.outcome is WriteOutcome.AUTH_FAILED:
+                stats.stop_reason = "auth_failed"
+                stats.stopped = True
+                self._stop_on_auth_failure("writer")
+                break
             if result.outcome is WriteOutcome.RATE_LIMITED:
                 stats.stop_reason = "rate_limited"
                 stats.stopped = True
@@ -1241,9 +1264,27 @@ class RunNight:
                 self._end_reason = edit_result.outcome.value
             return
 
+        if edit_result.outcome is EditOutcome.AUTH_FAILED:
+            self._stop_on_auth_failure("editor")
+            return
         self._degrade(RunStatus.PARTIAL, f"editor_{edit_result.outcome.value}")
 
     # --- helpers ---------------------------------------------------------
+
+    def _stop_on_auth_failure(self, role: str) -> None:
+        """Sesión de Claude caducada (T112): corta la noche entera.
+
+        Ningún agente corre después (tampoco el Popularizer sobre lecturas
+        previas) y se salta el Editor. Estado al menos `PARTIAL`; el motivo
+        `auth_failed_<rol>` sustituye a uno `PARTIAL` previo (la ingesta
+        fallida sigue visible en `notes`), salvo si ya es `KILLED`.
+        """
+        self._auth_failed = True
+        self._skip_editor = True
+        if self._status is RunStatus.KILLED:
+            return
+        self._status = RunStatus.PARTIAL
+        self._end_reason = f"auth_failed_{role}"
 
     def _degrade(self, status: RunStatus, reason: str) -> None:
         """Sustituye `self._status`/`self._end_reason` solo si `status` es

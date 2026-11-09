@@ -107,6 +107,7 @@ class PopularizeOutcome(StrEnum):
     AGENT_ERROR = "agent_error"
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
+    AUTH_FAILED = "auth_failed"
 
 
 #: Traduce el vocabulario general de `AgentRunner` (`AttemptOutcome`) al
@@ -120,6 +121,7 @@ _OUTCOME_BY_ATTEMPT: dict[AttemptOutcome, PopularizeOutcome] = {
     AttemptOutcome.AGENT_ERROR: PopularizeOutcome.AGENT_ERROR,
     AttemptOutcome.TIMEOUT: PopularizeOutcome.TIMEOUT,
     AttemptOutcome.RATE_LIMITED: PopularizeOutcome.RATE_LIMITED,
+    AttemptOutcome.AUTH_FAILED: PopularizeOutcome.AUTH_FAILED,
 }
 
 

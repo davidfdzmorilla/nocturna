@@ -75,7 +75,13 @@ from nocturna.domain.entities import (
     Reading,
     Run,
 )
-from nocturna.domain.errors import InvalidTransition, LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import (
+    InvalidTransition,
+    LLMAuthenticationFailed,
+    LLMError,
+    LLMRateLimited,
+    LLMTimeout,
+)
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -529,6 +535,30 @@ async def test_rate_limited_no_reintenta_deja_el_item_en_read_y_la_reading_intac
     assert call.status is AgentCallStatus.ERROR
     assert call.tokens_in == 300
     assert call.tokens_out == 10
+
+
+async def test_authentication_failed_no_reintenta_y_deja_el_item_en_read():
+    item = _make_item()
+    reading = _make_reading(item.id, interest_score=5)
+    env = _make_environment(item=item)
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.POPULARIZER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=300, tokens_out=10),
+    )
+    popularize = _make_popularize_reading(work=env.work, provider=fake, max_attempts=3)
+
+    result = await popularize(item=item, reading=reading)
+
+    assert result.outcome is PopularizeOutcome.AUTH_FAILED
+    assert result.finding is None
+    assert result.attempts == 1
+    assert len(fake.calls) == 1
+    assert item.status is ItemStatus.READ
+    assert len(env.agent_calls.calls) == 1
+    call = env.agent_calls.calls[0]
+    assert call.status is AgentCallStatus.ERROR
+    assert (call.tokens_in, call.tokens_out) == (300, 10)
 
 
 async def test_timeout_no_reintenta_deja_el_item_en_read_y_la_reading_intacta():

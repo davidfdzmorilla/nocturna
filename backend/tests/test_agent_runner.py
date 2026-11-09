@@ -53,7 +53,13 @@ from nocturna.application.budget import (
 )
 from nocturna.application.unit_of_work import AgentWorkFactory
 from nocturna.domain.entities import AgentCallStatus, Run
-from nocturna.domain.errors import InvariantViolation, LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import (
+    InvariantViolation,
+    LLMAuthenticationFailed,
+    LLMError,
+    LLMRateLimited,
+    LLMTimeout,
+)
 from nocturna.domain.llm import AgentResult, AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -308,6 +314,30 @@ async def test_llm_rate_limited_termina_sin_reintentar_con_status_y_tokens_corre
     assert call.status is AgentCallStatus.ERROR
     assert call.tokens_in == 400
     assert call.tokens_out == 10
+
+
+async def test_llm_authentication_failed_termina_sin_reintentar_con_tokens_contados():
+    """T112: sesión caducada; terminal, sin reintento, gasto registrado."""
+    env = _make_environment()
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.READER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=400, tokens_out=10),
+    )
+    runner = _make_runner(work=env.work, provider=fake, max_attempts=2)
+
+    result = await runner.run(prompt="prompt", item_id=None, build=_build_ok)
+
+    assert result.outcome is AttemptOutcome.AUTH_FAILED
+    assert result.value is None
+    assert result.attempts == 1
+    assert result.tokens_spent == 410
+    assert result.run_id == env.run.id
+    assert len(fake.calls) == 1, "una sesión caducada no se reintenta"
+    assert len(env.agent_calls.calls) == 1
+    call = env.agent_calls.calls[0]
+    assert call.status is AgentCallStatus.ERROR
+    assert (call.tokens_in, call.tokens_out) == (400, 10)
 
 
 async def test_llm_timeout_termina_sin_reintentar_con_status_y_tokens_correctos():
@@ -786,6 +816,11 @@ async def test_ninguna_unidad_de_trabajo_sigue_abierta_durante_la_llamada_al_pro
             AgentCallStatus.ERROR,
         ),
         (
+            lambda: LLMAuthenticationFailed("sesión caducada", tokens_in=400, tokens_out=10),
+            AttemptOutcome.AUTH_FAILED,
+            AgentCallStatus.ERROR,
+        ),
+        (
             lambda: LLMTimeout("no respondió a tiempo", tokens_in=400, tokens_out=10),
             AttemptOutcome.TIMEOUT,
             AgentCallStatus.TIMEOUT,
@@ -796,7 +831,7 @@ async def test_ninguna_unidad_de_trabajo_sigue_abierta_durante_la_llamada_al_pro
             AgentCallStatus.ERROR,
         ),
     ],
-    ids=["rate_limited", "timeout", "agent_error"],
+    ids=["rate_limited", "auth_failed", "timeout", "agent_error"],
 )
 async def test_tokens_spent_acumula_intento_invalido_mas_fallo_terminal_que_le_sigue(
     make_error, expected_outcome, expected_status
@@ -1086,3 +1121,38 @@ async def test_role_configurado_viaja_al_agent_request_para_cualquier_rol(role: 
 
     assert fake.calls[0].role is role
     assert env.agent_calls.calls[0].agent is role
+
+
+# --- T112: cada enum de desenlace traduce todos los AttemptOutcome ----------
+
+
+def _outcome_maps() -> list[tuple[str, dict]]:
+    from nocturna.application.use_cases import (
+        edit_night,
+        popularize_reading,
+        read_item,
+        write_tensions,
+    )
+
+    return [
+        ("read", read_item._OUTCOME_BY_ATTEMPT),
+        ("popularize", popularize_reading._OUTCOME_BY_ATTEMPT),
+        ("edit", edit_night._OUTCOME_BY_ATTEMPT),
+        ("write", write_tensions.OUTCOME_BY_ATTEMPT),
+    ]
+
+
+@pytest.mark.parametrize("attempt", list(AttemptOutcome), ids=lambda a: a.name)
+@pytest.mark.parametrize("name", ["read", "popularize", "edit", "write"])
+def test_cada_enum_de_desenlace_traduce_todos_los_attempt_outcome(name, attempt):
+    mapping = dict(_outcome_maps())[name]
+    assert attempt in mapping
+    translated = mapping[attempt]
+    if attempt in (
+        AttemptOutcome.AUTH_FAILED,
+        AttemptOutcome.RATE_LIMITED,
+        AttemptOutcome.TIMEOUT,
+        AttemptOutcome.AGENT_ERROR,
+    ):
+        assert translated.name == attempt.name
+        assert translated.value == attempt.value

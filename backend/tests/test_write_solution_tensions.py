@@ -31,7 +31,7 @@ from nocturna.domain.entities import (
     MeasuredParameter,
     SolutionTensionLabel,
 )
-from nocturna.domain.errors import InvariantViolation
+from nocturna.domain.errors import InvariantViolation, LLMAuthenticationFailed
 from nocturna.domain.llm import AgentRole
 from nocturna.domain.solution_tension import SkipReason
 
@@ -86,6 +86,25 @@ async def test_valido_crea_solution_tension_sin_publicar_y_no_toca_el_item() -> 
     assert call.agent is AgentRole.WRITER and call.item_id == item.id
     assert call.prompt_version == "writer-archive-v2"
     assert [c.role for c in fake.calls] == [AgentRole.WRITER]
+
+
+async def test_authentication_failed_no_reintenta_y_no_deja_finding() -> None:
+    env, item = _env()
+    _add(env, item)
+    fake = FakeLLMProvider()
+    fake.fail(
+        AgentRole.WRITER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=100, tokens_out=10),
+    )
+    (candidate,) = make_solution_selector(env).pending().candidates
+
+    result = await make_solution_writer(env, fake, max_attempts=2)(candidate)
+
+    assert result.outcome is WriteOutcome.AUTH_FAILED and result.finding is None
+    assert len(fake.calls) == 1
+    assert env.findings.unpublished_for_run(env.run.id) == []
+    (call,) = env.agent_calls.calls
+    assert call.status is AgentCallStatus.ERROR
 
 
 async def test_invalido_dos_veces_agota_intentos_sin_finding() -> None:

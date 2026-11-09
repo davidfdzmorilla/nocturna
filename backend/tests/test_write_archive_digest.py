@@ -33,7 +33,7 @@ from nocturna.application.use_cases.write_archive_digest import (
 from nocturna.application.use_cases.write_tensions import WriteOutcome
 from nocturna.domain.archive_digest import DigestTextStatus
 from nocturna.domain.entities import AgentCallStatus
-from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMError, LLMRateLimited, LLMTimeout
 from nocturna.domain.llm import AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -282,6 +282,7 @@ async def test_tras_una_fila_failed_la_semana_sale_como_writer_failed() -> None:
         (LLMError("fallo del agente"), WriteOutcome.AGENT_ERROR),
         (LLMTimeout("tiempo agotado"), WriteOutcome.TIMEOUT),
         (LLMRateLimited("límite alcanzado"), WriteOutcome.RATE_LIMITED),
+        (LLMAuthenticationFailed("sesión caducada"), WriteOutcome.AUTH_FAILED),
     ],
 )
 async def test_errores_del_agente_no_dejan_fila_y_la_semana_sigue_pendiente(

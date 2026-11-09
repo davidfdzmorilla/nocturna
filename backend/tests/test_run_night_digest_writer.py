@@ -49,7 +49,7 @@ from nocturna.domain.entities import (
     ItemStatus,
     RunStatus,
 )
-from nocturna.domain.errors import LLMRateLimited
+from nocturna.domain.errors import LLMAuthenticationFailed, LLMRateLimited
 from nocturna.domain.llm import AgentRequest, AgentResult, AgentRole
 
 pytestmark = pytest.mark.anyio
@@ -770,3 +770,35 @@ async def test_el_log_trae_la_fase_writer_digest_y_un_night_item_por_semana(
     assert len(items) == 1
     assert items[0].outcome == "written" and items[0].week == "2026-W44"
     assert items[0].attempts == 1 and items[0].tokens_spent == 1000
+
+
+# --- T112: sesión caducada en cualquiera de las tres pasadas del redactor ------
+
+
+@pytest.mark.parametrize(
+    ("ok_arxiv", "ok_archive", "ok_digest", "label"),
+    [(0, 0, 0, "arxiv"), (2, 0, 0, "archivo"), (2, 2, 0, "resumen")],
+    ids=["arxiv", "archivo", "resumen"],
+)
+async def test_t112_auth_failed_en_una_pasada_del_redactor_corta_las_siguientes_y_salta_el_editor(
+    ok_arxiv: int, ok_archive: int, ok_digest: int, label: str
+) -> None:
+    env = _env(arxiv=2, archive=2, weeks=2, paper=True, writer_reserve_tokens=90_000)
+    fake = FakeLLMProvider()
+    _ok_tension(fake, ok_arxiv, data=ARXIV_JSON)
+    _ok_tension(fake, ok_archive)
+    _ok_digest(fake, ok_digest)
+    fake.fail(
+        AgentRole.WRITER,
+        error=LLMAuthenticationFailed("sesión caducada", tokens_in=40, tokens_out=3),
+    )
+    _approve(fake, env)
+
+    result = await _night(env, fake)()
+
+    expected_writes = ok_arxiv + ok_archive + ok_digest + 1
+    assert len(_writes(fake)) == expected_writes, f"nada tras el fallo de la pasada de {label}"
+    assert AgentRole.EDITOR not in _roles(fake)
+    assert result.status is RunStatus.PARTIAL
+    assert "end=auth_failed_writer" in result.notes
+    assert "rate_limited" not in result.notes

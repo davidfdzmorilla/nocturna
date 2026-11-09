@@ -129,7 +129,12 @@ from claude_agent_sdk import (
     query,
 )
 
-from nocturna.domain.errors import LLMError, LLMRateLimited, LLMTimeout
+from nocturna.domain.errors import (
+    LLMAuthenticationFailed,
+    LLMError,
+    LLMRateLimited,
+    LLMTimeout,
+)
 from nocturna.domain.llm import AgentRequest, AgentResult
 
 _logger = logging.getLogger(__name__)
@@ -142,18 +147,25 @@ RATE_LIMIT_STATUS = 429
 #: Valor de `AssistantMessage.error` con el que el SDK señala un límite de tasa.
 RATE_LIMIT_ASSISTANT_ERROR = "rate_limit"
 
+#: Valor de `AssistantMessage.error` con el que el SDK señala una sesión no válida.
+AUTH_FAILED_ASSISTANT_ERROR = "authentication_failed"
+
 
 def _llm_error_class(status: int | None, assistant_error: str | None = None) -> type[LLMError]:
     """Elige la excepción a lanzar según `api_error_status` y `AssistantMessage.error`.
 
     `LLMRateLimited` (subclase de `LLMError`, `domain/errors.py`) señala un
     límite de tasa: `status == 429` o `assistant_error == "rate_limit"`;
-    cualquier otra cosa usa `LLMError` sin más (p. ej.
-    `authentication_failed`). Sin comparar textos. Quien capture `LLMError`
+    cualquier otra cosa usa `LLMError` sin más. T112: si
+    `assistant_error == "authentication_failed"` (sesión OAuth del CLI no
+    válida) gana `LLMAuthenticationFailed`, aunque llegue a la vez un 429.
+    Comparación exacta, sin comparar textos. Quien capture `LLMError`
     sigue atrapando ambas (`budget-guard-review` § 6: un límite de tasa
     termina la noche, no se reintenta; esa reacción es del consumidor,
     T44 — este proveedor solo da la señal tipada).
     """
+    if assistant_error == AUTH_FAILED_ASSISTANT_ERROR:
+        return LLMAuthenticationFailed
     if status == RATE_LIMIT_STATUS or assistant_error == RATE_LIMIT_ASSISTANT_ERROR:
         return LLMRateLimited
     return LLMError
@@ -697,19 +709,21 @@ class AgentSDKProvider:
                 # no respondió en Ns", así que no se traduce a
                 # `LLMTimeout`: se trata como cualquier otra excepción no
                 # reconocida.
+                foreign_class = _llm_error_class(_failed_status(last_result), assistant_error)
                 _log_call_failure(
                     request,
-                    error_class=LLMError,
+                    error_class=foreign_class,
                     sdk_exc=exc,
                     last_result=last_result,
                     assistant_error=assistant_error,
                     rate_limit_info=rate_limit_info,
                 )
-                raise LLMError(
+                raise foreign_class(
                     f"el agente '{request.role.value}' falló con un TimeoutError "
                     f"ajeno al deadline de {request.timeout_s}s: {exc}",
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
+                    api_error_status=_failed_status(last_result),
                 ) from exc
             _log_call_failure(
                 request,
@@ -850,8 +864,9 @@ class AgentSDKProvider:
             )
 
         if last_result is None:
-            _log_post(LLMError)
-            raise LLMError(f"el agente '{request.role.value}' terminó sin emitir ResultMessage")
+            none_class = _llm_error_class(None, assistant_error)
+            _log_post(none_class)
+            raise none_class(f"el agente '{request.role.value}' terminó sin emitir ResultMessage")
         if last_result.subtype != "success" or last_result.is_error:
             tokens_in, tokens_out = _extract_tokens(
                 usage=last_result.usage, model_usage=last_result.model_usage
@@ -875,8 +890,11 @@ class AgentSDKProvider:
             tokens_in, tokens_out = _extract_tokens(
                 usage=last_result.usage, model_usage=last_result.model_usage
             )
-            _log_post(LLMError)
-            raise LLMError(
+            # Resultado sin is_error: `api_error_status` no cuenta (ADR 0049),
+            # solo la señal del asistente.
+            terminal_class = _llm_error_class(None, assistant_error)
+            _log_post(terminal_class)
+            raise terminal_class(
                 f"el agente '{request.role.value}' terminó con subtype='success' "
                 f"pero terminal_reason='{last_result.terminal_reason}': la salida "
                 "puede estar incompleta",
