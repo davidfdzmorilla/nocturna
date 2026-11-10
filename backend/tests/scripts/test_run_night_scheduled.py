@@ -623,9 +623,10 @@ def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path
     assert caffeinate_calls == [
         "-is uv run --frozen nocturna run-night",
         "-is uv run --frozen nocturna evaluate-tensions",
+        f"-is {BACKEND_ROOT}/scripts/sync-to-vps.sh",
     ]
     uv_calls = uv_call_log.read_text().splitlines()
-    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls]
+    assert caffeinate_calls[:-1] == [f"-is uv {c}" for c in uv_calls]
 
 
 def test_centinela_impide_el_segundo_lanzamiento(tmp_path):
@@ -1163,6 +1164,7 @@ def test_plantilla_de_plist_es_coherente(tmp_path):
         "StandardOutPath",
         "StandardErrorPath",
         "RunAtLoad",
+        "EnvironmentVariables",
     }, (
         f"claves inesperadas en el plist: {sorted(plist.keys())}; revisa si alguna es "
         "KeepAlive u otro mecanismo de reintento automático, prohibido por la Regla de "
@@ -1208,7 +1210,7 @@ def test_t105_deja_el_estado_y_lanza_el_informe_sin_cambiar_el_codigo(tmp_path, 
     result = _run_wrapper([], env, cwd=tmp_path)
 
     assert result.returncode == code
-    assert _status_lines(home) == [f"run-night={code}", "evaluate-tensions=4"]
+    assert _status_lines(home) == [f"run-night={code}", "evaluate-tensions=4", "sync=78"]
     assert report_log.read_text().splitlines() == [
         f"run --frozen nocturna morning-report --trigger run-night --night {_today_iso()}"
     ]
@@ -1255,7 +1257,7 @@ def test_t105_duplicado_deja_estado_76_sin_nuevo_informe(tmp_path):
     second = _run_wrapper([], env, cwd=tmp_path)
 
     assert (first.returncode, second.returncode) == (0, 76)
-    assert _status_lines(home) == ["run-night=0", "evaluate-tensions=0", "duplicate=76"]
+    assert _status_lines(home) == ["run-night=0", "evaluate-tensions=0", "sync=78", "duplicate=76"]
     assert len(report_log.read_text().splitlines()) == 1
 
 

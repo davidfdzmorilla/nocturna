@@ -22,6 +22,7 @@ from helpers.finding_payloads import (
 from nocturna.api.schemas import (
     CatalogTensionOut,
     ConfirmationReferenceOut,
+    DataStatusResponse,
     FindingDetail,
     FindingsPageResponse,
     FindingSummary,
@@ -449,3 +450,22 @@ def test_solution_tension_out_es_lista_blanca() -> None:
     assert dumped["new_releasedate"] == "2026-09-18"
     forbidden = {"solution_key", "soltype", "pl_pubdate", "ttv_flag", "period_check", "computed_at"}
     assert forbidden.isdisjoint(all_keys(dumped))
+
+
+def test_data_status_response_has_exactly_expected_keys() -> None:
+    dumped = DataStatusResponse(data_updated_at=_PUBLISHED_AT).model_dump(mode="json")
+    assert set(dumped.keys()) == {"data_updated_at"}
+    assert _FORBIDDEN_NESTED_KEYS.isdisjoint(all_keys(dumped))
+    assert dumped["data_updated_at"] == "2026-01-02T03:00:00Z"
+
+
+def test_data_status_response_accepts_null_and_is_frozen() -> None:
+    empty = DataStatusResponse(data_updated_at=None)
+    assert empty.model_dump(mode="json") == {"data_updated_at": None}
+    with pytest.raises(ValueError):
+        empty.data_updated_at = _PUBLISHED_AT  # type: ignore[misc]
+
+
+def test_data_status_response_requires_the_field() -> None:
+    with pytest.raises(ValueError):
+        DataStatusResponse()  # type: ignore[call-arg]

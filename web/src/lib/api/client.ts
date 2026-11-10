@@ -24,6 +24,7 @@
 import { cache } from "react";
 import { apiBaseUrl } from "./config";
 import type {
+  DataStatus,
   DigestWeeksResponse,
   FindingDetail,
   FindingsPage,
@@ -134,4 +135,11 @@ export const fetchArchiveWeek = cache(async function fetchArchiveWeek(
     `/archive/weeks/${encodeURIComponent(week)}`,
     [404, 422],
   );
+});
+
+/** Pie de página (T108): una sola petición por render gracias a `cache()`. */
+export const fetchDataStatus = cache(async function fetchDataStatus(): Promise<
+  ApiResult<DataStatus>
+> {
+  return getJson<DataStatus>("/data-status");
 });

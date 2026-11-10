@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: {
@@ -32,12 +35,7 @@ export default function RootLayout({
         >
           {children}
         </main>
-        <footer className="border-t border-border py-8 text-sm text-text-muted">
-          <p className="mx-auto max-w-5xl px-4 sm:px-6">
-            Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos
-            generados automáticamente a partir de arXiv astro-ph.
-          </p>
-        </footer>
+        <SiteFooter />
       </body>
     </html>
   );

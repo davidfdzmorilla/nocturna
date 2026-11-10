@@ -437,6 +437,12 @@ launchctl bootout gui/$(id -u)/com.nocturna.morning-report
 rm ~/Library/LaunchAgents/com.nocturna.morning-report.plist
 ```
 
+#### Sincronización con el VPS (T108, ADR 0051)
+
+Los plist de `com.nocturna.run-night` y de `com.nocturna.archive-snapshot` tienen tres variables de entorno para `backend/scripts/sync-to-vps.sh`: `NOCTURNA_SYNC_TARGET` (usuario@host del VPS), `NOCTURNA_SYNC_KEY` (clave privada dedicada) y `NOCTURNA_SYNC_KNOWN_HOSTS` (known_hosts con la huella del VPS). Vienen con los marcadores `__NOCTURNA_SYNC_*__` sin sustituir.
+
+Sin rellenarlas (o con el marcador), la sincronización sale con 78 sin hacer nada, y la noche no cambia. Con las tres rellenadas, cada noche y cada snapshot sincronizan la base con el VPS, y el código queda en `sync=` del `.status`. Cómo generar la clave, fijar el `known_hosts` y rellenar los plist: `docs/DESPLIEGUE.md`, § Sincronización de datos.
+
 ---
 
 ## El centinela: alcance y límites

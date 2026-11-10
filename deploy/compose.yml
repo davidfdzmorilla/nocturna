@@ -96,6 +96,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # El primer arranque (initdb y rol de solo lectura) puede pasar de 50 s.
+      start_period: 120s
     logging: *logging
 
 networks:

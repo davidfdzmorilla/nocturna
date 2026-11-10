@@ -404,4 +404,17 @@ Dos entornos. El pipeline y sus credenciales están en el Mac; el VPS solo aloja
 - **Construcción**: en el VPS, desde el repositorio clonado (T107 D4). No hay registro de imágenes.
 - **Tests**: `backend/tests/test_deploy_no_claude_credentials.py` (estático, en `pytest`) y `backend/tests/deploy/test_images.py` (`-m docker`, `NOCTURNA_CHECK_IMAGES=1`), que comprueban la ausencia de Claude y de sus credenciales en ficheros, imágenes y compose. T109 añade `backend/tests/deploy/test_readonly_hardening.py` (estático y `-m docker`), `backend/tests/db/test_api_readonly_role_db.py` y `backend/tests/db/test_api_read_only_session_db.py` (`-m db`) y `backend/tests/test_api_docs_toggle.py`.
 - **Procedimiento**: `docs/DESPLIEGUE.md`.
-- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; sincronización de datos (T108); medición de la fase (T110).
+- **Sincronización de datos (T108, [ADR 0051](adr/0051-sincronizacion-de-datos-mac-vps.md))**: después de `run-night` (tras `evaluate-tensions`) y del snapshot del archivo, los envoltorios llaman a `sync-to-vps.sh`. Sin tokens ni Claude; su código va a `sync=` del `.status` y no cambia el de la noche.
+
+```
+run-night-scheduled.sh / archive-snapshot-scheduled.sh
+  └─ backend/scripts/sync-to-vps.sh (Mac)
+       pg_dump -Fc del contenedor local → sha256 + revisión de Alembic
+       → ssh (clave dedicada, known_hosts fijado), volcado por stdin
+       └─ deploy/sync/restore.sh (VPS, orden forzada por authorized_keys)
+            flock → validar orden → tope 1 GiB → sha256 → revisión = head de migrate
+            → pg_restore (transacción única, lock_timeout) → 10-api-readonly-role.sh
+```
+
+- **`/data-status`** (API, lectura): `data_updated_at = greatest(max(runs.finished_at), max(archive_snapshot.taken_at))`, con `DataFreshnessReader` en el dominio y `SqlAlchemyDataFreshnessReader` en la infraestructura. La web lo lee en el pie (`SiteFooter`, `layout.tsx` con `force-dynamic`): «Datos actualizados el <fecha Europe/Madrid>» o «Fecha de actualización no disponible». Que falle la petición no añade `noindex`.
+- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; primera sincronización real, usuario `nocturna-sync` y clave (T108, `docs/DESPLIEGUE.md`); medición de la fase (T110).

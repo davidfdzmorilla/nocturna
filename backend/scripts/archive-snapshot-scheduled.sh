@@ -21,6 +21,8 @@
 #           tensiones posterior falló; se registra en el log de salida. El 4
 #           (T99): todo guardado, pero quedaron planetas sin resolver en la
 #           evaluación (se reintentan); se registra como aviso.
+#     (T108) Salvo --dry-run, tras el snapshot corre `sync-to-vps.sh`; su código
+#           queda en `sync=` del .status y nunca altera el del snapshot.
 #     75    Precondiciones no listas (Docker o postgres) dentro de NOCTURNA_WAIT_S.
 #     77    Entorno inválido: `uv` no resoluble en PATH, o NOCTURNA_WAIT_S /
 #           NOCTURNA_LOG_DIR con un valor inválido.
@@ -128,6 +130,13 @@ for arg in "$@"; do
 done
 if [[ "$dry_run" -eq 0 ]]; then
     printf 'archive-snapshot=%s\n' "$exit_code" >>"$log_dir/archive-$day_key.status" 2>/dev/null || true
+    # T108: sincroniza la base con el VPS (cero tokens). Su código queda en
+    # `sync=` y nunca cambia el del snapshot; 78 = no configurada.
+    set +e
+    caffeinate -is "${script_dir}/sync-to-vps.sh" >>"$out_log" 2>>"$err_log"
+    sync_exit_code=$?
+    set -e
+    printf 'sync=%s\n' "$sync_exit_code" >>"$log_dir/archive-$day_key.status" 2>/dev/null || true
     uv run --frozen nocturna morning-report --trigger archive-snapshot --night "$day_date" \
         >>"$out_log" 2>>"$err_log" || true
 fi

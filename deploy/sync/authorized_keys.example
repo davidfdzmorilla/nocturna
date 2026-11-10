@@ -1,0 +1,10 @@
+# Entrada de ~/.ssh/authorized_keys del usuario del VPS que ejecuta la restauración (T108).
+#
+# - `restrict` desactiva reenvíos (agente, X11, puertos), PTY y ~/.ssh/rc.
+# - `command=` fuerza restore.sh: el cliente solo puede aportar los argumentos
+#   "restore <sha256> <revisión>" por SSH_ORIGINAL_COMMAND, que el script valida.
+# - Ruta absoluta del checkout del VPS; el script debe ser ejecutable.
+# - Clave dedicada, solo para esto (ssh-keygen -t ed25519 -C nocturna-sync). La
+#   privada se queda en el Mac; aquí solo va la pública. No reutilices la clave de
+#   administración.
+restrict,command="/ruta/al/repo/deploy/sync/restore.sh" ssh-ed25519 AAAA…REEMPLAZAR nocturna-sync

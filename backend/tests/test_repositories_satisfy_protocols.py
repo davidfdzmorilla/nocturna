@@ -25,6 +25,7 @@ from nocturna.domain.repositories import (
     AgentCallRepository,
     ArchiveItemRepository,
     ArchiveRepository,
+    DataFreshnessReader,
     FindingRepository,
     ItemRepository,
     ReadingRepository,
@@ -35,6 +36,7 @@ from nocturna.domain.repositories import (
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyAgentCallRepository,
     SqlAlchemyArchiveRepository,
+    SqlAlchemyDataFreshnessReader,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
     SqlAlchemyReadingRepository,
@@ -164,3 +166,8 @@ def test_in_memory_solution_tension_repository_cumple_el_protocol() -> None:
 
     repo: SolutionTensionRepository = InMemorySolutionTensionRepository()
     _assert_conforms(SolutionTensionRepository, type(repo))
+
+
+def test_sqlalchemy_data_freshness_reader_cumple_el_protocol() -> None:
+    reader: DataFreshnessReader = SqlAlchemyDataFreshnessReader(None)
+    _assert_conforms(DataFreshnessReader, type(reader))

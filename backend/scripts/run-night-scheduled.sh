@@ -38,6 +38,8 @@
 #           `environment`, `run-night`, `evaluate-tensions`) y, salvo --dry-run,
 #           lanza `nocturna morning-report --trigger run-night` al terminar: el
 #           informe y su aviso no cambian nunca el código de salida de la noche.
+#     (T108) Tras evaluate-tensions, `sync-to-vps.sh` (volcado al VPS); su código
+#           queda en `sync=` del .status y nunca altera el de la noche.
 #     77    Entorno o configuración inválidos: `uv`/`claude` no resolubles
 #           en PATH, o NOCTURNA_WAIT_S/NOCTURNA_LOG_DIR con un valor
 #           inválido (p.ej. NOCTURNA_WAIT_S no numérico, NOCTURNA_LOG_DIR
@@ -344,6 +346,18 @@ else
     elif [[ "$evaluate_exit_code" -ne 0 ]]; then
         echo "run-night-scheduled: evaluate-tensions falló (código $evaluate_exit_code); la noche conserva el código de run-night ($exit_code)." >>"$err_log"
     fi
+fi
+
+# T108: sincroniza la base con el VPS (volcado + restauración remota). Cero
+# tokens y sin Claude. Va tras evaluate-tensions para llevar sus resultados.
+# Nunca cambia `exit_code`: su código queda en el .status (78 = no configurada)
+# y el informe matinal lo cuenta aparte. Con `--dry-run` no se ejecuta.
+if [[ "$dry_run" -eq 0 ]]; then
+    set +e
+    caffeinate -is "${script_dir}/sync-to-vps.sh" >>"$out_log" 2>>"$err_log"
+    sync_exit_code=$?
+    set -e
+    record_status sync "$sync_exit_code"
 fi
 
 {
