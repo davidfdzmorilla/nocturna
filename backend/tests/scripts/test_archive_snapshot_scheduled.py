@@ -257,14 +257,18 @@ def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path
     assert env.run("--full").returncode == 0
 
     caffeinate_calls = env.caffeinate_log.read_text().splitlines()
-    assert caffeinate_calls == ["-is uv run --frozen nocturna archive-snapshot --full"]
+    # T108: tras el snapshot, `sync-to-vps.sh` también va envuelto en `caffeinate`.
+    assert caffeinate_calls[0] == "-is uv run --frozen nocturna archive-snapshot --full"
+    assert len(caffeinate_calls) == 2
+    assert caffeinate_calls[1].startswith("-is ")
+    assert caffeinate_calls[1].endswith("/scripts/sync-to-vps.sh")
     uv_calls = env.uv_log.read_text().splitlines()
     # T105: el informe matinal va sin `caffeinate`, detrás del snapshot.
     assert uv_calls[-1] == (
         "run --frozen nocturna morning-report --trigger archive-snapshot "
         f"--night {date.today().isoformat()}"
     )
-    assert caffeinate_calls == [f"-is uv {c}" for c in uv_calls[:-1]]
+    assert caffeinate_calls[:-1] == [f"-is uv {c}" for c in uv_calls[:-1]]
 
 
 def test_levanta_postgres_con_el_compose_del_repositorio(tmp_path):
@@ -394,7 +398,7 @@ def test_t105_deja_el_codigo_y_lanza_el_informe_sin_cambiar_el_codigo_de_salida(
 
     assert result.returncode == 3
     key = date.today().strftime("%Y%m%d")
-    assert (env.logs / f"archive-{key}.status").read_text() == "archive-snapshot=3\n"
+    assert (env.logs / f"archive-{key}.status").read_text() == "archive-snapshot=3\nsync=78\n"
     assert "morning-report --trigger archive-snapshot" in env.uv_log.read_text().splitlines()[-1]
 
 

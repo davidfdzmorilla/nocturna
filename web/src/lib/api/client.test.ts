@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchDataStatus,
   fetchArchiveWeek,
   fetchArchiveWeeks,
   fetchFindingsPage,
@@ -339,5 +340,66 @@ describe("el 422 solo es not_found en la semana del archivo", () => {
       ok: false,
       reason: "unavailable",
     });
+  });
+});
+
+
+describe("fetchDataStatus (T108)", () => {
+  it("200 devuelve ok:true con la fecha y pide /data-status", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 200,
+        ok: true,
+        json: () => Promise.resolve({ data_updated_at: "2026-11-08T23:30:00Z" }),
+      }),
+    );
+    const result = await fetchDataStatus();
+    expect(result).toEqual({
+      ok: true,
+      data: { data_updated_at: "2026-11-08T23:30:00Z" },
+    });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(`${API_URL}/data-status`);
+  });
+
+  it("200 con data_updated_at null sigue siendo ok", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 200,
+        ok: true,
+        json: () => Promise.resolve({ data_updated_at: null }),
+      }),
+    );
+    expect(await fetchDataStatus()).toEqual({
+      ok: true,
+      data: { data_updated_at: null },
+    });
+  });
+
+  it.each([500, 502, 503])("%i devuelve unavailable", async (status) => {
+    vi.mocked(fetch).mockResolvedValue(fakeResponse({ status, ok: false }));
+    expect(await fetchDataStatus()).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("caída de red devuelve unavailable sin lanzar", async () => {
+    vi.mocked(fetch).mockRejectedValue(new TypeError("fetch failed"));
+    expect(await fetchDataStatus()).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("JSON ilegible devuelve unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        status: 200,
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("bad json")),
+      }),
+    );
+    expect(await fetchDataStatus()).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("sin NOCTURNA_API_URL devuelve unavailable", async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("NOCTURNA_API_URL", "");
+    expect(await fetchDataStatus()).toEqual({ ok: false, reason: "unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

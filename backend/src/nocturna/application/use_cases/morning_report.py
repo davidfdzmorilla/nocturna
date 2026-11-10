@@ -41,6 +41,8 @@ _MAX_COLUMNS = 100
 _RECENT_DAYS = 7
 _WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 _ARCHIVE_EXIT_KEY = "archive-snapshot"
+_SYNC_EXIT_KEY = "sync"
+_SYNC_NOT_CONFIGURED = 78
 
 
 class Trigger(StrEnum):
@@ -133,12 +135,55 @@ class MorningReport:
     last_snapshot: ArchiveSnapshot | None = None
     last_snapshot_local_date: date | None = None
     archive_exit: int | None = None
+    sync_exit: int | None = None
+    sync_origin: str | None = None  # envoltorio de origen si no es el que dispara el informe
     digest_week: str | None = None
     digest_changes: int | None = None
     digest_text_status: str | None = None  # written | failed | none
     ingest_recovered_from: str | None = None
     recent_nights: tuple[tuple[date, RunStatus | None], ...] = ()
     logs: tuple[str, ...] = ()
+
+
+def _sync_exit(launch: LaunchEvidence, trigger: Trigger) -> tuple[int | None, str | None]:
+    """Código de `sync-to-vps.sh` y su origen.
+
+    Sale del envoltorio que dispara el informe; si no, del otro, y entonces se indica el
+    origen (`run-night` / `archive-snapshot`) para no confundir de qué ejecución es.
+    """
+    night, archive = launch.wrapper_exits, launch.archive_exits
+    if trigger is Trigger.ARCHIVE_SNAPSHOT:
+        first, second, second_name = archive, night, "run-night"
+    else:
+        first, second, second_name = night, archive, "archive-snapshot"
+    if _SYNC_EXIT_KEY in first:
+        return first[_SYNC_EXIT_KEY], None
+    if _SYNC_EXIT_KEY in second:
+        return second[_SYNC_EXIT_KEY], second_name
+    return None, None
+
+
+_SYNC_TIMED_OUT = 3
+_SYNC_RESTORE_BUSY = 15
+
+
+def _sync_line(sync_exit: int | None, origin: str | None = None) -> str:
+    """T108: informativa; no altera la causa de la noche ni `should_notify`."""
+    if sync_exit is None:
+        state = "no ejecutada"
+    elif sync_exit == 0:
+        state = "correcta"
+    elif sync_exit == _SYNC_NOT_CONFIGURED:
+        state = "no configurada"
+    elif sync_exit == _SYNC_TIMED_OUT:
+        state = "fallida: tiempo agotado"
+    elif sync_exit == _SYNC_RESTORE_BUSY:
+        state = "fallida: otra restauración en curso"
+    else:
+        state = f"fallida (código {sync_exit})"
+    if origin is not None and sync_exit is not None:
+        state = f"{state} ({origin})"
+    return f"Sincronización con el VPS: {state}"
 
 
 class BuildMorningReport:
@@ -239,6 +284,7 @@ class BuildMorningReport:
         for call in calls:
             by_status[call.status.value] = by_status.get(call.status.value, 0) + 1
 
+        sync_exit, sync_origin = _sync_exit(launch, trigger)
         return MorningReport(
             night=night,
             trigger=trigger,
@@ -267,6 +313,8 @@ class BuildMorningReport:
                 snapshot.taken_at.astimezone(self._tz).date() if snapshot is not None else None
             ),
             archive_exit=launch.archive_exits.get(_ARCHIVE_EXIT_KEY),
+            sync_exit=sync_exit,
+            sync_origin=sync_origin,
             digest_week=digest.week if digest is not None else None,
             digest_changes=digest.changes if digest is not None else None,
             digest_text_status=digest.text_status if digest is not None else None,
@@ -437,6 +485,7 @@ def render_report(report: MorningReport) -> str:
         f"Archivo: snapshot {snap_date} · {_n(snap.rows_total if snap else None)} filas"
         f" · última publ. {release} · archive-snapshot {_n(report.archive_exit)}"
     )
+    lines.append(_sync_line(report.sync_exit, report.sync_origin))
     if report.digest_week is None:
         lines.append(f"Resumen semanal: {_DASH}")
     else:

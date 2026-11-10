@@ -41,6 +41,22 @@
     <key>StandardErrorPath</key>
     <string>__HOME__/nocturna-logs/launchd-archive.log</string>
 
+    <!--
+        T108: sincronización con el VPS (sync-to-vps.sh). Los marcadores se
+        sustituyen con sed al materializar el plist; si se dejan sin sustituir
+        (o vacíos), sync-to-vps.sh sale con 78 y no hace nada. Ver
+        deploy/sync/authorized_keys.example para el lado del VPS.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NOCTURNA_SYNC_TARGET</key>
+        <string>__NOCTURNA_SYNC_TARGET__</string>
+        <key>NOCTURNA_SYNC_KEY</key>
+        <string>__NOCTURNA_SYNC_KEY__</string>
+        <key>NOCTURNA_SYNC_KNOWN_HOSTS</key>
+        <string>__NOCTURNA_SYNC_KNOWN_HOSTS__</string>
+    </dict>
+
     <key>RunAtLoad</key>
     <false/>
 </dict>

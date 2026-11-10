@@ -283,6 +283,14 @@ class ArchiveRepository(Protocol):
         ...
 
 
+class DataFreshnessReader(Protocol):
+    """Fecha de los datos publicados (T108). Solo lectura."""
+
+    def last_update(self) -> datetime | None:
+        """Último `finished_at` de un Run o `taken_at` de un snapshot; `None` si no hay."""
+        ...
+
+
 class ArchiveDigestReader(Protocol):
     """Lectura del resumen semanal de cambios de referencia (T84). Solo lectura."""
 

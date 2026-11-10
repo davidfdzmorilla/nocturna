@@ -204,3 +204,9 @@ export type DigestWeek = {
 export type DigestWeeksResponse = {
   weeks: DigestWeek[];
 };
+
+/** `GET /data-status` (T108): fecha de los datos más recientes (último Run terminado o último snapshot del archivo). */
+export type DataStatus = {
+  /** ISO 8601 con zona; `null` si aún no hay datos. */
+  data_updated_at: string | null;
+};

@@ -758,6 +758,20 @@ class SqlAlchemyArchiveRepository:
         self._session.flush()
 
 
+class SqlAlchemyDataFreshnessReader:
+    """Cumple `domain.repositories.DataFreshnessReader` (T108); solo emite SELECT.
+
+    Los Run en marcha tienen `finished_at` nulo y `max` los ignora."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def last_update(self) -> datetime | None:
+        latest_run = select(func.max(RunRow.finished_at)).scalar_subquery()
+        latest_snapshot = select(func.max(ArchiveSnapshotRow.taken_at)).scalar_subquery()
+        return self._session.execute(select(func.greatest(latest_run, latest_snapshot))).scalar()
+
+
 class SqlAlchemyArchiveDigestReader:
     """Lectura del resumen semanal (T84). Cumple `domain.repositories.ArchiveDigestReader`;
     solo emite SELECT."""

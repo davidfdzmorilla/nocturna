@@ -194,7 +194,7 @@ def test_noche_partial_por_arxiv_con_todos_los_datos():
 
     assert report.classification.causes == (NightCause.ARXIV_UNAVAILABLE,)
     assert report.tokens_used == 183_182
-    assert text.splitlines()[:8] == [
+    assert text.splitlines()[:9] == [
         "Nocturna · noche del 2026-11-05 (jue) · generado 07:30 por scheduled",
         "Estado: PARTIAL · Causa: arXiv no disponible en la ingesta (ArxivUnavailable)",
         "Horario: 00:05–03:41 · run-night 7 · evaluate-tensions 0",
@@ -202,10 +202,11 @@ def test_noche_partial_por_arxiv_con_todos_los_datos():
         "Ítems: nuevos 0 · leídos 7 (fallidos 0) · publicados 9",
         "Archivo: snapshot 2026-10-31 · 40.112 filas · última publ. 2026-10-15"
         " · archive-snapshot 0",
+        "Sincronización con el VPS: no ejecutada",
         "Resumen semanal: 2026-W44 · 12 cambios · texto del redactor: escrito",
-        text.splitlines()[7],
+        text.splitlines()[8],
     ]
-    assert text.splitlines()[7].startswith("Últimas 7 noches: ")
+    assert text.splitlines()[8].startswith("Últimas 7 noches: ")
     assert text.splitlines()[-1] == "Logs: night-20261105.out.log · night-20261105.err.log"
 
 

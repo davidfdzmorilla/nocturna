@@ -1,9 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderToReadableStream } from "react-dom/server.edge";
 import { describe, expect, it, vi } from "vitest";
 
 // El layout importa la hoja de estilos (Tailwind/PostCSS); aquí no hace falta.
 vi.mock("@/app/globals.css", () => ({}));
+// El pie es un Server Component async (T108): no se renderiza de forma
+// síncrona dentro del layout; se prueba aparte, con la API "caída".
+vi.mock("@/lib/api/client", () => ({
+  fetchDataStatus: async () => ({ ok: false, reason: "unavailable" }),
+}));
 
 import type { DigestEntry, TransitionKind } from "@/lib/api/types";
 import { AI_FREE_NOTE, SECTION_LABELS, SECTION_ORDER, entriesByKind } from "@/lib/archiveDigest";
@@ -223,11 +229,15 @@ describe("textos de D6, D4, D7 y D9", () => {
     );
   });
 
-  it("layout: pie y meta-descripción de D7", () => {
+  it("layout: pie y meta-descripción de D7", async () => {
     const text =
       "Nocturna. Resumen semanal del NASA Exoplanet Archive y hallazgos generados automáticamente a partir de arXiv astro-ph.";
     expect(metadata.description).toBe(text);
-    const html = renderToStaticMarkup(createElement(RootLayout, null, "contenido"));
+    const stream = await renderToReadableStream(
+      createElement(RootLayout, null, "contenido"),
+    );
+    await stream.allReady;
+    const html = await new Response(stream).text();
     expect(html).toContain("<footer");
     expect(html.replace(/\s+/g, " ")).toContain(text);
     expect(html).toContain("Análisis generado automáticamente por IA.");

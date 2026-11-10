@@ -41,6 +41,7 @@ from nocturna.infrastructure.config import Settings, load_pipeline_config
 from nocturna.infrastructure.db.repositories import (
     SqlAlchemyArchiveDigestReader,
     SqlAlchemyArchiveDigestTextRepository,
+    SqlAlchemyDataFreshnessReader,
     SqlAlchemyFindingRepository,
     SqlAlchemyItemRepository,
 )
@@ -105,6 +106,10 @@ def get_archive_digest_text_repository(
     session: _SessionDep,
 ) -> SqlAlchemyArchiveDigestTextRepository:
     return SqlAlchemyArchiveDigestTextRepository(session)
+
+
+def get_data_freshness_reader(session: _SessionDep) -> SqlAlchemyDataFreshnessReader:
+    return SqlAlchemyDataFreshnessReader(session)
 
 
 @lru_cache

@@ -14,3 +14,6 @@ node_modules/
 dist/
 .coverage
 build/
+
+# T108: bloqueo de restore.sh en el VPS
+deploy/sync/.restore.lock

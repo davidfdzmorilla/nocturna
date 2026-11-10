@@ -15,6 +15,7 @@ vi.mock("react", () => ({
 }));
 
 import {
+  fetchDataStatus,
   fetchArchiveWeek,
   fetchArchiveWeeks,
   fetchFinding,
@@ -39,6 +40,7 @@ describe("una petición a la API por render", () => {
     ["fetchArchiveWeeks", () => fetchArchiveWeeks()],
     ["fetchFinding", () => fetchFinding("x")],
     ["fetchArchiveWeek", () => fetchArchiveWeek("2026-W41")],
+    ["fetchDataStatus", () => fetchDataStatus()],
   ])("%s: dos llamadas iguales, un solo fetch", async (_n, call) => {
     await call();
     await call();

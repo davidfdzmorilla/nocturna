@@ -575,3 +575,14 @@ class HealthResponse(BaseModel):
 
     status: str
     database: str
+
+
+class DataStatusResponse(BaseModel):
+    """Fecha de los datos más recientes (`GET /data-status`, T108).
+
+    Último Run terminado o último snapshot del archivo.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    data_updated_at: datetime | None
