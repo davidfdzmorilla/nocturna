@@ -101,6 +101,9 @@ _FAKE_UV = """#!/usr/bin/env bash
 # variables: los tests de la noche cuentan solo las invocaciones de `run-night` y
 # `evaluate-tensions`.
 case "$*" in
+    *phase3-probe*)
+        exit "${UV_PROBE_EXIT_CODE:-0}"
+        ;;
     *morning-report*)
         if [ -n "${UV_REPORT_LOG_FILE:-}" ]; then
             printf '%s\\n' "$*" >> "$UV_REPORT_LOG_FILE"
@@ -624,9 +627,11 @@ def test_envuelve_uv_con_caffeinate_is_y_nunca_llega_al_caffeinate_real(tmp_path
         "-is uv run --frozen nocturna run-night",
         "-is uv run --frozen nocturna evaluate-tensions",
         f"-is {BACKEND_ROOT}/scripts/sync-to-vps.sh",
+        "-is uv run --frozen nocturna phase3-probe --trigger run-night",
     ]
     uv_calls = uv_call_log.read_text().splitlines()
-    assert caffeinate_calls[:-1] == [f"-is uv {c}" for c in uv_calls]
+    uv_caffeinate = [c for c in caffeinate_calls if "uv run" in c and "phase3-probe" not in c]
+    assert uv_caffeinate == [f"-is uv {c}" for c in uv_calls]
 
 
 def test_centinela_impide_el_segundo_lanzamiento(tmp_path):
@@ -1210,7 +1215,12 @@ def test_t105_deja_el_estado_y_lanza_el_informe_sin_cambiar_el_codigo(tmp_path, 
     result = _run_wrapper([], env, cwd=tmp_path)
 
     assert result.returncode == code
-    assert _status_lines(home) == [f"run-night={code}", "evaluate-tensions=4", "sync=78"]
+    assert _status_lines(home) == [
+        f"run-night={code}",
+        "evaluate-tensions=4",
+        "sync=78",
+        "probe=0",
+    ]
     assert report_log.read_text().splitlines() == [
         f"run --frozen nocturna morning-report --trigger run-night --night {_today_iso()}"
     ]
@@ -1257,7 +1267,13 @@ def test_t105_duplicado_deja_estado_76_sin_nuevo_informe(tmp_path):
     second = _run_wrapper([], env, cwd=tmp_path)
 
     assert (first.returncode, second.returncode) == (0, 76)
-    assert _status_lines(home) == ["run-night=0", "evaluate-tensions=0", "sync=78", "duplicate=76"]
+    assert _status_lines(home) == [
+        "run-night=0",
+        "evaluate-tensions=0",
+        "sync=78",
+        "probe=0",
+        "duplicate=76",
+    ]
     assert len(report_log.read_text().splitlines()) == 1
 
 

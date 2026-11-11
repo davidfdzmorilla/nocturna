@@ -162,7 +162,7 @@ def test_el_codigo_registrado_es_el_del_sync(rig, sync_ssh_exit):
 def test_sync_queda_en_el_status_tras_la_tarea_principal(rig):
     rig.run()
 
-    status = rig.status
+    status = [line for line in rig.status if not line.startswith("probe=")]
     assert status[-1] == "sync=0"
     assert any(line.startswith(f"{rig.main_step}=") for line in status[:-1])
 
@@ -246,11 +246,15 @@ def test_las_plantillas_plist_traen_los_marcadores_de_sync(template):
     text = (BACKEND / "scripts" / template).read_text()
     plist = plistlib.loads(text.replace("__HOME__", "/tmp/h").encode())
 
-    assert plist["EnvironmentVariables"] == {
+    expected = {
         "NOCTURNA_SYNC_TARGET": "__NOCTURNA_SYNC_TARGET__",
         "NOCTURNA_SYNC_KEY": "__NOCTURNA_SYNC_KEY__",
         "NOCTURNA_SYNC_KNOWN_HOSTS": "__NOCTURNA_SYNC_KNOWN_HOSTS__",
     }
+    if template == "com.nocturna.run-night.plist.template":
+        # T110.a: URL pública para phase3-probe.
+        expected["NOCTURNA_PUBLIC_URL"] = "__NOCTURNA_PUBLIC_URL__"
+    assert plist["EnvironmentVariables"] == expected
     assert "KeepAlive" not in plist
 
 

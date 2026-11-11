@@ -670,12 +670,55 @@ Aprobada el 2026-11-05 (T104). Decisiones de fondo en [ADR 0044](adr/0044-fase-3
 - **Cierre (2026-11-06; sin migración)**: plan aprobado con D1–D8. D3 se resolvió con la alternativa B tras la prueba previa: el alcance decía 404/503 y quedó 404 real y 200 con aviso y `noindex` ([ADR 0048](adr/0048-endurecimiento-para-exposicion-publica.md)). Qué se hizo: `deploy/postgres/api-readonly-role.sql` y `10-api-readonly-role.sh` (rol `nocturna_ro`, idempotente, lo aplica initdb y se reaplica a mano); `deploy/compose.yml` (rol de la API, servicio `migrate` con perfil `ops`, healthcheck de PostgreSQL por TCP, `NOCTURNA_API_DOCS_ENABLED=false`); `deploy/env.example` (`NOCTURNA_API_DB_PASSWORD`); `infrastructure/config.py` (`api_docs_enabled`); `infrastructure/db/session.py` y `api/deps.py` (sesión de solo lectura); `api/app.py` (documentación opcional); web: `generateMetadata` con `noindex` en las páginas, `lib/noindex.ts`, `notFound()` en los 404 reales, `React.cache` en `lib/api/client.ts`, texto de `app/error.tsx`; `docs/DESPLIEGUE.md` y `docs/ARCHITECTURE.md`. Tests: estáticos de deploy; `-m db` del rol (17 casos); `-m docker` (16) con aislamiento de red, `/docs` en 404, matriz de 404 y `noindex` con la API parada, y user agent de Googlebot. 22 mutantes muertos. Revisión aprobada en el ciclo 1, con la sugerencia del healthcheck por TCP aplicada. Suites: backend 4448 passed; `-m db` 634; `-m docker` 16; web 335. D8 de `OPEN_DECISIONS.md` queda abierta para T108. Pendiente del autor: verificación en el VPS (`docs/DESPLIEGUE.md`).
 
 ### T110 · Puesta en marcha y medición del criterio de cierre de la fase 3
-- **Estado**: pending
+- **Estado**: partida en T110.a y T110.b (D1 del 2026-11-10; ADR 0052)
 - **Depende de**: T105, T106, T108, T109
 - **Toca agentes y gasto**: no.
 - **Origen**: ADR 0044, criterio (a)–(e) y D7 (ventana de 14 días).
 - **Alcance**: 14 días de comprobaciones; medición en solo lectura de los criterios (a)–(e); informe para el ADR de cierre de fase 3.
 - **Hecho cuando**: lo fija el plan. Como mínimo, 14 días registrados y los criterios medidos; si alguno falla, la tarea de corrección que exige D8.
+- **Partición (2026-11-10)**: T110 original queda partida. Su alcance y su «Hecho cuando» pasan a T110.a (instrumento) y T110.b (puesta en marcha y ventana).
+
+### T110.a · Instrumento de medición del cierre de fase 3
+- **Estado**: done
+- **Depende de**: T105, T106, T108, T109
+- **Toca agentes y gasto**: no. No toca agentes ni gasto.
+- **Origen**: partición de T110 (D1, ADR 0052).
+- **Alcance**: `nocturna phase3-probe` y `nocturna phase3-check`; registro `phase3-probes.log` en `NOCTURNA_LOG_DIR`; plantilla `docs/CIERRE_FASE_3.md`; ADR 0052 (umbrales de (a)–(e), (c) y (d) fijados antes de medir).
+- **Hecho cuando**:
+  1. `phase3-probe` (0/78/1; no abre la base; log 0600 sin URL; tope total) y `phase3-check` (0/3/2/1; solo lectura), con las reglas de ADR 0052 (D2–D5, D9).
+  2. Los envoltorios añaden `probe=` en `.status` sin cambiar `exit_code` ni `classify_night`; la probe no corre con `--dry-run` ni en los códigos 75/76/77.
+  3. Plantillas plist con `__NOCTURNA_PUBLIC_URL__`.
+  4. Tests sin red real (`MockTransport`) y mutantes detectados. (Tests con `FakeLLMProvider`: no aplica, la tarea no toca agentes.)
+  5. Plantilla `docs/CIERRE_FASE_3.md`.
+  6. ADR 0052.
+  7. Revisión aprobada.
+- **Cerrada: 2026-11-10 · instrumento `phase3-probe` y `phase3-check` con ADR 0052 (umbrales y procedimientos de (a)–(e) fijados antes de medir), en el repo; sin VPS ni ventana.**
+- **Cierre (2026-11-10; sin migración)**: decisiones D1–D13 en `OPEN_DECISIONS.md` (decisión del autor del 2026-11-10 con la recomendación; ADR 0052). Qué se hizo: `domain/phase3.py` (puro: líneas de registro, `parse_site_html`, `robots_header_is_noindex`, `evaluate_phase3` para (a), (b) y (e), y criterios que ya no pueden cumplir); `application/use_cases/phase3.py` (`ProbePublicSite`, `MeasurePhase3`, puertos `PublicSite`, `ProbeLog`, `DeliveryLog` y `RunSource`); `infrastructure/ops/public_site.py` (`HttpxPublicSite`: sin redirecciones, 10 s por fase, tope total de 30 s, corte de 2 MB, solo nombres de clase de error); `infrastructure/ops/phase3_log.py` (`FileProbeLog` 0600, `FileDeliveryLog` solo lectura); subcomandos `phase3-probe` y `phase3-check`; `run_probe_guarded` en `run-night-scheduled.sh` (tras la sincronización) y en `morning-report-scheduled.sh`, con vigilante de `NOCTURNA_PROBE_TIMEOUT_S` (90 s), `probe=` en `.status` y sin cambiar `exit_code` ni la clasificación; plantillas plist con `__NOCTURNA_PUBLIC_URL__`; `docs/CIERRE_FASE_3.md`; `docs/CALIBRACION.md` (Paso 9); ADR 0052. Run de referencia de (b) con `last_night_run_finished_before`, sin límite inferior y filtrado por `started_at`, con un filtro SQL equivalente a `is_night_run`. Tests sin red real (`MockTransport`) y sin Claude: suite backend 5043 passed, 20 skipped, con `-m db`; ruff limpio; mutantes detectados en umbrales, 09:00, primera comprobación, noindex, unclassified, notified=fail, `>=` del pie, is_night_run, exit_code, follow_redirects, incompleta y vigilante. Revisión en tres ciclos: los ciclos 1 y 2 quedaron rechazados sin bloqueantes (tope total del probe, contradicción en D4, Run de referencia sin límite inferior, X-Robots-Tag, cuerpo de más de 2 MB), y el ciclo 3, autorizado por el autor, aprobó. Abierta: OD T110.a sobre (e) con `completed` tras las 09:00, a resolver antes de la fecha N. Deuda en `TECHNICAL_DEBT.md`: «Terminated» de `sync-to-vps.sh` y `run_probe_guarded` duplicada.
+
+### T110.b · Puesta en marcha y ventana de 14 días
+- **Estado**: pending
+- **Depende de**: T110.a y las acciones del autor (T107 D1, D2, D3, D9 y D10)
+- **Toca agentes y gasto**: no.
+- **Origen**: partición de T110 (D1, ADR 0052).
+- **Alcance**: checklist del autor, en 16 pasos, y ventana de 14 días según ADR 0052 (D8–D9).
+- **Checklist del autor**:
+  1. Resolver T107 D1, D2, D3, D9 y D10.
+  2. Comprar el dominio y crear el VPS con cortafuegos 22/80/443 (`docs/DESPLIEGUE.md` §1).
+  3. Instalar Docker (§2).
+  4. DNS A/AAAA y comprobación con `dig` (§3).
+  5. `git clone` y `deploy/.env` escrito por el autor en el VPS (§4).
+  6. `build` y `up -d`, sin `migrate` (§5; ADR 0051 D11).
+  7. Certificado de staging y después de producción (§6, §7).
+  8. Sincronización §1–4 (usuario, paquetes, clave, `known_hosts`, `authorized_keys`); la prueba debe devolver 10.
+  9. Comprobar que el volcado no lleva credenciales (Sincronización §7).
+  10. Primera restauración y una segunda, las dos con 0, y la fecha visible en el pie (Sincronización §6).
+  11. Verificación final §8; se anota en T107.
+  12. Plists: variables de sincronización (Sincronización §5) y `NOCTURNA_PUBLIC_URL`, y recarga; instalar el plist del informe matinal (`docs/CALIBRACION.md`, Paso 8).
+  13. `uv run nocturna phase3-probe --trigger manual` deja una línea OK en `phase3-probes.log`.
+  14. Inspección (c) inicial; anotar la fecha N de inicio en T110.b.
+  15. 14 noches con el Mac encendido y con sesión; Lighthouse (d) en los últimos tres días.
+  16. Tras las 09:00 de N+13: `uv run nocturna phase3-check --from N`, inspección (c) final, rellenar `CIERRE_FASE_3.md` y escribir el ADR de cierre.
+- **Hecho cuando**: lo fija el plan. Como mínimo, el registro de 14 días y la medición de (a)–(e) en el ADR de cierre de fase 3.
 
 ### T111 · Diagnóstico de las noches del 10-29 y 10-30 (429 y autenticación)
 - **Estado**: done

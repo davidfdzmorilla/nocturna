@@ -89,7 +89,8 @@ def test_lanza_morning_report_programado_y_propaga_el_codigo(tmp_path):
 
     assert result.returncode == 1
     assert env.uv_log.read_text().splitlines() == [
-        "run --frozen nocturna morning-report --trigger scheduled --no-notify"
+        "run --frozen nocturna phase3-probe --trigger scheduled",
+        "run --frozen nocturna morning-report --trigger scheduled --no-notify",
     ]
 
 
@@ -108,7 +109,8 @@ def test_postgres_no_healthy_no_impide_el_informe(tmp_path):
     result = env.run(DOCKER_HEALTH_STATUS="starting")
 
     assert result.returncode == 0
-    assert len(env.uv_log.read_text().splitlines()) == 1
+    calls = env.uv_log.read_text().splitlines()
+    assert sum("morning-report" in c for c in calls) == 1
     err = (env.home / "nocturna-logs").glob("morning-*.err.log")
     assert "sin base" in next(iter(err)).read_text()
 

@@ -49,7 +49,12 @@ def test_run_night_el_codigo_de_salida_es_el_de_la_noche_aunque_el_informe_falle
     result = _run_wrapper([], env, cwd=tmp_path)
 
     assert result.returncode == night_code
-    assert _status_lines(home) == [f"run-night={night_code}", "evaluate-tensions=0", "sync=78"]
+    assert _status_lines(home) == [
+        f"run-night={night_code}",
+        "evaluate-tensions=0",
+        "sync=78",
+        "probe=0",
+    ]
     assert len(report_log.read_text().splitlines()) == 1
 
 

@@ -45,6 +45,11 @@ class SqlMorningReportData:
     def started_between(self, start: datetime, end: datetime) -> list[Run]:
         return _guard(lambda: SqlAlchemyRunRepository(self._session).started_between(start, end))
 
+    def last_night_run_finished_before(self, before: datetime) -> Run | None:
+        return _guard(
+            lambda: SqlAlchemyRunRepository(self._session).last_night_run_finished_before(before)
+        )
+
     def calls_for_run(self, run_id: UUID) -> list[AgentCall]:
         return _guard(lambda: SqlAlchemyAgentCallRepository(self._session).calls_for_run(run_id))
 

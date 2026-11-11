@@ -38,6 +38,13 @@
     <key>StandardErrorPath</key>
     <string>__HOME__/nocturna-logs/launchd-morning-report.log</string>
 
+    <!-- T110.a: URL pública para phase3-probe; sin sustituir, la comprobación sale con 78. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NOCTURNA_PUBLIC_URL</key>
+        <string>__NOCTURNA_PUBLIC_URL__</string>
+    </dict>
+
     <key>RunAtLoad</key>
     <true/>
 </dict>

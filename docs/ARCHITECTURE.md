@@ -371,6 +371,19 @@ Lectura de la noche, sin LLM, sin tokens y sin escritura en la base. Dispara tra
 - **Envoltorios**: `run-night-scheduled.sh` y `archive-snapshot-scheduled.sh` registran su código en `*.status` y lanzan el informe con `--night` (sin informe en `--dry-run`); `morning-report-scheduled.sh` es la red de las 07:30. Ningún envoltorio cambia su código de salida por el informe.
 - **Instalación**: `docs/CALIBRACION.md`, Paso 8.
 
+## Medición del cierre de fase 3 (T110.a, [ADR 0052](adr/0052-medicion-del-criterio-de-cierre-de-fase-3.md))
+
+Instrumento de solo lectura para (a), (b) y (e) del ADR 0044. Sin LLM, sin tokens y sin escritura en la base. Los criterios (c) y (d) son manuales (`docs/CIERRE_FASE_3.md`).
+
+- **`domain/phase3.py`** (puro, sin IO): formato y lectura de `phase3-probes.log` y `morning-deliveries.log`; `parse_site_html` (`noindex` de `<meta name="robots">` y fecha del pie en `<time datetime>`); `robots_header_is_noindex` (`X-Robots-Tag`); `evaluate_phase3`, con un veredicto por día para (a), (b) y (e), `Verdict` y los criterios que ya no pueden cumplir.
+- **`application/use_cases/phase3.py`**: `ProbePublicSite` (una comprobación y una línea de registro; 0, 78 si falta la URL o está el marcador, 1 si no se pudo anotar) y `MeasurePhase3` (lee registros y `Run`, y delega en el dominio). Puertos `PublicSite`, `ProbeLog`, `DeliveryLog` y `RunSource`. No importa el proveedor LLM, el SDK ni `budget.py`.
+- **`infrastructure/ops/public_site.py`**: `HttpxPublicSite`. Una petición GET sin redirecciones, con TLS por defecto, 10 s por fase, tope total de 30 s con lectura en streaming y corte de 2 MB. De un fallo conserva solo el nombre de la clase de error.
+- **`infrastructure/ops/phase3_log.py`**: `FileProbeLog` (añade con permisos 0600 y no escribe la URL) y `FileDeliveryLog` (solo lectura).
+- **`RunSource`**: lo cumple `SqlMorningReportData` (solo `SELECT`). `last_night_run_finished_before` no tiene límite inferior, porque el Run de referencia de (b) puede ser anterior a la ventana.
+- **Subcomandos**: `phase3-probe [--trigger run-night|scheduled|manual]` y `phase3-check --from YYYY-MM-DD [--days 14]`. Códigos en ADR 0052.
+- **Envoltorios**: `run-night-scheduled.sh` lanza `phase3-probe --trigger run-night` tras `sync-to-vps.sh`; `morning-report-scheduled.sh` lo lanza con `--trigger scheduled`. `run_probe_guarded` pone un vigilante (`NOCTURNA_PROBE_TIMEOUT_S`, 90 s por defecto; TERM y, a los 5 s, KILL) y anota el resultado en `probe=` del `.status` (3 si venció). No cambia `exit_code` ni la clasificación del informe, y no se ejecuta con `--dry-run` ni con los códigos 75, 76 y 77.
+- **Plist**: `com.nocturna.run-night` y `com.nocturna.morning-report` llevan `NOCTURNA_PUBLIC_URL`; la plantilla tiene el marcador `__NOCTURNA_PUBLIC_URL__`. Instalación: `docs/CALIBRACION.md`, Paso 9.
+
 ## Lo que no existe en fase 1 (a propósito)
 
 Contrastador, Analista, `ApiKeyProvider`, autenticación, panel de administración, despliegue.
@@ -417,4 +430,4 @@ run-night-scheduled.sh / archive-snapshot-scheduled.sh
 ```
 
 - **`/data-status`** (API, lectura): `data_updated_at = greatest(max(runs.finished_at), max(archive_snapshot.taken_at))`, con `DataFreshnessReader` en el dominio y `SqlAlchemyDataFreshnessReader` en la infraestructura. La web lo lee en el pie (`SiteFooter`, `layout.tsx` con `force-dynamic`): «Datos actualizados el <fecha Europe/Madrid>» o «Fecha de actualización no disponible». Que falle la petición no añade `noindex`.
-- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; primera sincronización real, usuario `nocturna-sync` y clave (T108, `docs/DESPLIEGUE.md`); medición de la fase (T110).
+- **Pendiente**: dominio, VPS y correo (T107 D1–D3); verificación TLS en el VPS; primera sincronización real, usuario `nocturna-sync` y clave (T108, `docs/DESPLIEGUE.md`); medición de la fase (T110.a en el repo; T110.b, puesta en marcha y ventana, `docs/CIERRE_FASE_3.md`).

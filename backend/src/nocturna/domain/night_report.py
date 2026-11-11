@@ -25,7 +25,8 @@ from nocturna.domain.entities import Run, RunStatus
 # para que cierre y detección no puedan divergir.
 ORPHAN_NOTE = "cerrado por run-night: quedó RUNNING de un proceso anterior"
 
-_REREAD_NOTE = "reread"
+REREAD_NOTE = "reread"
+NIGHT_NOTES_PREFIX = "ingest="
 
 
 class NightCause(StrEnum):
@@ -268,9 +269,9 @@ def is_night_run(run: Run) -> bool:
     Excluye las relecturas (`notes == 'reread'`) y los de `run-item` (sin notas).
     """
     notes = run.notes or ""
-    if notes == _REREAD_NOTE:
+    if notes == REREAD_NOTE:
         return False
-    if notes.startswith("ingest=") or notes == ORPHAN_NOTE:
+    if notes.startswith(NIGHT_NOTES_PREFIX) or notes == ORPHAN_NOTE:
         return True
     return run.status in (RunStatus.FAILED, RunStatus.RUNNING)
 

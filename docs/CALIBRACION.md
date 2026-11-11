@@ -443,6 +443,48 @@ Los plist de `com.nocturna.run-night` y de `com.nocturna.archive-snapshot` tiene
 
 Sin rellenarlas (o con el marcador), la sincronización sale con 78 sin hacer nada, y la noche no cambia. Con las tres rellenadas, cada noche y cada snapshot sincronizan la base con el VPS, y el código queda en `sync=` del `.status`. Cómo generar la clave, fijar el `known_hosts` y rellenar los plist: `docs/DESPLIEGUE.md`, § Sincronización de datos.
 
+#### Paso 9: Comprobación de la web pública (T110.a, ADR 0052)
+
+`phase3-probe` pide una vez por noche (tras la sincronización, en `run-night`) y una vez por la mañana (en el informe matinal) la URL pública. Hace una sola petición HTTP sin redirecciones, no abre la base y no usa Claude. Anota una línea en `phase3-probes.log` (0600, sin la URL). La ventana de medición empieza con la primera noche N que cumpla D8 de ADR 0052; N se anota en `docs/CIERRE_FASE_3.md`.
+
+**Rellenar `NOCTURNA_PUBLIC_URL`** en los plist de `com.nocturna.run-night` y `com.nocturna.morning-report`, con la URL https del dominio:
+
+```bash
+URL_PUBLICA="https://<dominio>/"
+sed -i '' "s|__NOCTURNA_PUBLIC_URL__|$URL_PUBLICA|g" \
+    ~/Library/LaunchAgents/com.nocturna.run-night.plist \
+    ~/Library/LaunchAgents/com.nocturna.morning-report.plist
+```
+
+Si el plist instalado no tiene la clave `NOCTURNA_PUBLIC_URL`, se instaló antes de T110.a: regenerarlo desde la plantilla (Paso 2 o Paso 8) y volver a poner las variables de sincronización (Sincronización §5), porque la regeneración no las conserva.
+
+Recargar los dos agentes:
+
+```bash
+launchctl bootout gui/$(id -u)/com.nocturna.run-night 2>/dev/null
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nocturna.run-night.plist
+launchctl bootout gui/$(id -u)/com.nocturna.morning-report 2>/dev/null
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nocturna.morning-report.plist
+```
+
+**Sin la URL**, la comprobación sale con 78, no escribe en el registro y el `.status` de la noche lleva `probe=78`. El código de la noche no cambia.
+
+**Prueba manual** (desde `backend/`):
+
+```bash
+NOCTURNA_PUBLIC_URL="https://<dominio>/" uv run nocturna phase3-probe --trigger manual
+```
+
+Debe salir con 0. La última línea de `phase3-probes.log` (en `NOCTURNA_LOG_DIR`, por defecto `~/nocturna-logs`) tiene esta forma, con fechas reales:
+
+```
+checked_at=<fecha>T<hora>+01:00 trigger=manual http=200 tls=ok error=- noindex=no footer=<fecha>T<hora>+01:00
+```
+
+Si `http` no es 200, `tls` no es `ok`, `error` no es `-` o `noindex` no es `no`, la comprobación falla. Una comprobación manual no cuenta para (a), pero sí para (b). Conviene corregir la causa antes de fijar N.
+
+**`NOCTURNA_PROBE_TIMEOUT_S`**: tope del vigilante de los envoltorios, en segundos (entero positivo; por defecto 90). Si la comprobación se cuelga, el vigilante la corta y la noche anota `probe=3`. El tope de la petición (30 s en total) va en el código y no cambia con esta variable. No hace falta fijarla; si se fija, va en `EnvironmentVariables` del plist.
+
 ---
 
 ## El centinela: alcance y límites

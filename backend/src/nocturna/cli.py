@@ -267,6 +267,7 @@ from nocturna.application.use_cases.morning_report import (
     render_report,
     should_notify,
 )
+from nocturna.application.use_cases.phase3 import MeasurePhase3, ProbePublicSite
 from nocturna.application.use_cases.popularize_reading import (
     PopularizeOutcome,
     PopularizeReading,
@@ -328,6 +329,15 @@ from nocturna.domain.exoplanet_filter import ExoplanetFilter
 from nocturna.domain.llm import AgentRole, LLMProvider
 from nocturna.domain.night_report import ORPHAN_NOTE, target_night
 from nocturna.domain.own_solution import OwnSolutionRule
+from nocturna.domain.phase3 import (
+    A_MIN,
+    B_MIN,
+    E_MIN,
+    WINDOW_DAYS,
+    CriterionResult,
+    Phase3Measurement,
+    Verdict,
+)
 from nocturna.domain.repositories import ArchiveRepository
 from nocturna.domain.solution_tension import SolutionTension, SolutionTensionRule
 from nocturna.domain.sources import ArxivSource
@@ -371,6 +381,8 @@ from nocturna.infrastructure.exoplanet_archive.snapshot import ArchiveSnapshotSo
 from nocturna.infrastructure.logging import configure_json_logging
 from nocturna.infrastructure.ops.launch_log import FileLaunchLog
 from nocturna.infrastructure.ops.notifier import OsascriptNotifier
+from nocturna.infrastructure.ops.phase3_log import FileDeliveryLog, FileProbeLog
+from nocturna.infrastructure.ops.public_site import HttpxPublicSite
 from nocturna.infrastructure.ops.report_file import FileReportSink
 
 # `AgentSDKProvider` (infrastructure/llm/agent_sdk_provider.py) NO se importa
@@ -727,6 +739,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-notify",
         action="store_true",
         help="No muestra la notificación de macOS.",
+    )
+
+    phase3_probe = subparsers.add_parser(
+        "phase3-probe",
+        help="Comprueba la web pública y anota el resultado (cierre de fase 3, sin LLM).",
+        description=(
+            "Hace una petición a NOCTURNA_PUBLIC_URL y añade una línea a phase3-probes.log "
+            "en el directorio de logs. No abre la base ni usa Claude. Códigos: 0 anotada, "
+            "78 sin URL configurada, 1 no se pudo anotar."
+        ),
+    )
+    phase3_probe.add_argument(
+        "--trigger",
+        default="scheduled",
+        choices=["run-night", "scheduled", "manual"],
+        help="Quién pide la comprobación; 'manual' no cuenta para (a) (por defecto: scheduled).",
+    )
+
+    phase3_check = subparsers.add_parser(
+        "phase3-check",
+        help="Mide los criterios automáticos (a), (b) y (e) del cierre de fase 3 (solo lectura).",
+        description=(
+            "Lee phase3-probes.log, morning-deliveries.log y los Run de la base (sesión de solo "
+            "lectura) e imprime el veredicto día a día. (c) y (d) son manuales. Códigos: 0 "
+            "cumple, 3 no cumple, 2 incompleta, 1 error."
+        ),
+    )
+    phase3_check.add_argument(
+        "--from",
+        dest="first_night",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Primera noche de la ventana.",
+    )
+    phase3_check.add_argument(
+        "--days",
+        type=int,
+        default=WINDOW_DAYS,
+        help=f"Longitud de la ventana en días (por defecto: {WINDOW_DAYS}).",
     )
 
     evaluate_tensions = subparsers.add_parser(
@@ -1304,6 +1356,94 @@ def _morning_report(args: argparse.Namespace) -> int:
         _logger.warning("morning_report.delivery_log_failed", extra={"error": type(exc).__name__})
     _logger.info("morning_report.written", extra={"file": name, "notified": notified})
     return 0
+
+
+def _phase3_probe(args: argparse.Namespace) -> int:
+    """`phase3-probe`: `0` anotada; `78` sin URL; `1` no se pudo anotar. No abre la base."""
+    configure_json_logging()
+    # El INFO de httpx lleva la URL: no debe llegar al .err.log del envoltorio.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    log_dir = _log_dir()
+    if log_dir is None:
+        print("phase3-probe: NOCTURNA_LOG_DIR no puede estar vacío", file=sys.stderr)
+        return 1
+    config = load_pipeline_config()
+    clock = SystemClock(ZoneInfo(config.window.timezone))
+    probe = ProbePublicSite(HttpxPublicSite(), FileProbeLog(log_dir), clock)
+    code = probe(os.environ.get("NOCTURNA_PUBLIC_URL"), args.trigger)
+    if code == 78:
+        print("phase3-probe: NOCTURNA_PUBLIC_URL no configurada", file=sys.stderr)
+    elif code != 0:
+        print("phase3-probe: no se pudo anotar la comprobación", file=sys.stderr)
+    return code
+
+
+_PHASE3_EXIT = {Verdict.CUMPLE: 0, Verdict.NO_CUMPLE: 3, Verdict.INCOMPLETA: 2}
+
+
+def _render_phase3(m: Phase3Measurement) -> str:
+    def mark(c: CriterionResult, i: int) -> str:
+        return "ok" if c.days[i].ok else "NO"
+
+    lines = [f"{'fecha':<11}{'a':<4}{'b':<4}{'e':<4}motivo"]
+    for i, verdict in enumerate(m.a.days):
+        reasons = [f"{c.name}: {c.days[i].reason}" for c in (m.a, m.b, m.e) if not c.days[i].ok]
+        lines.append(
+            f"{verdict.day.isoformat():<11}{mark(m.a, i):<4}{mark(m.b, i):<4}{mark(m.e, i):<4}"
+            + "; ".join(reasons)
+        )
+    lines.append("")
+    for c, minimum in ((m.a, A_MIN), (m.b, B_MIN), (m.e, E_MIN)):
+        state = "cumple" if c.count >= minimum else "no cumple"
+        lines.append(f"({c.name}) {c.count}/{m.days}, umbral {minimum}: {state}")
+    lines.append("(c) y (d) son manuales: ver docs/CIERRE_FASE_3.md")
+    if m.status is Verdict.INCOMPLETA and m.cannot_comply:
+        names = ", ".join(f"({n})" for n in m.cannot_comply)
+        lines.append(f"ya no puede cumplir: {names}")
+    lines.append(f"estado: {m.status.value} (completa a partir de {m.complete_at.isoformat()})")
+    return "\n".join(lines)
+
+
+def _phase3_check(args: argparse.Namespace) -> int:
+    """`phase3-check`: `0` cumple; `3` no cumple; `2` incompleta; `1` error. Solo lectura."""
+    configure_json_logging()
+    log_dir = _log_dir()
+    if log_dir is None or args.days < 1:
+        print("phase3-check: NOCTURNA_LOG_DIR vacío o --days inválido", file=sys.stderr)
+        return 1
+    if args.days < 14:
+        print(
+            "phase3-check: con --days < 14 la ventana no puede cumplir; los umbrales son 13/12/14",
+            file=sys.stderr,
+        )
+    elif args.days > 14:
+        print(
+            "phase3-check: la ventana de ADR 0052 es de 14 días; con más días los umbrales "
+            "absolutos no son comparables",
+            file=sys.stderr,
+        )
+    config = load_pipeline_config()
+    tz = ZoneInfo(config.window.timezone)
+    try:
+        engine = create_db_engine(
+            Settings(), connect_timeout=_MORNING_REPORT_CONNECT_TIMEOUT_S, read_only=True
+        )
+        with unit_of_work(create_session_factory(engine), commit=False) as session:
+            measure = MeasurePhase3(
+                FileProbeLog(log_dir),
+                FileDeliveryLog(log_dir),
+                SqlMorningReportData(session, tz),
+                SystemClock(tz),
+                tz,
+            )
+            result = measure(args.first_night, args.days)
+    except Exception as exc:  # noqa: BLE001
+        # Solo el nombre de la clase: el mensaje puede contener el DSN.
+        print(f"phase3-check: no se pudo medir ({type(exc).__name__})", file=sys.stderr)
+        return 1
+    print(_render_phase3(result))
+    return _PHASE3_EXIT[result.status]
 
 
 def _archive_digest(args: argparse.Namespace) -> int:
@@ -3488,6 +3628,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _archive_digest(args)
     if args.command == "morning-report":
         return _morning_report(args)
+    if args.command == "phase3-probe":
+        return _phase3_probe(args)
+    if args.command == "phase3-check":
+        return _phase3_check(args)
     if args.command == "evaluate-tensions":
         return _evaluate_tensions(args)
     if args.command == "solution-tensions":

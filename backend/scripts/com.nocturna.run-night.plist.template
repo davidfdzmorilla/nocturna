@@ -60,6 +60,9 @@
         <string>__NOCTURNA_SYNC_KEY__</string>
         <key>NOCTURNA_SYNC_KNOWN_HOSTS</key>
         <string>__NOCTURNA_SYNC_KNOWN_HOSTS__</string>
+        <!-- T110.a: URL pública para phase3-probe; sin sustituir, la comprobación sale con 78. -->
+        <key>NOCTURNA_PUBLIC_URL</key>
+        <string>__NOCTURNA_PUBLIC_URL__</string>
     </dict>
 
     <key>RunAtLoad</key>
