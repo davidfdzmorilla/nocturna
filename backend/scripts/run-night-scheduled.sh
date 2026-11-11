@@ -183,6 +183,78 @@ abort_precondition() {
     exit 75
 }
 
+# T110.a: vigilante de la comprobación pública. `getaddrinfo` y otras esperas no las
+# acota el cliente HTTP; si el proceso se cuelga, se perdería el informe matinal y el
+# criterio (e). macOS no trae `timeout`: mismo patrón que sync-to-vps.sh (el trabajo
+# corre en su propio grupo de procesos y un vigilante lo mata al vencer el tope).
+# (Duplicado a propósito en morning-report-scheduled.sh: son envoltorios independientes.)
+# Tope: NOCTURNA_PROBE_TIMEOUT_S (por defecto 90). Devuelve el código de `phase3-probe`,
+# o 3 si venció. Nunca cambia el código de salida del envoltorio.
+probe_flag=""
+probe_watchdog_pid=""
+probe_pid_global=""
+probe_cleanup() {
+    [[ -n "$probe_flag" ]] && rm -f "$probe_flag"
+    [[ -n "$probe_pid_global" ]] && kill -KILL -- "-$probe_pid_global" 2>/dev/null
+    [[ -n "$probe_watchdog_pid" ]] && kill -- "-$probe_watchdog_pid" 2>/dev/null
+    return 0
+}
+run_probe_guarded() {
+    local trigger="$1" limit_s="${NOCTURNA_PROBE_TIMEOUT_S:-90}"
+    local flag probe_pid watchdog_pid code
+    if [[ ! "$limit_s" =~ ^[0-9]+$ || "$limit_s" -eq 0 ]]; then
+        limit_s=90
+    fi
+    flag="$(mktemp "${TMPDIR:-/tmp}/nocturna-probe.XXXXXX")"
+    rm -f "$flag"
+    # Si el envoltorio muere (EXIT, o INT/TERM que de otro modo no ejecutan el trap EXIT),
+    # no queda el fichero de marca ni el vigilante. Trap EXIT propio de esta función: el
+    # envoltorio no usa ninguno, y INT/TERM se restauran a "por defecto" al volver (en este
+    # punto de ambos scripts no hay otros traps de INT/TERM activos).
+    probe_flag="$flag"
+    probe_watchdog_pid=""
+    trap 'probe_cleanup' EXIT
+    trap 'probe_cleanup; exit 143' INT TERM
+    set -m
+    caffeinate -is uv run --frozen nocturna phase3-probe --trigger "$trigger" >>"$out_log" 2>>"$err_log" &
+    probe_pid=$!
+    probe_pid_global="$probe_pid"
+    (
+        sleep "$limit_s" &
+        wait $!
+        : >"$flag"
+        kill -TERM -- "-$probe_pid" 2>/dev/null || true
+        sleep 5 &
+        wait $!
+        kill -KILL -- "-$probe_pid" 2>/dev/null || true
+    ) >/dev/null 2>&1 &
+    watchdog_pid=$!
+    probe_watchdog_pid="$watchdog_pid"
+    set +m
+    code=0
+    wait "$probe_pid" 2>/dev/null || code=$?
+    if [[ -e "$flag" ]]; then
+        # Venció el tope: el vigilante ya envió TERM. Se le deja terminar (5 s) para que
+        # envíe el KILL a quien ignore TERM; `wait` del probe puede volver antes si lo que
+        # murió fue `caffeinate` y no el comando.
+        wait "$watchdog_pid" 2>/dev/null || true
+    else
+        kill -- "-$watchdog_pid" 2>/dev/null || true
+        # Recoge al vigilante: evita el aviso "Terminated" del shell en el log de launchd.
+        wait "$watchdog_pid" 2>/dev/null || true
+    fi
+    probe_watchdog_pid=""
+    if [[ -e "$flag" ]]; then
+        rm -f "$flag"
+        echo "run-night-scheduled: phase3-probe superó ${limit_s}s y se cortó (código 3)." >>"$err_log"
+        code=3
+    fi
+    probe_flag=""
+    probe_pid_global=""
+    trap - EXIT INT TERM
+    return "$code"
+}
+
 # T105: informe matinal y aviso. Solo lectura, sin `caffeinate` y sin tokens;
 # cualquier fallo se ignora (`|| true`): nunca altera el código de salida de la
 # noche. Se ejecuta desde `backend/` (el `cd` del final aún no ocurrió en los
@@ -358,6 +430,18 @@ if [[ "$dry_run" -eq 0 ]]; then
     sync_exit_code=$?
     set -e
     record_status sync "$sync_exit_code"
+fi
+
+# T110.a: comprobación de la web pública tras el volcado (cierre de fase 3, ADR
+# 0044). Cero tokens, sin Claude y sin base. Nunca cambia `exit_code`: su código
+# queda en `probe=` del .status (78 = URL no configurada). Con `--dry-run` no
+# se ejecuta. Las salidas 75/76/77 ocurren antes y no llegan aquí.
+if [[ "$dry_run" -eq 0 ]]; then
+    set +e
+    run_probe_guarded run-night
+    probe_exit_code=$?
+    set -e
+    record_status probe "$probe_exit_code"
 fi
 
 {

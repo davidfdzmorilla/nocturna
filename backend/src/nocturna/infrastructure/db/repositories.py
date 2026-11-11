@@ -26,7 +26,7 @@ from itertools import batched
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -52,6 +52,7 @@ from nocturna.domain.entities import (
 )
 from nocturna.domain.errors import InvariantViolation
 from nocturna.domain.llm import AgentRole
+from nocturna.domain.night_report import NIGHT_NOTES_PREFIX, ORPHAN_NOTE, REREAD_NOTE
 from nocturna.domain.solution_tension import SolutionTension
 from nocturna.domain.tension import PUBLISHED_CONFIRMED, TensionEvaluation
 from nocturna.infrastructure.db.mappers import (
@@ -431,6 +432,32 @@ class SqlAlchemyRunRepository:
             .order_by(RunRow.started_at.asc())
         )
         return [run_from_row(row) for row in self._session.execute(stmt).scalars()]
+
+    def last_night_run_finished_before(self, before: datetime) -> Run | None:
+        """El `Run` de noche cerrado más reciente iniciado antes de `before` (`<` estricto).
+
+        El filtro SQL replica `domain.night_report.is_night_run` (un test los compara):
+        `notes` distinto de `reread` y, o bien `ingest=...`, o bien la nota de huérfano, o
+        bien estado `failed`/`running`. Solo SELECT.
+        """
+        night = or_(
+            RunRow.notes.startswith(NIGHT_NOTES_PREFIX, autoescape=True),
+            RunRow.notes == ORPHAN_NOTE,
+            RunRow.status.in_((RunStatus.FAILED, RunStatus.RUNNING)),
+        )
+        stmt = (
+            select(RunRow)
+            .where(
+                RunRow.started_at < before,
+                RunRow.finished_at.is_not(None),
+                RunRow.notes != REREAD_NOTE,
+                night,
+            )
+            .order_by(RunRow.started_at.desc())
+            .limit(1)
+        )
+        row = self._session.execute(stmt).scalars().first()
+        return run_from_row(row) if row is not None else None
 
     def save(self, run: Run) -> None:
         """Persiste el estado actual del `Run`, incluido `tokens_used`.

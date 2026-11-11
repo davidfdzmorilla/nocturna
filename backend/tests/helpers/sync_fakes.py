@@ -57,6 +57,7 @@ exit 0
 FAKE_UV_ORDER = """#!/usr/bin/env bash
 case "$*" in
     *morning-report*) printf 'morning-report\\n' >> "${ORDER_LOG:-/dev/null}"; exit 0 ;;
+    *phase3-probe*) printf 'phase3-probe\\n' >> "${ORDER_LOG:-/dev/null}"; exit 0 ;;
     *evaluate-tensions*) printf 'evaluate-tensions\\n' >> "${ORDER_LOG:-/dev/null}"
         exit "${UV_EVALUATE_EXIT_CODE:-0}" ;;
     *run-night*) printf 'run-night\\n' >> "${ORDER_LOG:-/dev/null}"
